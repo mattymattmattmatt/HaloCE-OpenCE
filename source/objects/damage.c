@@ -2567,6 +2567,9 @@ static void area_of_effect_cause_damage_to_object(
 			&object->object.bounding_sphere_center,
 			&damage->direction);
 		distance = normalize3d(&damage->direction);
+		/* port: for the gore prototype (port/linux/game/gore.c) */
+		damage->area_of_effect_distance = distance;
+		damage->area_of_effect_full_damage = damage_effect->damage.damage_upper_bound;
 		radius_delta = damage_effect->cutoff_radius - damage_effect->falloff_radius;
 		if (radius_delta > 0.f)
 		{

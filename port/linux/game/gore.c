@@ -4,27 +4,33 @@ The gore prototype. A biped whose body is depleted by a strong enough hit
 comes apart a tick later, when the game has run its death (statistics, AI,
 dropped weapon):
 
-- the hit's force: an area-of-effect hit's body damage over the unit's
-  maximum vitality (the blast's distance falloff is already in it), or a
-  vehicle hit's speed in world units a second (physics.c fills
-  damage_data.vehicle_impact_speed). Each is compared with the unit's
-  threshold (the table below, keyed by the biped tag's path, times
-  game.gore_threshold_scale).
-- the pieces: copies of the unit's own biped, each drawing only some of its
-  model's regions (a region drawn with permutation NONE draws nothing,
-  models.c), posed by the dying unit's node matrices and then moved here as
-  a rigid body (their own node matrices are never recomputed). Head, arms
-  and legs where the model has those regions (Flood combat forms: each arm).
-  Units with no such regions (Grunt, Hunter, ...) throw the map's stock
-  Flood bits (garbage objects with their own physics) when the map has them.
-- the pieces collide with the world only from their third tick; they fly
-  along the force with a random spin, bounce, and leave blood: a burst at
-  the cut, drops while they fly, a splat decal at their first impact.
+- explosions: the blast's distance from the unit's centre against the
+  unit's gib radius (the table below: a frag grenade's 120 damage within
+  2 m for a marine), grown by the square root of the effect's full damage
+  over the frag's (a rocket's 330: 1.66 times), over
+  game.gore_threshold_scale. Vehicle hits: the vehicle's speed (physics.c
+  fills damage_data.vehicle_impact_speed) against the unit's threshold.
+  Hunters never come apart.
+- the pieces: six copies of the unit, each drawing one piece of the stock
+  bip01 skeleton (head, each upper arm, each thigh, the rest as the torso):
+  the nodes outside the piece get zero axes at the cut's joint, so the
+  vertices weighted to them shrink to it and those weighted to both sides
+  stretch into a stump. No new art: every model with the bip01 skeleton
+  (Grunt, Jackal, Elite, marines, Flood combat forms...) gets true left
+  and right limbs. Other models split by their regions (head, arms, legs)
+  where they have them, or throw the map's stock Flood bits (garbage
+  objects with their own physics), or bleed only.
+- the copies are posed by the dying unit's node matrices and moved here as
+  rigid bodies (their own node matrices are never recomputed); they collide
+  with the world from their third tick, fly along the force with a random
+  spin, bounce, and leave blood: a burst at the cut, a few drops in the air,
+  a splat decal where they first land.
 - the dying unit is deleted (its kill was counted by its death).
 
 Settings: game.gore, game.gore_threshold_scale, game.gore_max_pieces,
-game.gore_piece_seconds; debug.gore_test (seconds) gibs the biped nearest a
-player that many seconds into a map, to try it.
+game.gore_piece_seconds; debug.gore_test (seconds) brings the biped nearest
+the player's view (debug.gore_test_unit: whose tag path has this in it) in
+front of the player and gibs it, to try it.
 */
 
 #include "cseries.h"
@@ -52,6 +58,7 @@ player that many seconds into a map, to try it.
 float cosf(float);
 float sinf(float);
 float fabsf(float);
+double sqrt(double);
 #include <string.h>
 
 int config_boolean(const char *name);
@@ -87,22 +94,33 @@ enum
 struct gore_unit_type
 {
 	char const *tag_path_part; /* a substring of the biped's tag path */
-	real explosion_threshold; /* body damage over maximum vitality */
+	real gib_radius; /* metres: a frag grenade (120 damage) this close gibs */
 	real vehicle_threshold; /* world units a second */
 	char const *decal_name;
+	boolean disabled; /* never gibs: the normal death */
 };
 
+/* a frag grenade's explosion (weapons\frag grenade\explosion, every map):
+falloff 1.5 and cutoff 2.5 world units (4.6 m and 7.6 m), 80 to 120 damage,
+so its damage alone cannot tell 2 m from 4 m; the gib radius is the blast's
+distance from the unit's centre, grown by the square root of the effect's
+full damage over the frag's 120 (a rocket's 330: 1.66 times) */
 static struct gore_unit_type const gore_unit_types[] =
 {
-	{ "grunt", 1.2f, 3.f, "effects\\decals\\blood splats\\blood grunt splat" },
-	{ "jackal", 1.2f, 3.5f, "effects\\decals\\blood splats\\blood grunt splat" },
-	{ "elite", 1.6f, 5.f, "effects\\decals\\blood splats\\blood elite splat" },
-	{ "hunter", 3.f, 9.f, "effects\\decals\\blood splats\\blood hunter splat" },
-	{ "flood", 1.f, 3.f, "effects\\decals\\blood splats\\blood elite splat" },
-	{ "marine", 1.3f, 4.f, "effects\\decals\\blood splats\\blood splat" },
-	{ "crewman", 1.3f, 4.f, "effects\\decals\\blood splats\\blood splat" },
-	{ "", 1.5f, 4.5f, "effects\\decals\\blood splats\\blood splat" },
+	{ "hunter", 0.f, 0.f, NULL, TRUE },
+	{ "grunt", 2.3f, 3.f, "effects\\decals\\blood splats\\blood grunt splat", FALSE },
+	{ "jackal", 2.f, 3.5f, "effects\\decals\\blood splats\\blood grunt splat", FALSE },
+	{ "elite", 1.6f, 5.f, "effects\\decals\\blood splats\\blood elite splat", FALSE },
+	{ "flood", 2.3f, 3.f, "effects\\decals\\blood splats\\blood elite splat", FALSE },
+	{ "marine", 2.f, 4.f, "effects\\decals\\blood splats\\blood splat", FALSE },
+	{ "crewman", 2.f, 4.f, "effects\\decals\\blood splats\\blood splat", FALSE },
+	{ "captain", 2.f, 4.f, "effects\\decals\\blood splats\\blood splat", FALSE },
+	{ "pilot", 2.f, 4.f, "effects\\decals\\blood splats\\blood splat", FALSE },
+	{ "", 1.8f, 4.5f, "effects\\decals\\blood splats\\blood splat", FALSE },
 };
+
+#define GORE_METRES_PER_WORLD_UNIT 3.048f
+#define GORE_FRAG_DAMAGE 120.f
 
 /* the region names each part keeps (the stock models', d20 .. a10) */
 static char const *const gore_part_regions[NUMBER_OF_GORE_PARTS][3] =
@@ -137,6 +155,9 @@ struct gore_piece
 	real rotation[3][3];
 	short node_count;
 	real_matrix4x3 base_matrices[GORE_MAXIMUM_NODES];
+	/* NONE: the node is drawn; else the node whose position its vertices
+	collapse to (a node of the unit outside this piece) */
+	signed char collapse[GORE_MAXIMUM_NODES];
 };
 
 struct gore_pending
@@ -284,7 +305,7 @@ static struct gore_piece *gore_piece_new(void)
 static void gore_piece_launch(struct gore_piece *piece, real_vector3d const *direction, real force)
 {
 	real_vector3d random;
-	real speed = PIN(force, 1.f, 4.f) * real_seed_random_range(&gore_seed, 0.12f, 0.25f); /* world units a tick */
+	real speed = PIN(force, 1.f, 3.f) * real_seed_random_range(&gore_seed, 0.05f, 0.12f); /* world units a tick */
 
 	seed_random_direction3d(&gore_seed, &random);
 	piece->velocity.i = direction->i * speed + random.i * speed * 0.5f;
@@ -296,7 +317,7 @@ static void gore_piece_launch(struct gore_piece *piece, real_vector3d const *dir
 
 /* a copy of the unit showing the given regions only */
 static void gore_spawn_copy(long unit_index, unsigned long region_mask, short pivot_node,
-	real_vector3d const *direction, real force, long blood_effect_index, long decal_index)
+	signed char const *collapse, real_vector3d const *direction, real force, long blood_effect_index, long decal_index)
 {
 	struct object_datum *unit = object_get(unit_index);
 	struct object_placement_data placement;
@@ -337,6 +358,8 @@ static void gore_spawn_copy(long unit_index, unsigned long region_mask, short pi
 		piece->base_matrices[node_index] = source_matrices[node_index];
 	}
 	piece->node_count = node_count;
+	for (node_index = 0; node_index < node_count; node_index++)
+		piece->collapse[node_index] = collapse ? collapse[node_index] : NONE;
 
 	for (region_index = 0; region_index < MAXIMUM_REGIONS_PER_OBJECT; region_index++)
 	{
@@ -413,6 +436,76 @@ static void gore_spawn_garbage(char const *name, real_point3d const *position,
 	piece->position = *position;
 }
 
+/* true left and right limbs for any model with the stock bip01 skeleton:
+six copies of the whole unit, each drawing the nodes of its piece only
+(the others' vertices collapse to the cut, gore_piece_pose) */
+static void gore_mark_subtree(struct model *model, short node_index, signed char *in, signed char value)
+{
+	while (node_index != NONE && node_index < (short)model->nodes.count && node_index < GORE_MAXIMUM_NODES)
+	{
+		struct model_node const *node = TAG_BLOCK_GET_ELEMENT(&model->nodes, node_index, struct model_node);
+
+		in[node_index] = value;
+		gore_mark_subtree(model, node->first_child_node_index, in, value);
+		node_index = node->next_sibling_node_index;
+	}
+}
+
+static boolean gore_split_by_nodes(long unit_index, struct model *model, struct gore_pending const *pending,
+	long blood_effect_index, long decal_index)
+{
+	static char const *const roots[] =
+	{
+		"bip01 head", "bip01 l upperarm", "bip01 r upperarm", "bip01 l thigh", "bip01 r thigh",
+	};
+	short root_nodes[NUMBEROF(roots)];
+	short node_count = (short)MIN(model->nodes.count, GORE_MAXIMUM_NODES);
+	signed char owner[GORE_MAXIMUM_NODES]; /* which piece each node is in: 0 the torso, 1.. the roots */
+	short index;
+	short piece;
+
+	for (index = 0; index < (short)NUMBEROF(roots); index++)
+	{
+		root_nodes[index] = gore_model_node_find(model, roots[index]);
+		if (root_nodes[index] == NONE || root_nodes[index] >= node_count)
+			return FALSE;
+	}
+	csmemset(owner, 0, sizeof(owner));
+	for (index = 0; index < (short)NUMBEROF(roots); index++)
+	{
+		struct model_node const *root = TAG_BLOCK_GET_ELEMENT(&model->nodes, root_nodes[index], struct model_node);
+
+		owner[root_nodes[index]] = (signed char)(index + 1);
+		gore_mark_subtree(model, root->first_child_node_index, owner, (signed char)(index + 1));
+	}
+	for (piece = 0; piece <= (short)NUMBEROF(roots); piece++)
+	{
+		signed char collapse[GORE_MAXIMUM_NODES];
+		short pivot = piece ? root_nodes[piece - 1] : gore_model_node_find(model, "bip01 spine");
+
+		for (index = 0; index < GORE_MAXIMUM_NODES; index++)
+		{
+			if (index >= node_count || owner[index] == piece)
+			{
+				collapse[index] = NONE;
+			}
+			else if (piece)
+			{
+				/* a limb: the rest of the body shrinks to the limb's joint */
+				collapse[index] = (signed char)root_nodes[piece - 1];
+			}
+			else
+			{
+				/* the torso: each limb shrinks to its own joint */
+				collapse[index] = (signed char)root_nodes[owner[index] - 1];
+			}
+		}
+		gore_spawn_copy(unit_index, 0xFFFFFFFF, pivot, collapse, &pending->direction, pending->force,
+			blood_effect_index, decal_index);
+	}
+	return TRUE;
+}
+
 static void gore_unit_gib(struct gore_pending const *pending)
 {
 	long unit_index = pending->unit_index;
@@ -444,7 +537,12 @@ static void gore_unit_gib(struct gore_pending const *pending)
 		decal_index = tag_loaded(DECAL_TAG, "effects\\decals\\blood splats\\blood splat");
 	center = unit->object.bounding_sphere_center;
 
-	if (model && unit->object.node_matrices.size > 0)
+	if (model && unit->object.node_matrices.size > 0 && gore_split_by_nodes(unit_index, model, pending,
+		blood_effect_index, decal_index))
+	{
+		parts = NUMBER_OF_GORE_PARTS;
+	}
+	else if (model && unit->object.node_matrices.size > 0)
 	{
 		/* each part that has its own regions; what is left goes with the torso */
 		for (part = 0; part < NUMBER_OF_GORE_PARTS; part++)
@@ -474,7 +572,7 @@ static void gore_unit_gib(struct gore_pending const *pending)
 				continue;
 			used |= mask;
 			parts++;
-			gore_spawn_copy(unit_index, mask, gore_model_node_find(model, gore_part_pivots[part]),
+			gore_spawn_copy(unit_index, mask, gore_model_node_find(model, gore_part_pivots[part]), NULL,
 				&pending->direction, pending->force, blood_effect_index, decal_index);
 		}
 	}
@@ -524,7 +622,7 @@ static void gore_unit_gib(struct gore_pending const *pending)
 			if (gore_pieces[index].object_index != NONE && gore_pieces[index].age == 0)
 				count++;
 		}
-		error(_error_silent, "gore: %s came apart into %d pieces (%d by its regions), force %.2f",
+		error(_error_silent, "gore: %s came apart into %d pieces (%d split), force %.2f",
 			tag_get_name(unit->definition_index), count, parts, pending->force);
 	}
 	object_delete(unit_index);
@@ -579,6 +677,19 @@ static void gore_piece_pose(struct gore_piece *piece)
 		real_matrix4x3 *matrix = &matrices[node_index];
 		real_vector3d offset;
 
+		if (piece->collapse[node_index] != NONE)
+		{
+			/* outside the piece: its vertices shrink to the cut (those
+			weighted to both sides stretch into a stump) */
+			vector_from_points3d(&piece->pivot0, &piece->base_matrices[(short)piece->collapse[node_index]].position, &offset);
+			gore_apply(piece->rotation, &offset, &offset);
+			point_from_line3d(&piece->position, &offset, 1.f, &matrix->position);
+			matrix->forward = *global_zero_vector3d;
+			matrix->left = *global_zero_vector3d;
+			matrix->up = *global_zero_vector3d;
+			matrix->scale = base->scale;
+			continue;
+		}
 		vector_from_points3d(&piece->pivot0, &base->position, &offset);
 		gore_apply(piece->rotation, &offset, &offset);
 		point_from_line3d(&piece->position, &offset, 1.f, &matrix->position);
@@ -623,7 +734,7 @@ static void gore_piece_update(struct gore_piece *piece)
 				decal_new_from_collision(piece->decal_index, &collision, &down, 1.f, FALSE, NONE, NULL);
 			}
 		}
-		else if (!piece->impacted && (piece->age % 6) == 0)
+		else if (!piece->impacted && piece->age <= 36 && (piece->age % 12) == 0)
 		{
 			gore_effect_at(piece->blood_effect_index, &object->object.position, global_down3d);
 		}
@@ -658,7 +769,7 @@ static void gore_piece_update(struct gore_piece *piece)
 						piece->age, piece->position.x, piece->position.y, piece->position.z);
 					piece->impacted = TRUE;
 					if (piece->decal_index != NONE)
-						decal_new_from_collision(piece->decal_index, &collision, &step, 1.f, FALSE, NONE, NULL);
+						decal_new_from_collision(piece->decal_index, &collision, &step, 0.6f, FALSE, NONE, NULL);
 					gore_effect_at(piece->blood_effect_index, &collision.point, &collision.plane.n);
 				}
 				if (magnitude3d(&piece->velocity) < 0.02f && collision.plane.n.k > 0.5f)
@@ -674,7 +785,7 @@ static void gore_piece_update(struct gore_piece *piece)
 			point_from_line3d(&piece->position, &step, 1.f, &piece->position);
 		}
 		gore_rotate(piece->rotation, &piece->spin);
-		if (!piece->impacted && (piece->age % 5) == 0)
+		if (!piece->impacted && piece->age <= 36 && (piece->age % 12) == 0)
 			gore_effect_at(piece->blood_effect_index, &piece->position, global_down3d);
 
 		/* the object follows the piece (its clusters, its bounds) */
@@ -745,13 +856,25 @@ static void gore_test_update(void)
 		struct damage_data damage;
 
 		error(_error_silent, "gore: test gib of %s", tag_get_name(object_get(best)->definition_index));
+		/* in front of the player, to see it */
+		{
+			struct unit_datum *player_unit = (struct unit_datum *)player;
+			real_point3d position;
+			real_vector3d forward = player_unit->unit.looking_vector;
+
+			forward.k = 0.f;
+			normalize3d(&forward);
+			point_from_line3d(&player->object.position, &forward, 1.2f, &position);
+			object_set_position(best, &position, NULL, NULL);
+			object_compute_node_matrices_recursive(best);
+		}
 		damage_data_new(&damage, NONE);
 		SET_FLAG(damage.flags, _damage_area_of_effect_bit, TRUE);
 		vector_from_points3d(&player->object.position, &object_get(best)->object.position, &damage.direction);
 		normalize3d(&damage.direction);
 		object_get(best)->object.body_vitality = 0.f;
 		unit_kill(best);
-		gore_unit_body_depleted(best, &damage, 100.f);
+		gore_unit_body_depleted(best, &damage, 1.2f);
 	}
 	else
 	{
@@ -785,10 +908,22 @@ void gore_unit_body_depleted(long unit_index, struct damage_data const *damage, 
 	if (scale <= 0.f)
 		scale = 1.f;
 	type = gore_unit_type_get(unit->definition_index);
+	if (type->disabled)
+		return;
 	if (damage->vehicle_impact_speed > 0.f)
 		force = damage->vehicle_impact_speed / (type->vehicle_threshold * scale);
+	else if (TEST_FLAG(damage->flags, _damage_area_of_effect_bit) && damage->area_of_effect_full_damage > 0.f)
+	{
+		real radius = type->gib_radius / GORE_METRES_PER_WORLD_UNIT *
+			(real)sqrt(damage->area_of_effect_full_damage / GORE_FRAG_DAMAGE) / scale;
+
+		force = radius / MAX(damage->area_of_effect_distance, 0.05f);
+	}
 	else if (TEST_FLAG(damage->flags, _damage_area_of_effect_bit))
-		force = normalized_damage / (type->explosion_threshold * scale);
+	{
+		/* (an area of effect with no distance: the debug test) */
+		force = normalized_damage;
+	}
 	if (force < 1.f)
 		return;
 
