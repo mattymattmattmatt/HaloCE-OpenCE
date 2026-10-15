@@ -72,6 +72,9 @@ extern boolean debug_decals;
 /* port: a decal made while this is over 0 lasts at least this many seconds
 (the gore mod's blood) */
 extern real decal_lifetime_minimum;
+/* port: decals refused (collisions off the structure) and the decals now */
+extern long decal_refused_count;
+long decal_count_get(void);
 
 /* port: one-quad decals the caller moves (blood on vehicles) */
 long decal_quad_new(long decal_definition_index, short cluster_index, real_point3d const corners[4], real alpha);

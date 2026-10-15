@@ -735,7 +735,7 @@ char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
 			"\t\tfloat edge = 1.0 - clamp(blood_color.a, 0.0, 1.0) * 0.9;\n"
 			"\t\tfloat cover = smoothstep(edge, edge + 0.08, n);\n"
 			"\t\tfloat shade = 0.25 + 0.75 * dot(result.rgb, vec3(0.3, 0.59, 0.11));\n"
-			"\t\tresult.rgb = mix(result.rgb, blood_color.rgb * shade, cover * 0.85);\n"
+			"\t\tresult.rgb = mix(result.rgb, blood_color.rgb * shade, cover * 0.75);\n"
 			"\t}\n");
 	}
 	if (key->alpha_test_function)

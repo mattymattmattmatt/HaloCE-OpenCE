@@ -188,6 +188,7 @@ static long gore_piece_unit_definition = NONE; /* (the unit coming apart) */
 static real gore_last_force = 1.f; /* gore_unit_hit's, for gore_unit_gib_later */
 
 static struct gore_unit_type const *gore_unit_type_get(long definition_index);
+static boolean gore_vehicle_node_is_wheel(long vehicle_index, short node_index);
 static struct model *gore_model_get(long definition_index);
 
 /* ---------- blood on vehicles
@@ -248,20 +249,21 @@ static void gore_blood_color(long unit_definition_index, real_rgb_color *color)
 {
 	char const *name = tag_get_name(unit_definition_index);
 
-	color->red = 0.55f; color->green = 0.02f; color->blue = 0.02f;
+	/* dark, dried tones */
+	color->red = 0.24f; color->green = 0.03f; color->blue = 0.03f;
 	if (!name)
 		return;
 	if (strstr(name, "grunt") || strstr(name, "jackal"))
 	{
-		color->red = 0.08f; color->green = 0.25f; color->blue = 0.75f;
+		color->red = 0.05f; color->green = 0.08f; color->blue = 0.2f;
 	}
 	else if (strstr(name, "elite"))
 	{
-		color->red = 0.42f; color->green = 0.1f; color->blue = 0.68f;
+		color->red = 0.16f; color->green = 0.05f; color->blue = 0.2f;
 	}
 	else if (strstr(name, "flood"))
 	{
-		color->red = 0.5f; color->green = 0.5f; color->blue = 0.12f;
+		color->red = 0.2f; color->green = 0.2f; color->blue = 0.06f;
 	}
 }
 
@@ -569,7 +571,6 @@ static void gore_vehicle_hit_blood(long vehicle_index, long unit_index, real for
 		return;
 	decal_index = gore_vehicle_blood_decal(unit->definition_index);
 	/* the hull, a little all over (its parts are mostly the root's) */
-	gore_coverage_add(vehicle_index, 0, 0.09f * PIN(force, 0.5f, 3.f), unit->definition_index);
 	count = (short)PIN(1.f + force * 2.f, 1.f, 6.f);
 	for (index = 0; index < count; index++)
 	{
@@ -591,13 +592,25 @@ static void gore_vehicle_hit_blood(long vehicle_index, long unit_index, real for
 				&collision.point, &collision.plane.n,
 				real_seed_random_range(&gore_seed, 0.08f, 0.14f) * PIN(force, 0.7f, 1.6f),
 				decal_index, PIN(0.5f + 0.3f * force, 0.5f, 1.f));
-			gore_coverage_add(vehicle_index, collision.node_index != NONE ? collision.node_index : 0,
-				0.07f * PIN(force, 0.5f, 3.f), unit->definition_index);
+			/* (the wheels only: the hull tinted looked painted) */
+			if (collision.node_index != NONE && gore_vehicle_node_is_wheel(vehicle_index, collision.node_index))
+				gore_coverage_add(vehicle_index, collision.node_index, 0.07f * PIN(force, 0.5f, 3.f), unit->definition_index);
 			if (config_boolean("game.gore_log"))
 				error(_error_silent, "gore: blood on %s node %d (force %.2f)",
 					tag_get_name(vehicle->definition_index), collision.node_index, force);
 		}
 	}
+}
+
+static boolean gore_vehicle_node_is_wheel(long vehicle_index, short node_index)
+{
+	struct model *model = gore_model_get(object_get(vehicle_index)->definition_index);
+	char const *name;
+
+	if (!model || node_index < 0 || node_index >= (short)model->nodes.count)
+		return FALSE;
+	name = TAG_BLOCK_GET_ELEMENT(&model->nodes, node_index, struct model_node)->name;
+	return strstr(name, "wheel") || strstr(name, "tire") || strstr(name, "tread");
 }
 
 /* the vehicle's wheel nodes (names with wheel or tire in them) */
@@ -1792,5 +1805,8 @@ void gore_update(void)
 	gore_vehicles_update();
 	gore_vehicle_marks_update();
 	gore_coverage_update();
+	if (config_boolean("game.gore_log") && (game_time_get() % 300) == 0)
+		error(_error_silent, "gore: decals now %ld (refused off the structure: %ld)",
+			decal_count_get(), decal_refused_count);
 	decal_lifetime_minimum = 0.f;
 }

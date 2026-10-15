@@ -470,6 +470,7 @@ extern struct data_array *global_decal_data;
 
 boolean decals_enabled= TRUE;
 real decal_lifetime_minimum = 0.0f; /* port: see decals.h */
+long decal_refused_count = 0;
 static real decal_quad_texcoords[4][2];
 static short decal_quad_uv[MAXIMUM_DECALS_PER_MAP][4][2];
 boolean decal_quad_set(long decal_index, real_point3d const corners[4]);
@@ -1588,14 +1589,16 @@ void decal_new_from_collision(
 	(scenery a gore piece landed on) has an object's surface index, not the
 	bsp's, and can have no cluster: that walked the bsp with a stranger's
 	surface and inserted into cluster -1 (asserts, then a stale decal and an
-	access violation) */
-	if (collision->object_index!=NONE ||
+	access violation). By the result's type: a structure hit leaves
+	object_index as it was, not NONE */
+	if (collision->type!=_collision_result_structure ||
 		collision->location.cluster_index<0 ||
 		collision->location.cluster_index>=MAXIMUM_CLUSTERS_PER_STRUCTURE ||
 		collision->surface_index<0 ||
 		!collision_bsp ||
 		collision->surface_index>=collision_bsp->surfaces.count)
 	{
+		decal_refused_count++;
 		return;
 	}
 
@@ -2817,4 +2820,18 @@ void decal_quads_delete_except(
 			decal_quad_delete(iterator.datum_index);
 		}
 	}
+}
+
+long decal_count_get(
+	void)
+{
+	struct data_iterator iterator;
+	long count = 0;
+
+	data_iterator_new(&iterator, global_decal_data);
+	while (data_iterator_next(&iterator))
+	{
+		count++;
+	}
+	return count;
 }
