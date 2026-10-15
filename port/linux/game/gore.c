@@ -553,8 +553,13 @@ static void gore_vehicle_marks_update(void)
 
 static long gore_vehicle_blood_decal(long unit_definition_index)
 {
-	long decal_index = tag_loaded(DECAL_TAG, gore_unit_type_get(unit_definition_index)->decal_name);
+	struct gore_unit_type const *type = gore_unit_type_get(unit_definition_index);
+	long decal_index;
 
+	/* (a hunter's has no name: tag_loaded would compare against NULL) */
+	if (type->disabled || !type->decal_name)
+		return NONE;
+	decal_index = type->decal_name ? tag_loaded(DECAL_TAG, type->decal_name) : NONE;
 	if (decal_index == NONE)
 		decal_index = tag_loaded(DECAL_TAG, "effects\\decals\\blood splats\\blood splat");
 	return decal_index;
@@ -755,6 +760,9 @@ static void gore_vehicles_update(void)
 			if (!TEST_FLAG(biped->object.damage_flags, _object_dead_bit) ||
 				distance_squared3d(&biped->object.position, &vehicle->object.bounding_sphere_center) > reach * reach)
 				continue;
+			/* units that never gib (hunters) leave no blood on vehicles */
+			if (gore_unit_type_get(biped->definition_index)->disabled)
+				continue;
 			gore_vehicle_run_over(vehicle_index, bodies.index, &biped->object.position,
 				gore_vehicle_blood_decal(biped->definition_index), biped->definition_index);
 		}
@@ -933,6 +941,7 @@ static void gore_spawn_copy(long unit_index, unsigned long region_mask, short pi
 	placement.forward = unit->object.forward;
 	placement.up = unit->object.up;
 	placement.variant_number = unit->object.variant_number;
+	csmemcpy(placement.change_colors, unit->object.base_change_colors, sizeof(placement.change_colors));
 	object_index = object_new(&placement);
 	if (object_index == NONE)
 		return;
@@ -964,6 +973,15 @@ static void gore_spawn_copy(long unit_index, unsigned long region_mask, short pi
 		object->object.region_permutations[region_index] = TEST_FLAG(region_mask, region_index) ?
 			unit->object.region_permutations[region_index] : (byte)NONE;
 	}
+	/* the unit's look, not a fresh random one: its change colours (a red
+	grunt's pack stays red), its regions' damage, its shader permutation */
+	csmemcpy(object->object.base_change_colors, unit->object.base_change_colors, sizeof(object->object.base_change_colors));
+	csmemcpy(object->object.outgoing_change_colors, unit->object.outgoing_change_colors, sizeof(object->object.outgoing_change_colors));
+	csmemcpy(object->object.region_damage, unit->object.region_damage, sizeof(object->object.region_damage));
+	object->object.regions_destroyed_flags = unit->object.regions_destroyed_flags;
+	object->object.forced_shader_permutation_index = unit->object.forced_shader_permutation_index;
+	object->object.variant_number = unit->object.variant_number;
+	object->object.owner_team_index = unit->object.owner_team_index;
 	SET_FLAG(object->object.flags, _object_do_not_recompute_node_matrices_bit, TRUE);
 	SET_FLAG(object->object.flags, _object_no_collisions_bit, TRUE);
 	SET_FLAG(object->object.flags, _object_cannot_be_garbage_bit, TRUE);
@@ -1133,7 +1151,7 @@ static void gore_unit_gib(struct gore_pending const *pending)
 			resistance->area_damage_effect.index : resistance->body_destroyed_effect.index;
 		trail_effect_index = resistance->localized_damage_effect.index;
 	}
-	decal_index = tag_loaded(DECAL_TAG, type->decal_name);
+	decal_index = type->decal_name ? tag_loaded(DECAL_TAG, type->decal_name) : NONE;
 	if (decal_index == NONE)
 		decal_index = tag_loaded(DECAL_TAG, "effects\\decals\\blood splats\\blood splat");
 	center = unit->object.bounding_sphere_center;
