@@ -1336,8 +1336,24 @@ static void object_damage_body(
 
 	{
 		real body_vitality = object_get_actual_body_vitality(object_index, FALSE);
+		/* port: the gore prototype (port/linux/game/gore.c): a hard enough
+		hit on a biped that this kills, or on its corpse, gibs it (and is
+		not the body's destroyed threshold, which deletes it) */
+		boolean gore_gibs =
+			TEST_FLAG(_object_mask_biped, object->object.type) &&
+			body_vitality < 0.f &&
+			gore_unit_hit(object_index, damage, actual_damage);
 
-		if (damage_resistance->body_destroyed_threshold < 0.f &&
+		if (gore_gibs)
+		{
+			if (!TEST_FLAG(object->object.damage_flags, _object_dead_bit))
+			{
+				object_deplete_body(object_index);
+				SET_FLAG(*being_damaged_flags, _object_being_damaged_body_depleted_bit, TRUE);
+			}
+			gore_unit_gib_later(object_index, damage, actual_damage);
+		}
+		else if (damage_resistance->body_destroyed_threshold < 0.f &&
 			body_vitality < damage_resistance->body_destroyed_threshold)
 		{
 			object_destroy(object_index);
@@ -1368,10 +1384,7 @@ static void object_damage_body(
 
 				object_deplete_body(object_index);
 				SET_FLAG(*being_damaged_flags, _object_being_damaged_body_depleted_bit, TRUE);
-				/* port: the gore prototype: a hard enough hit gibs the body
-				(port/linux/game/gore.c); else the normal limp-body death */
-				if (TEST_FLAG(_object_mask_biped, object->object.type))
-					gore_unit_body_depleted(object_index, damage, actual_damage);
+
 			}
 		}
 		else if (body_vitality < damage_resistance->body_damaged_effect_threshold &&

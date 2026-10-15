@@ -10,10 +10,12 @@ with blood. Single player only.
 
 struct damage_data;
 
-/* object_damage_body (damage.c), when a unit's body is depleted: decides
-whether it gibs. normalized_damage is the hit's body damage over the unit's
-maximum vitality. */
-void gore_unit_body_depleted(long unit_index, struct damage_data const *damage, real normalized_damage);
+/* object_damage_body (damage.c), when a hit leaves a biped's body below
+zero (it dies, or was a corpse): whether it gibs. normalized_damage is the
+hit's body damage over the unit's maximum vitality. game.gore_log logs it. */
+boolean gore_unit_hit(long unit_index, struct damage_data const *damage, real normalized_damage);
+/* then, when it said so (after the unit's death, if this hit killed it) */
+void gore_unit_gib_later(long unit_index, struct damage_data const *damage, real normalized_damage);
 /* game_tick (game.c), after objects_update */
 void gore_update(void);
 /* game_initialize_for_new_map / game_dispose_from_old_map */

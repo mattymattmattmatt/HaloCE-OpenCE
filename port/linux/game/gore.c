@@ -48,6 +48,7 @@ front of the player and gibs it, to try it.
 #include "objects/objects.h"
 #include "physics/collision_model_definitions.h"
 #include "physics/collisions.h"
+#include "scenario/scenario.h"
 #include "tag_files/tag_files.h"
 #include "tag_files/tag_groups.h"
 #include "units/bipeds.h"
@@ -108,15 +109,15 @@ full damage over the frag's 120 (a rocket's 330: 1.66 times) */
 static struct gore_unit_type const gore_unit_types[] =
 {
 	{ "hunter", 0.f, 0.f, NULL, TRUE },
-	{ "grunt", 2.3f, 3.f, "effects\\decals\\blood splats\\blood grunt splat", FALSE },
-	{ "jackal", 2.f, 3.5f, "effects\\decals\\blood splats\\blood grunt splat", FALSE },
-	{ "elite", 1.6f, 5.f, "effects\\decals\\blood splats\\blood elite splat", FALSE },
-	{ "flood", 2.3f, 3.f, "effects\\decals\\blood splats\\blood elite splat", FALSE },
-	{ "marine", 2.f, 4.f, "effects\\decals\\blood splats\\blood splat", FALSE },
-	{ "crewman", 2.f, 4.f, "effects\\decals\\blood splats\\blood splat", FALSE },
-	{ "captain", 2.f, 4.f, "effects\\decals\\blood splats\\blood splat", FALSE },
-	{ "pilot", 2.f, 4.f, "effects\\decals\\blood splats\\blood splat", FALSE },
-	{ "", 1.8f, 4.5f, "effects\\decals\\blood splats\\blood splat", FALSE },
+	{ "grunt", 2.8f, 3.f, "effects\\decals\\blood splats\\blood grunt splat", FALSE },
+	{ "jackal", 2.5f, 3.5f, "effects\\decals\\blood splats\\blood grunt splat", FALSE },
+	{ "elite", 2.f, 5.f, "effects\\decals\\blood splats\\blood elite splat", FALSE },
+	{ "flood", 2.8f, 3.f, "effects\\decals\\blood splats\\blood elite splat", FALSE },
+	{ "marine", 2.5f, 4.f, "effects\\decals\\blood splats\\blood splat", FALSE },
+	{ "crewman", 2.5f, 4.f, "effects\\decals\\blood splats\\blood splat", FALSE },
+	{ "captain", 2.5f, 4.f, "effects\\decals\\blood splats\\blood splat", FALSE },
+	{ "pilot", 2.5f, 4.f, "effects\\decals\\blood splats\\blood splat", FALSE },
+	{ "", 2.2f, 4.5f, "effects\\decals\\blood splats\\blood splat", FALSE },
 };
 
 #define GORE_METRES_PER_WORLD_UNIT 3.048f
@@ -173,7 +174,8 @@ struct gore_pending
 static struct gore_piece gore_pieces[GORE_MAXIMUM_PIECES];
 static struct gore_pending gore_pending[GORE_MAXIMUM_PENDING];
 static unsigned long gore_seed = 0x6f726531;
-static boolean gore_test_done;
+static short gore_test_done;
+static real gore_last_force = 1.f; /* gore_unit_hit's, for gore_unit_gib_later */
 
 /* ---------- private code */
 
@@ -813,8 +815,15 @@ static void gore_test_update(void)
 	long best = NONE;
 	real best_distance = 0.f;
 
-	if (seconds <= 0.f || gore_test_done || game_time_get() < (long)(seconds * 30.f))
+	static real const sweep[] = { 1.f, 1.5f, 2.f, 2.5f, 3.f };
+	real test_distance = (real)config_real("debug.gore_test_distance");
+	short sweep_count = test_distance < 0.f ? (short)NUMBEROF(sweep) : 1;
+
+	if (seconds <= 0.f || gore_test_done >= sweep_count ||
+		game_time_get() < (long)((seconds + 4.f * gore_test_done) * 30.f))
 		return;
+	if (test_distance < 0.f)
+		test_distance = sweep[gore_test_done];
 	object_iterator_new(&iterator, _object_mask_biped, 0);
 	while ((biped = (struct biped_datum *)object_iterator_next(&iterator)) != NULL)
 	{
@@ -850,7 +859,7 @@ static void gore_test_update(void)
 			best_distance = distance;
 		}
 	}
-	gore_test_done = TRUE;
+	gore_test_done++;
 	if (best != NONE)
 	{
 		struct damage_data damage;
@@ -868,13 +877,67 @@ static void gore_test_update(void)
 			object_set_position(best, &position, NULL, NULL);
 			object_compute_node_matrices_recursive(best);
 		}
+		if (test_distance > 0.f)
+		{
+			/* a frag grenade's explosion this many metres from the unit's
+			feet, on the ground on the side away from the player */
+			long frag = tag_loaded('jpt!', "weapons\\frag grenade\\explosion");
+			real_vector3d away;
+			real_point3d point;
+			struct object_datum *target = object_get(best);
+
+			if (frag == NONE)
+			{
+				error(_error_silent, "gore: test: no frag grenade explosion on this map");
+				return;
+			}
+			vector_from_points3d(&player->object.position, &target->object.position, &away);
+			away.k = 0.f;
+			normalize3d(&away);
+			point_from_line3d(&target->object.position, &away,
+				test_distance / GORE_METRES_PER_WORLD_UNIT, &point);
+			point.z += 0.1f; /* (a grenade going off just above the ground by the unit's feet) */
+			error(_error_silent, "gore: test: frag at %.2f m from %s (body %.2f shield %.2f)",
+				test_distance, tag_get_name(target->definition_index),
+				target->object.body_vitality, target->object.shield_vitality);
+			if (config_boolean("debug.gore_test_projectile"))
+			{
+				/* a real frag grenade, dropped there: its fuse, its
+				detonation and the AI's reaction as in play */
+				long grenade = tag_loaded('proj', "weapons\\frag grenade\\frag grenade");
+
+				if (grenade != NONE)
+				{
+					struct object_placement_data placement;
+
+					point.z += 0.15f;
+					object_placement_data_new(&placement, grenade, NONE);
+					placement.position = point;
+					object_new(&placement);
+				}
+				return;
+			}
+			damage_data_new(&damage, frag);
+			damage.origin = point;
+			damage.epicenter = point;
+			damage.direction = *global_down3d;
+			scenario_location_from_point(&damage.location, &point);
+			area_of_effect_cause_damage(&damage, NONE);
+			error(_error_silent, "gore: test: after the blast %s is %s (body %.2f)",
+				tag_get_name(target->definition_index),
+				object_try_and_get_and_verify_type(best, _object_mask_biped) ?
+					(TEST_FLAG(object_get(best)->object.damage_flags, _object_dead_bit) ? "dead" : "alive") : "gone",
+				object_try_and_get_and_verify_type(best, _object_mask_biped) ? object_get(best)->object.body_vitality : 0.f);
+			return;
+		}
 		damage_data_new(&damage, NONE);
 		SET_FLAG(damage.flags, _damage_area_of_effect_bit, TRUE);
 		vector_from_points3d(&player->object.position, &object_get(best)->object.position, &damage.direction);
 		normalize3d(&damage.direction);
 		object_get(best)->object.body_vitality = 0.f;
 		unit_kill(best);
-		gore_unit_body_depleted(best, &damage, 1.2f);
+		gore_last_force = 1.2f;
+		gore_unit_gib_later(best, &damage, 1.2f);
 	}
 	else
 	{
@@ -892,46 +955,109 @@ void gore_reset(void)
 		gore_pieces[index].object_index = NONE;
 	for (index = 0; index < GORE_MAXIMUM_PENDING; index++)
 		gore_pending[index].unit_index = NONE;
-	gore_test_done = FALSE;
+	gore_test_done = 0;
 }
 
-void gore_unit_body_depleted(long unit_index, struct damage_data const *damage, real normalized_damage)
+static real gore_unit_force(long unit_index, struct damage_data const *damage, real normalized_damage,
+	struct gore_unit_type const **type_out)
 {
 	struct object_datum *unit = object_try_and_get_and_verify_type(unit_index, _object_mask_biped);
 	struct gore_unit_type const *type;
 	real scale = (real)config_real("game.gore_threshold_scale");
 	real force = 0.f;
-	short index;
+	char const *kind = "other";
+	real measure = 0.f;
+	real threshold = 0.f;
 
-	if (!unit || !gore_enabled() || ((struct biped_datum *)unit)->unit.player_index != NONE)
-		return;
+	*type_out = NULL;
+	if (!unit)
+		return 0.f;
 	if (scale <= 0.f)
 		scale = 1.f;
 	type = gore_unit_type_get(unit->definition_index);
-	if (type->disabled)
-		return;
+	*type_out = type;
 	if (damage->vehicle_impact_speed > 0.f)
-		force = damage->vehicle_impact_speed / (type->vehicle_threshold * scale);
-	else if (TEST_FLAG(damage->flags, _damage_area_of_effect_bit) && damage->area_of_effect_full_damage > 0.f)
 	{
-		real radius = type->gib_radius / GORE_METRES_PER_WORLD_UNIT *
-			(real)sqrt(damage->area_of_effect_full_damage / GORE_FRAG_DAMAGE) / scale;
+		kind = "vehicle";
+		measure = damage->vehicle_impact_speed;
+		threshold = type->vehicle_threshold * scale;
+		force = threshold > 0.f ? measure / threshold : 0.f;
+	}
+	else if (damage->area_of_effect_full_damage > 0.f)
+	{
+		/* the blast's distance from the unit's centre against the gib
+		radius (metres) */
+		/* the blast's distance from the unit's body: the nearest point of
+		a line up its middle, feet to head (the area of effect measures to
+		the unit's centre, a metre above a grenade at its feet: a frag 2 m
+		from a marine's feet was 2.2 m from its centre and did not gib) */
+		real_point3d nearest = unit->object.bounding_sphere_center;
+		real radius = unit->object.bounding_sphere_radius;
+		real bottom = nearest.z - radius * 0.9f;
+		real top = nearest.z + radius * 0.6f;
 
-		force = radius / MAX(damage->area_of_effect_distance, 0.05f);
+		nearest.z = PIN(damage->epicenter.z, bottom, top);
+		kind = "explosion";
+		measure = (real)sqrt(distance_squared3d(&damage->epicenter, &nearest)) * GORE_METRES_PER_WORLD_UNIT;
+		threshold = type->gib_radius * (real)sqrt(damage->area_of_effect_full_damage / GORE_FRAG_DAMAGE) / scale;
+		force = threshold / MAX(measure, 0.15f);
 	}
 	else if (TEST_FLAG(damage->flags, _damage_area_of_effect_bit))
 	{
 		/* (an area of effect with no distance: the debug test) */
+		kind = "test";
 		force = normalized_damage;
 	}
-	if (force < 1.f)
-		return;
+	if (config_boolean("game.gore_log") && force > 0.f)
+	{
+		error(_error_silent, "gore: %s hit on %s: %s %.2f, gibs within %.2f, force %.2f%s%s",
+			kind, tag_get_name(unit->definition_index),
+			damage->vehicle_impact_speed > 0.f ? "speed" : "distance (m)", measure, threshold, force,
+			type->disabled ? " (never gibs)" : force >= 1.f ? ": gibs" : ": normal death",
+			TEST_FLAG(unit->object.damage_flags, _object_dead_bit) ? " (a corpse)" : "");
+	}
+	return force;
+}
+
+boolean gore_unit_hit(long unit_index, struct damage_data const *damage, real normalized_damage)
+{
+	struct object_datum *unit = object_try_and_get_and_verify_type(unit_index, _object_mask_biped);
+	struct gore_unit_type const *type;
+	short index;
+	real force;
+
+	if (!unit || !gore_enabled() || ((struct biped_datum *)unit)->unit.player_index != NONE)
+		return FALSE;
+	force = gore_unit_force(unit_index, damage, normalized_damage, &type);
+	gore_last_force = force;
+	if (!type || type->disabled || force < 1.f)
+		return FALSE;
+	for (index = 0; index < GORE_MAXIMUM_PENDING; index++)
+	{
+		if (gore_pending[index].unit_index == unit_index)
+			return TRUE; /* (already coming apart: this hit is spent) */
+	}
+	for (index = 0; index < GORE_MAXIMUM_PENDING; index++)
+	{
+		if (gore_pending[index].unit_index == NONE)
+			return TRUE;
+	}
+	return FALSE;
+}
+
+void gore_unit_gib_later(long unit_index, struct damage_data const *damage, real normalized_damage)
+{
+	struct gore_unit_type const *type;
+	short index;
+	real force;
 
 	for (index = 0; index < GORE_MAXIMUM_PENDING; index++)
 	{
 		if (gore_pending[index].unit_index == unit_index)
 			return;
 	}
+	force = gore_last_force;
+	(void)type; (void)normalized_damage;
 	for (index = 0; index < GORE_MAXIMUM_PENDING; index++)
 	{
 		if (gore_pending[index].unit_index == NONE)
@@ -940,7 +1066,7 @@ void gore_unit_body_depleted(long unit_index, struct damage_data const *damage, 
 
 			pending->unit_index = unit_index;
 			pending->time = game_time_get();
-			pending->force = force;
+			pending->force = MAX(force, 1.f);
 			pending->direction = damage->direction;
 			if (normalize3d(&pending->direction) == 0.f)
 				pending->direction = *global_up3d;

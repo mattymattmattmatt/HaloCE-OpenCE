@@ -300,6 +300,9 @@ static const struct config_setting config_settings[] =
 		"The most gore pieces at once (6 to 64); the oldest goes first." },
 	{ "game.gore_piece_seconds", _config_real, "20.0", "HALO_GORE_PIECE_SECONDS", _environment_value, _platform_all,
 		"How long a gore piece stays, in seconds." },
+	{ "game.gore_log", _config_boolean, "false", "HALO_GORE_LOG", _environment_value, _platform_all,
+		"Log each explosion or vehicle hit on a unit to the console: its\n"
+		"distance, the gore force and whether it came apart." },
 	{ "game.language", _config_string, "\"\"", "HALO_LANGUAGE", _environment_value, _platform_all,
 		"The language the game asks the Xbox for: \"ja\", \"de\", \"fr\", \"es\" or \"it\";\n"
 		"empty for English. The game data decides what is translated." },
@@ -522,6 +525,12 @@ static const struct config_setting config_settings[] =
 	{ "debug.gore_test_unit", _config_string, "\"\"", "HALO_GORE_TEST_UNIT", _environment_value, _platform_all,
 		"With gore_test: only a biped whose tag path has this in it (\"elite\");\n"
 		"empty for any." },
+	{ "debug.gore_test_distance", _config_real, "0.0", "HALO_GORE_TEST_DIST", _environment_value, _platform_all,
+		"With gore_test: instead, a frag grenade goes off this many metres from\n"
+		"the biped's centre; -1: 1, 1.5, 2, 2.5 and 3 m, four seconds apart, a\n"
+		"biped each; 0: the biped is gibbed outright." },
+	{ "debug.gore_test_projectile", _config_boolean, "false", "HALO_GORE_TEST_PROJECTILE", _environment_value, _platform_all,
+		"With gore_test_distance: drop a live frag grenade there instead." },
 	{ "debug.telnet_console", _config_boolean, "false", "HALO_TELNET_CONSOLE", _environment_set_is_true, _platform_all,
 		"Listen on 127.0.0.1 (port telnet_console_port) for a script console that\n"
 		"runs what it is sent as the game's console does, with no password; false\n"
