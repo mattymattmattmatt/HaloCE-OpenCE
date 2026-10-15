@@ -431,7 +431,10 @@ static void gore_vehicle_mark_add(long vehicle_index, short node_index, real_poi
 	real_vector3d const *normal, real radius, long definition_index, real alpha)
 {
 	struct object_datum *vehicle = object_try_and_get_and_verify_type(vehicle_index, _object_mask_vehicle);
-	long maximum = PIN(config_integer("game.gore_vehicle_marks"), 0, GORE_MAXIMUM_VEHICLE_MARKS);
+	/* Vehicle marks are hard-disabled: their corners come from hits on the vehicle's collision
+	geometry, so the quads float off the visible mesh. An older default wrote
+	game.gore_vehicle_marks = 160 into existing config.toml files, so the setting is ignored. */
+	long maximum = 0;
 	struct gore_vehicle_mark *mark = NULL;
 	real_matrix4x3 const *matrix;
 	real_vector3d n = *normal;
