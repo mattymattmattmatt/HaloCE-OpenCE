@@ -40,6 +40,8 @@ static real sphere[6][8] = {{-.22f,0,.7f},{.22f,0,.7f},{0,-.22f,.7f},{0,.22f,.7f
 #define rasterizer_model_draw(...) ((void)0)
 #define rasterizer_environment_shadow_model_draw(...) ((void)0)
 #define rasterizer_debug_model_vertices(...) ((void)0)
+/* (models.c's port hook for the gore mod's blood on vehicles: none here) */
+static void (*render_model_part_blood_proc)(long object_index, short node_index) = 0;
 #define D3DLOCK_READONLY 128
 
 static void tag_iterator_new(struct tag_iterator *iterator, long tag)
