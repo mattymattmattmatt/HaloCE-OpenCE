@@ -16,6 +16,11 @@ hit's body damage over the unit's maximum vitality. game.gore_log logs it. */
 boolean gore_unit_hit(long unit_index, struct damage_data const *damage, real normalized_damage);
 /* then, when it said so (after the unit's death, if this hit killed it) */
 void gore_unit_gib_later(long unit_index, struct damage_data const *damage, real normalized_damage);
+/* object_damage_body (damage.c), as a hit that did not gib it kills a
+biped: a sniper rifle's on the head takes the head off (game.gore_headshots) */
+boolean gore_unit_headshot(long unit_index, struct damage_data const *damage, boolean head);
+/* render_objects.c declares gore_render_node_matrices: the node matrices
+to draw an object with (a headless corpse's head shrunk to its neck) */
 /* game_tick (game.c), after objects_update */
 void gore_update(void);
 /* game_initialize_for_new_map / game_dispose_from_old_map */

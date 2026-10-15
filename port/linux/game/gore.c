@@ -184,6 +184,7 @@ struct gore_pending
 
 static struct gore_piece gore_pieces[GORE_MAXIMUM_PIECES];
 static boolean gore_last_player;
+static struct gore_headless *gore_headless_find(long unit_index);
 static struct gore_pending gore_pending[GORE_MAXIMUM_PENDING];
 static unsigned long gore_seed = 0x6f726531;
 static short gore_test_done;
@@ -1103,6 +1104,10 @@ static boolean gore_split_by_nodes(long unit_index, struct model *model, struct 
 	for (piece = 0; piece <= (short)NUMBEROF(roots); piece++)
 	{
 		signed char collapse[GORE_MAXIMUM_NODES];
+
+		/* (a sniper took its head already) */
+		if (piece == 1 && gore_headless_find(unit_index))
+			continue;
 		short pivot = piece ? root_nodes[piece - 1] : gore_model_node_find(model, "bip01 spine");
 
 		for (index = 0; index < GORE_MAXIMUM_NODES; index++)
@@ -1575,6 +1580,47 @@ static void gore_test_update(void)
 			object_set_position(best, &position, NULL, NULL);
 			object_compute_node_matrices_recursive(best);
 		}
+		if (config_boolean("debug.gore_test_sniper"))
+		{
+			/* a sniper rifle bullet's damage on the unit's head material,
+			along the player's view */
+			long bullet = tag_loaded('jpt!', "weapons\\sniper rifle\\sniper bullet");
+			struct damage_resistance const *resistance = gore_resistance_get(object_get(best)->definition_index);
+			struct model *model = gore_model_get(object_get(best)->definition_index);
+			short head_material = NONE;
+			short head_node = model ? gore_model_node_find(model, "bip01 head") : NONE;
+			real_vector3d normal;
+			short material;
+
+			if (bullet == NONE || !resistance)
+			{
+				error(_error_silent, "gore: test: no sniper rifle bullet on this map");
+				return;
+			}
+			for (material = 0; material < (short)resistance->materials.count; material++)
+			{
+				if (TEST_FLAG(TAG_BLOCK_GET_ELEMENT(&resistance->materials, material, struct damage_resistance_material)->flags,
+						0 /* damage.c _damage_material_head_bit */))
+				{
+					head_material = material;
+					break;
+				}
+			}
+			damage_data_new(&damage, bullet);
+			/* from the side, to see the head go */
+			damage.direction.i = -((struct unit_datum *)player)->unit.looking_vector.j;
+			damage.direction.j = ((struct unit_datum *)player)->unit.looking_vector.i;
+			damage.direction.k = 0.1f;
+			normalize3d(&damage.direction);
+			damage.origin = player->object.position;
+			damage.epicenter = object_get(best)->object.bounding_sphere_center;
+			scenario_location_from_point(&damage.location, &damage.epicenter);
+			scale_vector3d(&damage.direction, -1.f, &normal);
+			error(_error_silent, "gore: test: a sniper bullet on the head (material %d, node %d) of %s",
+				head_material, head_node, tag_get_name(object_get(best)->definition_index));
+			object_cause_damage(&damage, best, head_node, NONE, head_material, &normal);
+			return;
+		}
 		if (vehicle_speed > 0.f)
 		{
 			/* a warthog from the side, across in front of the player, at
@@ -1683,6 +1729,203 @@ static void gore_test_update(void)
 
 /* ---------- public code */
 
+/* ---------- sniper headshots
+
+A sniper rifle kill on the head (the damage tag's name has "sniper" in it,
+and the hit was on a material the collision model flags as the head, which
+is what the engine's own headshot multiplier goes by) takes off the head
+only: a copy of the unit showing just the head flies off along the shot, and
+the body keeps its head drawn shrunk to the neck (only as drawn,
+gore_render_node_matrices: its own node matrices, which its limp body
+works on, are left alone) while it dies its normal death, the neck bleeding
+for a while. */
+
+#define GORE_MAXIMUM_HEADLESS 64
+#define GORE_NECK_BLEED_TICKS 150
+
+struct gore_headless
+{
+	long unit_index; /* NONE: free */
+	short head_node;
+	long time;
+	long bleed_effect_index;
+	signed char in_head[GORE_MAXIMUM_NODES]; /* the head's nodes */
+};
+
+static struct gore_headless gore_headless[GORE_MAXIMUM_HEADLESS];
+
+static struct gore_headless *gore_headless_find(long unit_index)
+{
+	short index;
+
+	if (unit_index == NONE)
+		return NULL;
+	for (index = 0; index < GORE_MAXIMUM_HEADLESS; index++)
+	{
+		if (gore_headless[index].unit_index == unit_index)
+			return &gore_headless[index];
+	}
+	return NULL;
+}
+
+static boolean gore_headshot_unit_kind(long definition_index)
+{
+	static char const *const kinds[] = { "grunt", "jackal", "elite", "marine", "crewman", "cyborg" };
+	char const *name = tag_get_name(definition_index);
+	short index;
+
+	if (!name || strstr(name, "flood") || strstr(name, "hunter"))
+		return FALSE;
+	for (index = 0; index < (short)NUMBEROF(kinds); index++)
+	{
+		if (strstr(name, kinds[index]))
+			return TRUE;
+	}
+	return FALSE;
+}
+
+boolean gore_unit_headshot(long unit_index, struct damage_data const *damage, boolean head)
+{
+	struct object_datum *unit = object_try_and_get_and_verify_type(unit_index, _object_mask_biped);
+	struct damage_resistance const *resistance;
+	struct gore_headless *headless = NULL;
+	struct model *model;
+	char const *damage_name;
+	signed char collapse[GORE_MAXIMUM_NODES];
+	long blood_effect_index = NONE;
+	long decal_index;
+	short node_count;
+	short head_node;
+	short index;
+	real_vector3d direction;
+
+	if (!unit || !head || !gore_enabled() || !config_boolean("game.gore_headshots") ||
+		TEST_FLAG(unit->object.damage_flags, _object_dead_bit) || unit->object.node_matrices.size <= 0)
+		return FALSE;
+	damage_name = damage->definition_index != NONE ? tag_get_name(damage->definition_index) : NULL;
+	if (!damage_name || !strstr(damage_name, "sniper") || !gore_headshot_unit_kind(unit->definition_index))
+		return FALSE;
+	model = gore_model_get(unit->definition_index);
+	if (!model)
+		return FALSE;
+	head_node = gore_model_node_find(model, "bip01 head");
+	node_count = (short)MIN(MIN(model->nodes.count, GORE_MAXIMUM_NODES),
+		unit->object.node_matrices.size / (long)sizeof(real_matrix4x3));
+	if (head_node == NONE || head_node >= node_count || gore_headless_find(unit_index))
+		return FALSE;
+	for (index = 0; index < GORE_MAXIMUM_HEADLESS && !headless; index++)
+	{
+		if (gore_headless[index].unit_index == NONE ||
+			!object_try_and_get_and_verify_type(gore_headless[index].unit_index, _object_mask_biped))
+			headless = &gore_headless[index];
+	}
+	if (!headless)
+	{
+		/* the oldest makes room */
+		headless = &gore_headless[0];
+		for (index = 1; index < GORE_MAXIMUM_HEADLESS; index++)
+		{
+			if (gore_headless[index].time < headless->time)
+				headless = &gore_headless[index];
+		}
+	}
+	csmemset(headless->in_head, 0, sizeof(headless->in_head));
+	headless->in_head[head_node] = 1;
+	gore_mark_subtree(model, TAG_BLOCK_GET_ELEMENT(&model->nodes, head_node, struct model_node)->first_child_node_index,
+		headless->in_head, 1);
+	for (index = 0; index < GORE_MAXIMUM_NODES; index++)
+		collapse[index] = (index < node_count && headless->in_head[index]) ? NONE : (signed char)head_node;
+
+	resistance = gore_resistance_get(unit->definition_index);
+	headless->bleed_effect_index = NONE;
+	if (resistance)
+	{
+		blood_effect_index = resistance->area_damage_effect.index != NONE ?
+			resistance->area_damage_effect.index : resistance->body_destroyed_effect.index;
+		headless->bleed_effect_index = resistance->localized_damage_effect.index != NONE ?
+			resistance->localized_damage_effect.index : blood_effect_index;
+	}
+	{
+		struct gore_unit_type const *type = gore_unit_type_get(unit->definition_index);
+
+		decal_index = type->decal_name ? tag_loaded(DECAL_TAG, type->decal_name) : NONE;
+		if (decal_index == NONE)
+			decal_index = tag_loaded(DECAL_TAG, "effects\\decals\\blood splats\\blood splat");
+	}
+	direction = damage->direction;
+	if (normalize3d(&direction) == 0.f)
+		direction = *global_up3d;
+	gore_piece_unit_definition = unit->definition_index;
+	/* (the head piece's burst at the neck is gore_spawn_copy's) */
+	gore_spawn_copy(unit_index, 0xFFFFFFFF, head_node, collapse, &direction, 1.f, blood_effect_index, decal_index);
+	headless->unit_index = unit_index;
+	headless->head_node = head_node;
+	headless->time = game_time_get();
+	if (config_boolean("game.gore_log"))
+		error(_error_silent, "gore: sniper headshot: %s lost its head (%s)", tag_get_name(unit->definition_index), damage_name);
+	return TRUE;
+}
+
+static void gore_headless_update(void)
+{
+	short index;
+
+	for (index = 0; index < GORE_MAXIMUM_HEADLESS; index++)
+	{
+		struct gore_headless *headless = &gore_headless[index];
+		struct object_datum *unit;
+		long age;
+
+		if (headless->unit_index == NONE)
+			continue;
+		unit = object_try_and_get_and_verify_type(headless->unit_index, _object_mask_biped);
+		/* gone, or alive again (a revert to a checkpoint from before) */
+		if (!unit || (!TEST_FLAG(unit->object.damage_flags, _object_dead_bit) && game_time_get() - headless->time > 2))
+		{
+			headless->unit_index = NONE;
+			continue;
+		}
+		age = game_time_get() - headless->time;
+		if (age > 0 && age < GORE_NECK_BLEED_TICKS && (age % 10) == 0 && headless->bleed_effect_index != NONE)
+		{
+			real_matrix4x3 const *matrices = object_get_node_matrices(headless->unit_index);
+
+			if (headless->head_node < (short)(unit->object.node_matrices.size / (long)sizeof(real_matrix4x3)))
+				gore_effect_at(headless->bleed_effect_index, &matrices[headless->head_node].position,
+					&matrices[headless->head_node].forward);
+		}
+	}
+}
+
+real_matrix4x3 const *gore_render_node_matrices(long object_index, real_matrix4x3 const *nodes)
+{
+	static real_matrix4x3 drawn[GORE_MAXIMUM_NODES];
+	struct gore_headless *headless;
+	struct object_datum *object;
+	short count;
+	short index;
+
+	if (!nodes || !(headless = gore_headless_find(object_index)) ||
+		!(object = object_try_and_get_and_verify_type(object_index, _object_mask_biped)))
+		return nodes;
+	count = (short)MIN(object->object.node_matrices.size / (long)sizeof(real_matrix4x3), GORE_MAXIMUM_NODES);
+	if (headless->head_node >= count)
+		return nodes;
+	for (index = 0; index < count; index++)
+	{
+		drawn[index] = nodes[index];
+		if (headless->in_head[index])
+		{
+			/* shrunk to the neck (the head node's own origin) */
+			drawn[index].position = nodes[headless->head_node].position;
+			drawn[index].forward = *global_zero_vector3d;
+			drawn[index].left = *global_zero_vector3d;
+			drawn[index].up = *global_zero_vector3d;
+		}
+	}
+	return drawn;
+}
+
 void gore_reset(void)
 {
 	short index;
@@ -1691,6 +1934,8 @@ void gore_reset(void)
 		gore_pieces[index].object_index = NONE;
 	for (index = 0; index < GORE_MAXIMUM_PENDING; index++)
 		gore_pending[index].unit_index = NONE;
+	for (index = 0; index < GORE_MAXIMUM_HEADLESS; index++)
+		gore_headless[index].unit_index = NONE;
 	/* (the decals went with the map or the loaded game: forgotten, not
 	deleted) */
 	for (index = 0; index < GORE_MAXIMUM_VEHICLE_MARKS; index++)
@@ -1865,6 +2110,7 @@ void gore_update(void)
 		if (gore_pieces[index].object_index != NONE)
 			gore_piece_update(&gore_pieces[index]);
 	}
+	gore_headless_update();
 	gore_vehicles_update();
 	gore_vehicle_marks_update();
 	gore_coverage_update();

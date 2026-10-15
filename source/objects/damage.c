@@ -1383,6 +1383,11 @@ static void object_damage_body(
 						object_destroy_region(object_index, dying_region_index);
 				}
 
+				/* port: the gore prototype: a sniper rifle's kill on the head
+				takes the head off (port/linux/game/gore.c) */
+				if (TEST_FLAG(_object_mask_biped, object->object.type))
+					gore_unit_headshot(object_index, damage, TEST_FLAG(damage_material->flags, _damage_material_head_bit));
+
 				object_deplete_body(object_index);
 				SET_FLAG(*being_damaged_flags, _object_being_damaged_body_depleted_bit, TRUE);
 

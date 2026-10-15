@@ -310,6 +310,8 @@ static const struct config_setting config_settings[] =
 		"The most gore pieces at once (6 to 512); the oldest goes first." },
 	{ "game.gore_piece_seconds", _config_real, "600.0", "HALO_GORE_PIECE_SECONDS", _environment_value, _platform_all,
 		"How long a gore piece stays, in seconds." },
+	{ "game.gore_headshots", _config_boolean, "true", "HALO_GORE_HEADSHOTS", _environment_value, _platform_all,
+		"Gore: a sniper rifle kill on the head of a grunt, jackal, elite, marine or the player takes only the head off." },
 	{ "game.gore_log", _config_boolean, "false", "HALO_GORE_LOG", _environment_value, _platform_all,
 		"Log each explosion or vehicle hit on a unit to the console: its\n"
 		"distance, the gore force and whether it came apart." },
@@ -541,6 +543,8 @@ static const struct config_setting config_settings[] =
 		"biped each; 0: the biped is gibbed outright." },
 	{ "debug.gore_test_vehicle", _config_real, "0", "HALO_GORE_TEST_VEHICLE", _environment_value, _platform_all,
 		"With debug.gore_test: a warthog at this speed (m/s) at the unit, then 4 s later parked side on in view (to see its blood)." },
+	{ "debug.gore_test_sniper", _config_boolean, "false", "HALO_GORE_TEST_SNIPER", _environment_value, _platform_all,
+		"With debug.gore_test: instead, a sniper rifle bullet's damage on the unit's head (the map needs the sniper rifle)." },
 	{ "debug.gore_test_projectile", _config_boolean, "false", "HALO_GORE_TEST_PROJECTILE", _environment_value, _platform_all,
 		"With gore_test_distance: drop a live frag grenade there instead." },
 	{ "debug.telnet_console", _config_boolean, "false", "HALO_TELNET_CONSOLE", _environment_set_is_true, _platform_all,
