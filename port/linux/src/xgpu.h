@@ -151,9 +151,14 @@ struct nv2a_pixel_shader_key
 	blend of a constant color factor with a constant alpha one, as the
 	meters' (shader_transparent_meter) */
 	unsigned char source_blend;
+	/* blood over the surface (the gore mod's on vehicles: xgpu_set_blood) */
+	unsigned char blood;
 };
 
 char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key);
+/* the blood the next draws are covered with: its color and how much of the
+surface (0 to 1; 0 none), until set again (port/linux/game/gore.c) */
+void xgpu_set_blood(float red, float green, float blue, float amount);
 
 #ifdef HALO_GLES
 /* ES samplers have no LOD bias of their own */

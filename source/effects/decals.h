@@ -77,6 +77,7 @@ extern real decal_lifetime_minimum;
 long decal_quad_new(long decal_definition_index, short cluster_index, real_point3d const corners[4], real alpha);
 boolean decal_quad_set(long decal_index, real_point3d const corners[4]);
 void decal_quad_delete(long decal_index);
+void decal_quads_delete_except(long const *keep, long keep_count);
 
 /* ---------- public code */
 

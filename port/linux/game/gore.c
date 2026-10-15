@@ -157,6 +157,7 @@ struct gore_piece
 	boolean impacted;
 	long blood_effect_index;
 	long decal_index;
+	long unit_definition_index; /* (its blood's color) */
 	real_point3d pivot0;
 	real_point3d position;
 	real_vector3d velocity;
@@ -183,6 +184,7 @@ static struct gore_piece gore_pieces[GORE_MAXIMUM_PIECES];
 static struct gore_pending gore_pending[GORE_MAXIMUM_PENDING];
 static unsigned long gore_seed = 0x6f726531;
 static short gore_test_done;
+static long gore_piece_unit_definition = NONE; /* (the unit coming apart) */
 static real gore_last_force = 1.f; /* gore_unit_hit's, for gore_unit_gib_later */
 
 static struct gore_unit_type const *gore_unit_type_get(long definition_index);
@@ -211,6 +213,160 @@ struct gore_vehicle_mark
 };
 
 static struct gore_vehicle_mark gore_vehicle_marks[GORE_MAXIMUM_VEHICLE_MARKS];
+
+/* ---------- blood coverage
+
+How much of each of a vehicle's nodes (the hull's, each wheel's) is covered
+in blood, 0 to 1, and its color. The renderer (models.c's
+render_model_part_blood_proc, d3d8_gl.c's xgpu_set_blood) covers each part
+of the vehicle as much as its node is: noise over the part's texture
+coordinates, so it spreads in splatters and soaks in as more comes. A hit
+adds to the node it hit, a little to the hull; driving over a body adds to
+the wheel that went over it. It dries off over game.gore_blood_seconds
+twice over. Keyed by the vehicle's whole handle (index and salt): a new
+vehicle in an old one's slot starts clean. */
+
+#define GORE_MAXIMUM_COVERED_VEHICLES 32
+
+struct gore_coverage
+{
+	long vehicle_index; /* NONE: free */
+	long time;
+	real_rgb_color color[GORE_MAXIMUM_NODES];
+	real total[GORE_MAXIMUM_NODES]; /* (the color's weight) */
+	real amount[GORE_MAXIMUM_NODES];
+};
+
+static struct gore_coverage gore_coverages[GORE_MAXIMUM_COVERED_VEHICLES];
+
+void xgpu_set_blood(float red, float green, float blue, float amount);
+extern void (*render_model_part_blood_proc)(long object_index, short node_index);
+
+/* human red, covenant blue (grunts, jackals) or purple (elites), flood
+yellow-green */
+static void gore_blood_color(long unit_definition_index, real_rgb_color *color)
+{
+	char const *name = tag_get_name(unit_definition_index);
+
+	color->red = 0.55f; color->green = 0.02f; color->blue = 0.02f;
+	if (!name)
+		return;
+	if (strstr(name, "grunt") || strstr(name, "jackal"))
+	{
+		color->red = 0.08f; color->green = 0.25f; color->blue = 0.75f;
+	}
+	else if (strstr(name, "elite"))
+	{
+		color->red = 0.42f; color->green = 0.1f; color->blue = 0.68f;
+	}
+	else if (strstr(name, "flood"))
+	{
+		color->red = 0.5f; color->green = 0.5f; color->blue = 0.12f;
+	}
+}
+
+static struct gore_coverage *gore_coverage_get(long vehicle_index, boolean add)
+{
+	struct gore_coverage *oldest = NULL;
+	short index;
+
+	for (index = 0; index < GORE_MAXIMUM_COVERED_VEHICLES; index++)
+	{
+		struct gore_coverage *coverage = &gore_coverages[index];
+
+		if (coverage->vehicle_index == vehicle_index && vehicle_index != NONE)
+			return coverage;
+	}
+	if (!add || !object_try_and_get_and_verify_type(vehicle_index, _object_mask_vehicle))
+		return NULL;
+	for (index = 0; index < GORE_MAXIMUM_COVERED_VEHICLES; index++)
+	{
+		struct gore_coverage *coverage = &gore_coverages[index];
+
+		if (coverage->vehicle_index == NONE ||
+			!object_try_and_get_and_verify_type(coverage->vehicle_index, _object_mask_vehicle))
+		{
+			oldest = coverage;
+			break;
+		}
+		if (!oldest || coverage->time < oldest->time)
+			oldest = coverage;
+	}
+	csmemset(oldest, 0, sizeof(*oldest));
+	oldest->vehicle_index = vehicle_index;
+	return oldest;
+}
+
+static void gore_coverage_add(long vehicle_index, short node_index, real amount, long unit_definition_index)
+{
+	struct gore_coverage *coverage;
+	real_rgb_color color;
+
+	if (!config_boolean("game.gore_vehicle_blood") || !config_boolean("game.gore_vehicle_coverage") ||
+		node_index < 0 || node_index >= GORE_MAXIMUM_NODES || amount <= 0.f)
+		return;
+	coverage = gore_coverage_get(vehicle_index, TRUE);
+	if (!coverage)
+		return;
+	gore_blood_color(unit_definition_index, &color);
+	/* the node's color: the blood so far and this, by how much of each */
+	{
+		real_rgb_color *c = &coverage->color[node_index];
+		real total = coverage->total[node_index];
+
+		c->red = (c->red * total + color.red * amount) / (total + amount);
+		c->green = (c->green * total + color.green * amount) / (total + amount);
+		c->blue = (c->blue * total + color.blue * amount) / (total + amount);
+		coverage->total[node_index] = MIN(total + amount, 4.f);
+	}
+	coverage->amount[node_index] = MIN(coverage->amount[node_index] + amount, 1.f);
+	coverage->time = game_time_get();
+	if (config_boolean("game.gore_log"))
+		error(_error_silent, "gore: blood coverage of %s node %d now %.2f",
+			tag_get_name(object_get(vehicle_index)->definition_index), node_index, coverage->amount[node_index]);
+}
+
+static void gore_coverage_update(void)
+{
+	real seconds = (real)config_real("game.gore_blood_seconds");
+	real dry = seconds > 0.f ? 1.f / (seconds * 2.f * 30.f) : 0.f;
+	short index;
+
+	for (index = 0; index < GORE_MAXIMUM_COVERED_VEHICLES; index++)
+	{
+		struct gore_coverage *coverage = &gore_coverages[index];
+		short node;
+
+		if (coverage->vehicle_index == NONE)
+			continue;
+		if (!object_try_and_get_and_verify_type(coverage->vehicle_index, _object_mask_vehicle))
+		{
+			coverage->vehicle_index = NONE;
+			continue;
+		}
+		for (node = 0; node < GORE_MAXIMUM_NODES; node++)
+			coverage->amount[node] = MAX(coverage->amount[node] - dry, 0.f);
+	}
+}
+
+static void gore_render_part_blood(long object_index, short node_index)
+{
+	struct gore_coverage *coverage;
+
+	if (object_index == NONE)
+	{
+		xgpu_set_blood(0.f, 0.f, 0.f, 0.f);
+		return;
+	}
+	coverage = gore_coverage_get(object_index, FALSE);
+	if (!coverage || node_index < 0 || node_index >= GORE_MAXIMUM_NODES || coverage->amount[node_index] <= 0.01f)
+	{
+		xgpu_set_blood(0.f, 0.f, 0.f, 0.f);
+		return;
+	}
+	xgpu_set_blood(coverage->color[node_index].red, coverage->color[node_index].green, coverage->color[node_index].blue,
+		coverage->amount[node_index]);
+}
 
 struct gore_vehicle_wheel_contact
 {
@@ -348,6 +504,20 @@ static void gore_vehicle_marks_update(void)
 {
 	short index;
 
+	/* moving quads no mark has (a loaded or reverted game's) go */
+	if ((game_time_get() % 30) == 0)
+	{
+		long keep[GORE_MAXIMUM_VEHICLE_MARKS];
+		long count = 0;
+
+		for (index = 0; index < GORE_MAXIMUM_VEHICLE_MARKS; index++)
+		{
+			if (gore_vehicle_marks[index].vehicle_index != NONE && gore_vehicle_marks[index].decal_index != NONE)
+				keep[count++] = gore_vehicle_marks[index].decal_index;
+		}
+		decal_quads_delete_except(keep, count);
+	}
+
 	for (index = 0; index < GORE_MAXIMUM_VEHICLE_MARKS; index++)
 	{
 		struct gore_vehicle_mark *mark = &gore_vehicle_marks[index];
@@ -398,6 +568,8 @@ static void gore_vehicle_hit_blood(long vehicle_index, long unit_index, real for
 	if (!vehicle || !unit || !config_boolean("game.gore_vehicle_blood"))
 		return;
 	decal_index = gore_vehicle_blood_decal(unit->definition_index);
+	/* the hull, a little all over (its parts are mostly the root's) */
+	gore_coverage_add(vehicle_index, 0, 0.09f * PIN(force, 0.5f, 3.f), unit->definition_index);
 	count = (short)PIN(1.f + force * 2.f, 1.f, 6.f);
 	for (index = 0; index < count; index++)
 	{
@@ -419,6 +591,8 @@ static void gore_vehicle_hit_blood(long vehicle_index, long unit_index, real for
 				&collision.point, &collision.plane.n,
 				real_seed_random_range(&gore_seed, 0.08f, 0.14f) * PIN(force, 0.7f, 1.6f),
 				decal_index, PIN(0.5f + 0.3f * force, 0.5f, 1.f));
+			gore_coverage_add(vehicle_index, collision.node_index != NONE ? collision.node_index : 0,
+				0.07f * PIN(force, 0.5f, 3.f), unit->definition_index);
 			if (config_boolean("game.gore_log"))
 				error(_error_silent, "gore: blood on %s node %d (force %.2f)",
 					tag_get_name(vehicle->definition_index), collision.node_index, force);
@@ -459,7 +633,8 @@ static short gore_vehicle_wheel_nearest(long vehicle_index, real_point3d const *
 
 /* a vehicle going over a corpse or a piece: blood on the wheel that went
 over it (on its side, so it turns with it), a smear on the ground */
-static void gore_vehicle_run_over(long vehicle_index, long object_index, real_point3d const *point, long decal_index)
+static void gore_vehicle_run_over(long vehicle_index, long object_index, real_point3d const *point, long decal_index,
+	long unit_definition_index)
 {
 	struct object_datum *vehicle = object_get(vehicle_index);
 	real distance = 0.f;
@@ -488,6 +663,8 @@ static void gore_vehicle_run_over(long vehicle_index, long object_index, real_po
 	gore_wheel_contacts[free_index].vehicle_index = vehicle_index;
 	gore_wheel_contacts[free_index].object_index = object_index;
 	gore_wheel_contacts[free_index].time = game_time_get();
+	if (unit_definition_index != NONE)
+		gore_coverage_add(vehicle_index, wheel, 0.22f, unit_definition_index);
 	{
 		real_matrix4x3 const *matrix = &object_get_node_matrices(vehicle_index)[wheel];
 		real_vector3d side;
@@ -562,7 +739,7 @@ static void gore_vehicles_update(void)
 				distance_squared3d(&biped->object.position, &vehicle->object.bounding_sphere_center) > reach * reach)
 				continue;
 			gore_vehicle_run_over(vehicle_index, bodies.index, &biped->object.position,
-				gore_vehicle_blood_decal(biped->definition_index));
+				gore_vehicle_blood_decal(biped->definition_index), biped->definition_index);
 		}
 		for (index = 0; index < GORE_MAXIMUM_PIECES; index++)
 		{
@@ -574,7 +751,7 @@ static void gore_vehicles_update(void)
 				distance_squared3d(&object->object.bounding_sphere_center, &vehicle->object.bounding_sphere_center) > reach * reach)
 				continue;
 			gore_vehicle_run_over(vehicle_index, piece->object_index, &object->object.bounding_sphere_center,
-				piece->decal_index);
+				piece->decal_index, piece->unit_definition_index);
 		}
 	}
 }
@@ -802,6 +979,7 @@ static void gore_spawn_copy(long unit_index, unsigned long region_mask, short pi
 	piece->impacted = FALSE;
 	piece->blood_effect_index = blood_effect_index;
 	piece->decal_index = decal_index;
+	piece->unit_definition_index = gore_piece_unit_definition;
 	gore_piece_launch(piece, direction, force);
 	/* the cut's burst */
 	gore_effect_at(blood_effect_index, &piece->pivot0, direction);
@@ -836,6 +1014,7 @@ static void gore_spawn_garbage(char const *name, real_point3d const *position,
 	piece->impacted = FALSE;
 	piece->blood_effect_index = blood_effect_index;
 	piece->decal_index = decal_index;
+	piece->unit_definition_index = gore_piece_unit_definition;
 	piece->node_count = 0;
 	piece->position = *position;
 }
@@ -928,6 +1107,7 @@ static void gore_unit_gib(struct gore_pending const *pending)
 	if (!unit)
 		return;
 	type = gore_unit_type_get(unit->definition_index);
+	gore_piece_unit_definition = unit->definition_index;
 	model = gore_model_get(unit->definition_index);
 	resistance = gore_resistance_get(unit->definition_index);
 	if (resistance)
@@ -1259,7 +1439,7 @@ static void gore_test_update(void)
 		normalize3d(&forward);
 		/* (farther out than the remains, to be in view) */
 		point_from_line3d(&player->object.position, &forward, 3.5f, &position);
-		position.z += 0.3f;
+		position.z += 0.8f;
 		back = test_vehicle_side;
 		object_set_position(test_vehicle_index, &position, &back, global_up3d);
 		/* parked, side on, to be seen */
@@ -1449,6 +1629,9 @@ void gore_reset(void)
 	}
 	for (index = 0; index < GORE_MAXIMUM_WHEEL_CONTACTS; index++)
 		gore_wheel_contacts[index].vehicle_index = NONE;
+	for (index = 0; index < GORE_MAXIMUM_COVERED_VEHICLES; index++)
+		gore_coverages[index].vehicle_index = NONE;
+	render_model_part_blood_proc = gore_render_part_blood;
 	gore_test_done = 0;
 }
 
@@ -1608,5 +1791,6 @@ void gore_update(void)
 	}
 	gore_vehicles_update();
 	gore_vehicle_marks_update();
+	gore_coverage_update();
 	decal_lifetime_minimum = 0.f;
 }

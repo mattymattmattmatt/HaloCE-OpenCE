@@ -397,6 +397,8 @@ struct program_entry
 	/* nv2a_pixel_shader_key's source_blend's color, and what it last had */
 	GLint blend_constant;
 	float blend_constant_value[4];
+	GLint blood_color;
+	float blood_color_value[4];
 	/* the lights of a draw lit for each pixel (XGPU_MODEL_LIGHT_COUNT), and
 	constants_serial at their last upload */
 	GLint model_lights;
@@ -2706,6 +2708,18 @@ static struct vertex_shader_object *current_program(void)
 	return program ? program : device.vertex_shader;
 }
 
+/* ---------- blood (the gore mod's, on vehicles) */
+
+static float xgpu_blood[4];
+
+void xgpu_set_blood(float red, float green, float blue, float amount)
+{
+	xgpu_blood[0] = red;
+	xgpu_blood[1] = green;
+	xgpu_blood[2] = blue;
+	xgpu_blood[3] = amount > 0.f ? (amount < 1.f ? amount : 1.f) : 0.f;
+}
+
 /* ---------- program cache */
 
 /* size is a multiple of 4 */
@@ -2899,6 +2913,8 @@ static struct program_entry *program_get(GLuint vertex_shader, GLuint fragment_s
 	entry->texture_lod_bias = glGetUniformLocation(entry->program, "texture_lod_bias");
 	entry->screen_offset = glGetUniformLocation(entry->program, "screen_offset");
 	entry->blend_constant = glGetUniformLocation(entry->program, "blend_constant");
+	entry->blood_color = glGetUniformLocation(entry->program, "blood_color");
+	entry->blood_color_value[0] = -1.f;
 	entry->model_lights = glGetUniformLocation(entry->program, "model_lights");
 	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
 	{
@@ -3797,6 +3813,7 @@ static struct program_entry *prepare_draw(BOOL immediate)
 #endif
 	key.fog_enable = D3D__RenderState[D3DRS_FOGENABLE] != 0;
 	key.source_blend = source_blend_in_shader();
+	key.blood = xgpu_blood[3] > 0.f;
 	key.fog_table_mode = (unsigned char)D3D__RenderState[D3DRS_FOGTABLEMODE];
 #ifdef HALO_GLES
 	key.count_samples = device.visibility_test_active && xgpu_capabilities.atomic_counters;
@@ -3835,6 +3852,12 @@ static struct program_entry *prepare_draw(BOOL immediate)
 #endif
 	draw_flush();
 	state_program(entry->program);
+	if (key.blood && entry->blood_color >= 0 &&
+		memcmp(entry->blood_color_value, xgpu_blood, sizeof(xgpu_blood)))
+	{
+		memcpy(entry->blood_color_value, xgpu_blood, sizeof(xgpu_blood));
+		glUniform4fv(entry->blood_color, 1, xgpu_blood);
+	}
 	if (key.source_blend && entry->blend_constant >= 0)
 	{
 		float blend_constant[4];

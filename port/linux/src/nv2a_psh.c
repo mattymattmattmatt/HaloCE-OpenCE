@@ -622,6 +622,22 @@ char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
 		xgpu_text_append(&text, "uniform %s tex%d;\n", sampler_declaration(key->sampler_type[stage]), stage);
 	if (key->source_blend)
 		xgpu_text_append(&text, "uniform vec4 blend_constant;\n");
+	if (key->blood)
+	{
+		/* blood soaked into the surface: value noise over its texture
+		coordinates, the more blood the more of it covered, the edges in
+		splatter */
+		xgpu_text_append(&text,
+			"uniform vec4 blood_color;\n"
+			"float blood_hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }\n"
+			"float blood_noise(vec2 p)\n"
+			"{\n"
+			"	vec2 i = floor(p), f = fract(p);\n"
+			"	vec2 u = f * f * (3.0 - 2.0 * f);\n"
+			"	return mix(mix(blood_hash(i), blood_hash(i + vec2(1.0, 0.0)), u.x),\n"
+			"		mix(blood_hash(i + vec2(0.0, 1.0)), blood_hash(i + vec2(1.0, 1.0)), u.x), u.y);\n"
+			"}\n");
+	}
 	if (key->per_pixel_lighting)
 		model_lighting(&text, key->per_pixel_lighting == 2);
 	xgpu_text_append(&text,
@@ -710,6 +726,18 @@ char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
 
 	if (key->coverage_alpha)
 		xgpu_text_append(&text, "\tresult.a = mix(1.0, result.a, t0.g);\n");
+	if (key->blood)
+	{
+		xgpu_text_append(&text,
+			"\t{\n"
+			"\t\tvec2 blood_uv = xT0.xy * 9.0;\n"
+			"\t\tfloat n = 0.55 * blood_noise(blood_uv) + 0.3 * blood_noise(blood_uv * 2.7 + 5.3) + 0.15 * blood_noise(blood_uv * 7.1 + 1.7);\n"
+			"\t\tfloat edge = 1.0 - clamp(blood_color.a, 0.0, 1.0) * 0.9;\n"
+			"\t\tfloat cover = smoothstep(edge, edge + 0.08, n);\n"
+			"\t\tfloat shade = 0.25 + 0.75 * dot(result.rgb, vec3(0.3, 0.59, 0.11));\n"
+			"\t\tresult.rgb = mix(result.rgb, blood_color.rgb * shade, cover * 0.85);\n"
+			"\t}\n");
+	}
 	if (key->alpha_test_function)
 	{
 		const char *comparison = comparison_operator(key->alpha_test_function);

@@ -262,6 +262,11 @@ static real_rgb_color default_render_model_change_colors[MAXIMUM_CHANGE_COLORS_P
 static struct render_model_effect default_render_model_effect = { 0 };
 static char default_render_model_region_permutation_indices[MAXIMUM_REGIONS_PER_MODEL] = { 0 };
 
+/* port: called before (with the object and the part's node) and after
+(NONE, NONE) each solid part is drawn: the gore mod's blood on vehicles
+(port/linux/game/gore.c); NULL: none */
+void (*render_model_part_blood_proc)(long object_index, short node_index) = NULL;
+
 static struct profile_section render_model_section = { "render_model", NONE, TRUE };
 
 /* ---------- private code */
@@ -428,6 +433,8 @@ static void render_model_parts(
 								}
 								else
 								{
+									if (render_model_part_blood_proc && object_index!=NONE)
+										render_model_part_blood_proc(object_index, part->centroid_primary_node_index);
 									rasterizer_model_draw(
 										shader,
 										forced_shader_permutation_index ? forced_shader_permutation_index : shader_reference->permutation_index,
@@ -436,6 +443,8 @@ static void render_model_parts(
 										part->triangle_buffer.count,
 										&part->vertex_buffer,
 										NONE);
+									if (render_model_part_blood_proc && object_index!=NONE)
+										render_model_part_blood_proc(NONE, NONE);
 									rasterizer_debug_model_vertices(object_index, skinning, part);
 								}
 							}

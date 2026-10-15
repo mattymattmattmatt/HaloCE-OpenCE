@@ -1584,6 +1584,21 @@ void decal_new_from_collision(
 	match_assert("c:\\halo\\SOURCE\\effects\\decals.c", 2035, decals_enabled);
 	match_assert("c:\\halo\\SOURCE\\effects\\decals.c", 2037, !editor_geometry);
 
+	/* port: decals go on the structure only. A collision with an object
+	(scenery a gore piece landed on) has an object's surface index, not the
+	bsp's, and can have no cluster: that walked the bsp with a stranger's
+	surface and inserted into cluster -1 (asserts, then a stale decal and an
+	access violation) */
+	if (collision->object_index!=NONE ||
+		collision->location.cluster_index<0 ||
+		collision->location.cluster_index>=MAXIMUM_CLUSTERS_PER_STRUCTURE ||
+		collision->surface_index<0 ||
+		!collision_bsp ||
+		collision->surface_index>=collision_bsp->surfaces.count)
+	{
+		return;
+	}
+
 	while (decal_definition_index!=NONE)
 	{
 		short surface_queue_read_index = 0;
@@ -2465,7 +2480,15 @@ static long decal_insert(
 	boolean permanent)
 {
 	struct data_iterator iterator;
-	long decal_index = datum_new_at_index(global_decal_data, cache_index);
+	long decal_index;
+
+	/* port: (see decal_new_from_collision) no decal in no cluster */
+	if (cluster_index<0 || cluster_index>=MAXIMUM_CLUSTERS_PER_STRUCTURE ||
+		layer<0 || layer>=NUMBER_OF_DECAL_LAYERS)
+	{
+		return NONE;
+	}
+	decal_index = datum_new_at_index(global_decal_data, cache_index);
 
 	match_assert("c:\\halo\\SOURCE\\effects\\decals.c", 479,
 		cluster_index>=0 && cluster_index<MAXIMUM_CLUSTERS_PER_STRUCTURE);
@@ -2683,7 +2706,7 @@ long decal_quad_new(
 		decal->sprite_index = 0;
 		decal->bitmap_index = (byte)bitmap_index;
 		decal->lifetime = 0.0f;
-		decal->decay_time = 0.0f;
+		decal->decay_time = -1.0f; /* (a moving quad: decal_quads_delete_except) */
 		decal->definition_index = decal_definition_index;
 		decal->quad_count = 1;
 		decal->color = real_a_rgb_color_to_pixel32(PIN(alpha, 0.0f, 1.0f) *
@@ -2723,7 +2746,7 @@ boolean decal_quad_set(
 		return FALSE;
 	}
 	decal = datum_try_and_get(global_decal_data, decal_index);
-	if (!decal || decal->quad_count != 1 || decal->lifetime != 0.0f)
+	if (!decal || decal->quad_count != 1 || decal->lifetime != 0.0f || decal->decay_time != -1.0f)
 	{
 		return FALSE;
 	}
@@ -2754,7 +2777,7 @@ void decal_quad_delete(
 		return;
 	}
 	decal = datum_try_and_get(global_decal_data, decal_index);
-	if (!decal || decal->quad_count != 1 || decal->lifetime != 0.0f)
+	if (!decal || decal->quad_count != 1 || decal->lifetime != 0.0f || decal->decay_time != -1.0f)
 	{
 		return;
 	}
@@ -2764,4 +2787,34 @@ void decal_quad_delete(
 		decal_globals->locked_count--;
 	}
 	rasterizer_decal_vertices_delete(decal_index);
+}
+
+/* every moving quad but these (a loaded or reverted game's, whose marks
+were not saved with it: they hung where the vehicle had been) */
+void decal_quads_delete_except(
+	long const *keep,
+	long keep_count)
+{
+	struct data_iterator iterator;
+	struct decal_datum *decal;
+
+	data_iterator_new(&iterator, global_decal_data);
+	while ((decal = data_iterator_next(&iterator)) != NULL)
+	{
+		long index;
+		boolean kept = FALSE;
+
+		if (decal->quad_count != 1 || decal->lifetime != 0.0f || decal->decay_time != -1.0f)
+		{
+			continue;
+		}
+		for (index = 0; index < keep_count && !kept; index++)
+		{
+			kept = keep[index] == iterator.datum_index;
+		}
+		if (!kept)
+		{
+			decal_quad_delete(iterator.datum_index);
+		}
+	}
 }
