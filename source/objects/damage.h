@@ -63,6 +63,7 @@ struct damage_data
 	/* port: a vehicle hit's speed, world units a second (physics.c), for
 	the gore prototype (port/linux/game/gore.c); 0 for other damage */
 	real vehicle_impact_speed;
+	long vehicle_impact_object_index; /* port: the vehicle (gore's blood on it) */
 	/* port: an area of effect hit's distance from its epicenter (world
 	units) and its effect's full damage, for the gore prototype; the full
 	damage is 0 for other damage */

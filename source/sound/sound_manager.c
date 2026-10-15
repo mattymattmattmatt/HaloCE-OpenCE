@@ -2431,6 +2431,13 @@ long sound_new_impulse(
 		"c:\\halo\\SOURCE\\sound\\sound_manager.c",
 		0x240,
 		track_data_size<=MAXIMUM_SOUND_CALLBACK_DATA);
+	/* port: a sound at a node with no axes (a gore piece's collapsed
+	nodes, port/linux/game/gore.c) has no forward: any will do */
+	if (source->spatialization_mode!=_sound_spatialization_mode_none &&
+		!valid_real_normal3d(&source->location.forward))
+	{
+		source->location.forward = *global_forward3d;
+	}
 	match_assert(
 		"c:\\halo\\SOURCE\\sound\\sound_manager.c",
 		0x242,
@@ -2608,6 +2615,13 @@ boolean sound_refresh_looping(
 {
 	boolean result = refresh_state == _looping_sound_refresh_stop;
 
+	/* port: a sound at a node with no axes (a gore piece's collapsed
+	nodes, port/linux/game/gore.c) has no forward: any will do */
+	if (source->spatialization_mode!=_sound_spatialization_mode_none &&
+		!valid_real_normal3d(&source->location.forward))
+	{
+		source->location.forward = *global_forward3d;
+	}
 	match_assert(
 		"c:\\halo\\SOURCE\\sound\\sound_manager.c",
 		0x2F4,
@@ -3501,6 +3515,12 @@ static void update_channels(
 							&listener->matrix,
 							&sound->source.location.forward,
 							&location.forward);
+						/* port: (see sound_new_impulse) a source on a node
+						with no axes */
+						if (!valid_real_normal3d(&location.forward))
+						{
+							location.forward = *global_forward3d;
+						}
 						matrix4x3_inverse_transform_vector(
 							&listener->matrix,
 							&sound->source.location.translational_velocity,

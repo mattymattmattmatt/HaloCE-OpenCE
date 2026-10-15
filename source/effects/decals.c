@@ -244,7 +244,7 @@ symbols in this file:
 enum
 {
 	NUMBER_OF_DECAL_LAYERS = 5,
-	MAXIMUM_DECALS_PER_MAP = 2048,
+	MAXIMUM_DECALS_PER_MAP = HALO_PORT_MAXIMUM_DECALS, /* (2048) */
 	MAXIMUM_DECAL_VERTICES = 1024,
 	MAXIMUM_DECAL_SURFACE_QUEUE_SIZE = 1024
 };
@@ -469,6 +469,10 @@ static boolean decal_collision_edge_vertices_valid(
 extern struct data_array *global_decal_data;
 
 boolean decals_enabled= TRUE;
+real decal_lifetime_minimum = 0.0f; /* port: see decals.h */
+static real decal_quad_texcoords[4][2];
+static short decal_quad_uv[MAXIMUM_DECALS_PER_MAP][4][2];
+boolean decal_quad_set(long decal_index, real_point3d const corners[4]);
 static real_point2d decal_points2d_temp[2][12];
 static struct decal_globals *decal_globals;
 static struct decal_geometry decal_geometry = {0};
@@ -2163,6 +2167,12 @@ void decal_new_from_collision(
 							decal->decay_time = real_local_random_range(
 								definition->decay_time_lower_bound,
 								definition->decay_time_upper_bound);
+							/* port: the gore mod's longer lasting blood */
+							if (decal_lifetime_minimum > 0.0f && decal->lifetime > 0.0f &&
+								decal->lifetime < decal_lifetime_minimum)
+							{
+								decal->lifetime = decal_lifetime_minimum;
+							}
 							decal->definition_index = decal_definition_index;
 							decal->quad_count = decal_quad_count;
 
@@ -2599,3 +2609,159 @@ static boolean decal_collision_edge_vertices_valid(
 }
 
 /* ---------- end of file */
+
+/* ---------- port: decals on moving objects (the gore mod's blood on
+vehicles, port/linux/game/gore.c). One quad in a cluster, its corners
+rewritten by the caller every tick; it never expires (lifetime 0) and the
+caller deletes it. The vertex cache can still take it (least recently
+used): decal_quad_set says so. */
+
+long decal_quad_new(
+	long decal_definition_index,
+	short cluster_index,
+	real_point3d const corners[4],
+	real alpha)
+{
+	struct decal_definition *definition;
+	struct bitmap_group *bitmap_group;
+	real_rectangle2d sprite_bounds = { 0.0f, 1.0f, 0.0f, 1.0f };
+	real_rectangle2d extent;
+	short bitmap_index = 0;
+	long cache_index;
+	long decal_index;
+
+	if (!decals_enabled || decal_definition_index == NONE ||
+		cluster_index < 0 || cluster_index >= MAXIMUM_CLUSTERS_PER_STRUCTURE)
+	{
+		return NONE;
+	}
+	definition = decal_definition_get(decal_definition_index);
+	bitmap_group = bitmap_group_get(definition->shader.map.index);
+	if (!bitmap_group || bitmap_group->bitmaps.count <= 0 ||
+		!VALID_INDEX(definition->layer, NUMBER_OF_DECAL_LAYERS))
+	{
+		return NONE;
+	}
+	if (bitmap_group->type == _bitmap_group_type_sprites && bitmap_group->sequences.count > 0)
+	{
+		struct bitmap_group_sequence *sequence = TAG_BLOCK_GET_ELEMENT(
+			&bitmap_group->sequences, 0, struct bitmap_group_sequence);
+
+		if (sequence->sprites.count > 0)
+		{
+			bitmap_index = TAG_BLOCK_GET_ELEMENT(&sequence->sprites, 0, struct bitmap_group_sprite)->bitmap_index;
+			decal_sprite_get_bounds(definition, 0, 0, 1.0f, &sprite_bounds, &extent);
+		}
+	}
+	if (!_texture_cache_bitmap_get_hardware_format(
+		TAG_BLOCK_GET_ELEMENT(&bitmap_group->bitmaps, bitmap_index, struct bitmap_data), FALSE, TRUE))
+	{
+		return NONE;
+	}
+	cache_index = rasterizer_decal_vertices_new(sizeof(struct decal_quad));
+	if (cache_index == NONE)
+	{
+		return NONE;
+	}
+	decal_index = decal_insert(cache_index, cluster_index, definition->layer, NONE, FALSE);
+	if (decal_index == NONE)
+	{
+		rasterizer_decal_vertices_delete(cache_index);
+		return NONE;
+	}
+	{
+		struct decal_datum *decal = DECAL_GET(decal_index);
+		real_rgb_color color;
+		short corner;
+
+		rgb_colors_interpolate(&color,
+			(definition->flags >> _decal_definition_color_interpolate_in_hsv_bit) & 3,
+			&definition->color_lower_bound, &definition->color_upper_bound, 0.5f);
+		decal->position = corners[0];
+		decal->creation_time = game_time_get();
+		decal->sequence_index = 0;
+		decal->sprite_index = 0;
+		decal->bitmap_index = (byte)bitmap_index;
+		decal->lifetime = 0.0f;
+		decal->decay_time = 0.0f;
+		decal->definition_index = decal_definition_index;
+		decal->quad_count = 1;
+		decal->color = real_a_rgb_color_to_pixel32(PIN(alpha, 0.0f, 1.0f) *
+			0.5f * (definition->intensity_lower_bound + definition->intensity_upper_bound), &color);
+		decal->intensity = 255;
+		/* (sprite corners: 0,0 1,0 1,1 0,1) */
+		decal_quad_texcoords[0][0] = sprite_bounds.x0; decal_quad_texcoords[0][1] = sprite_bounds.y0;
+		decal_quad_texcoords[1][0] = sprite_bounds.x1; decal_quad_texcoords[1][1] = sprite_bounds.y0;
+		decal_quad_texcoords[2][0] = sprite_bounds.x1; decal_quad_texcoords[2][1] = sprite_bounds.y1;
+		decal_quad_texcoords[3][0] = sprite_bounds.x0; decal_quad_texcoords[3][1] = sprite_bounds.y1;
+		for (corner = 0; corner < 4; corner++)
+		{
+			decal_quad_uv[DATUM_INDEX_TO_ABSOLUTE_INDEX(decal_index) % MAXIMUM_DECALS_PER_MAP][corner][0] =
+				(short)PIN(decal_quad_texcoords[corner][0] * 32768.0f, 0.0f, 32767.0f);
+			decal_quad_uv[DATUM_INDEX_TO_ABSOLUTE_INDEX(decal_index) % MAXIMUM_DECALS_PER_MAP][corner][1] =
+				(short)PIN(decal_quad_texcoords[corner][1] * 32768.0f, 0.0f, 32767.0f);
+		}
+	}
+	if (!decal_quad_set(decal_index, corners))
+	{
+		return NONE;
+	}
+	return decal_index;
+}
+
+boolean decal_quad_set(
+	long decal_index,
+	real_point3d const corners[4])
+{
+	struct decal_datum *decal;
+	struct decal_quad *quad;
+	short absolute;
+	short corner;
+
+	if (decal_index == NONE)
+	{
+		return FALSE;
+	}
+	decal = datum_try_and_get(global_decal_data, decal_index);
+	if (!decal || decal->quad_count != 1 || decal->lifetime != 0.0f)
+	{
+		return FALSE;
+	}
+	absolute = (short)DATUM_INDEX_TO_ABSOLUTE_INDEX(decal_index);
+	quad = rasterizer_decal_vertices_lock(absolute, sizeof(struct decal_quad));
+	if (!quad)
+	{
+		return FALSE;
+	}
+	for (corner = 0; corner < 4; corner++)
+	{
+		quad->vertices[corner].position = corners[corner];
+		quad->vertices[corner].texcoord[0] = decal_quad_uv[absolute % MAXIMUM_DECALS_PER_MAP][corner][0];
+		quad->vertices[corner].texcoord[1] = decal_quad_uv[absolute % MAXIMUM_DECALS_PER_MAP][corner][1];
+	}
+	decal->position = corners[0];
+	rasterizer_decal_vertices_unlock();
+	return TRUE;
+}
+
+void decal_quad_delete(
+	long decal_index)
+{
+	struct decal_datum *decal;
+
+	if (decal_index == NONE)
+	{
+		return;
+	}
+	decal = datum_try_and_get(global_decal_data, decal_index);
+	if (!decal || decal->quad_count != 1 || decal->lifetime != 0.0f)
+	{
+		return;
+	}
+	if (TEST_FLAG(decal->flags, _decal_locked_bit))
+	{
+		SET_FLAG(decal->flags, _decal_locked_bit, FALSE);
+		decal_globals->locked_count--;
+	}
+	rasterizer_decal_vertices_delete(decal_index);
+}

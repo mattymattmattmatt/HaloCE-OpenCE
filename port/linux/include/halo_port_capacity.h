@@ -31,8 +31,17 @@ vertices, as on the Xbox. A change to a pool's size changes the game state's
 layout: saved games of builds before it no longer load. */
 
 #define HALO_PORT_GAME_STATE_BASE_ADDRESS 0x81A00000 /* (0x80061000) */
-#define HALO_PORT_GAME_STATE_CPU_SIZE 0x13C0000 /* (0x305000) */
-#define HALO_PORT_GAME_STATE_GPU_SIZE 0x40000 /* (0x40000) */
+#define HALO_PORT_GAME_STATE_CPU_SIZE 0x14C0000 /* (0x305000) */
+#define HALO_PORT_GAME_STATE_GPU_SIZE 0x100000 /* (0x40000) */
+
+/* decals: 8192 of them (the Xbox's 2048) and 12288 64-byte pages of their
+vertices (2560: 160 KB, the GPU part's 768 KB now), so blood and scorches
+stay many minutes on PC. Both pools are least-recently-used: when full the
+oldest unlocked decal goes, never a failure. Decals are not networked;
+they are in the game state, so the size is in the saved game's layout (an
+older build's saved game is refused, by its allocation checksum). */
+#define HALO_PORT_MAXIMUM_DECALS 8192 /* (2048) */
+#define HALO_PORT_DECAL_VERTEX_CACHE_PAGES 12288 /* (2560) */
 #define HALO_PORT_GAME_STATE_SIZE (HALO_PORT_GAME_STATE_CPU_SIZE+HALO_PORT_GAME_STATE_GPU_SIZE)
 
 /* ---------- textures

@@ -296,9 +296,17 @@ static const struct config_setting config_settings[] =
 	{ "game.gore_threshold_scale", _config_real, "1.0", "HALO_GORE_THRESHOLD_SCALE", _environment_value, _platform_all,
 		"Scales the force each unit needs to come apart: 0.5 gibs at half the\n"
 		"force, 2 at twice it." },
-	{ "game.gore_max_pieces", _config_integer, "48", "HALO_GORE_MAX_PIECES", _environment_value, _platform_all,
-		"The most gore pieces at once (6 to 64); the oldest goes first." },
-	{ "game.gore_piece_seconds", _config_real, "20.0", "HALO_GORE_PIECE_SECONDS", _environment_value, _platform_all,
+	{ "game.gore_blood_seconds", _config_real, "300.0", "HALO_GORE_BLOOD_SECONDS", _environment_value, _platform_all,
+		"Gore: blood decals last at least this long (seconds; 0: as the map's decals say). The 8192-decal pool takes the oldest first when full." },
+	{ "game.gore_piece_far_distance", _config_real, "100.0", "HALO_GORE_PIECE_FAR_DISTANCE", _environment_value, _platform_all,
+		"Gore: pieces farther than this from every player (metres) go after 10 seconds (0: never early)." },
+	{ "game.gore_vehicle_blood", _config_boolean, "true", "HALO_GORE_VEHICLE_BLOOD", _environment_value, _platform_all,
+		"Gore: blood on vehicles where they hit units, and on their wheels when they run over bodies and pieces." },
+	{ "game.gore_vehicle_marks", _config_integer, "160", "HALO_GORE_VEHICLE_MARKS", _environment_value, _platform_all,
+		"Gore: most blood marks on vehicles at once (0-256; the oldest goes first)." },
+	{ "game.gore_max_pieces", _config_integer, "192", "HALO_GORE_MAX_PIECES", _environment_value, _platform_all,
+		"The most gore pieces at once (6 to 256); the oldest goes first." },
+	{ "game.gore_piece_seconds", _config_real, "180.0", "HALO_GORE_PIECE_SECONDS", _environment_value, _platform_all,
 		"How long a gore piece stays, in seconds." },
 	{ "game.gore_log", _config_boolean, "false", "HALO_GORE_LOG", _environment_value, _platform_all,
 		"Log each explosion or vehicle hit on a unit to the console: its\n"
@@ -529,6 +537,8 @@ static const struct config_setting config_settings[] =
 		"With gore_test: instead, a frag grenade goes off this many metres from\n"
 		"the biped's centre; -1: 1, 1.5, 2, 2.5 and 3 m, four seconds apart, a\n"
 		"biped each; 0: the biped is gibbed outright." },
+	{ "debug.gore_test_vehicle", _config_real, "0", "HALO_GORE_TEST_VEHICLE", _environment_value, _platform_all,
+		"With debug.gore_test: a warthog at this speed (m/s) at the unit, then 4 s later parked side on in view (to see its blood)." },
 	{ "debug.gore_test_projectile", _config_boolean, "false", "HALO_GORE_TEST_PROJECTILE", _environment_value, _platform_all,
 		"With gore_test_distance: drop a live frag grenade there instead." },
 	{ "debug.telnet_console", _config_boolean, "false", "HALO_TELNET_CONSOLE", _environment_set_is_true, _platform_all,

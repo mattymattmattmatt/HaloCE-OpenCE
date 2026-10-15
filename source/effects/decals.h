@@ -69,6 +69,14 @@ pixel32 real_a_rgb_color_to_pixel32(
 
 extern boolean decals_enabled;
 extern boolean debug_decals;
+/* port: a decal made while this is over 0 lasts at least this many seconds
+(the gore mod's blood) */
+extern real decal_lifetime_minimum;
+
+/* port: one-quad decals the caller moves (blood on vehicles) */
+long decal_quad_new(long decal_definition_index, short cluster_index, real_point3d const corners[4], real alpha);
+boolean decal_quad_set(long decal_index, real_point3d const corners[4]);
+void decal_quad_delete(long decal_index);
 
 /* ---------- public code */
 

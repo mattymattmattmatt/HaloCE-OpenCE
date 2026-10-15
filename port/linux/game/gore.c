@@ -28,7 +28,8 @@ dropped weapon):
 - the dying unit is deleted (its kill was counted by its death).
 
 Settings: game.gore, game.gore_threshold_scale, game.gore_max_pieces,
-game.gore_piece_seconds; debug.gore_test (seconds) brings the biped nearest
+game.gore_piece_seconds, game.gore_piece_far_distance, game.gore_blood_seconds,
+game.gore_vehicle_blood, game.gore_vehicle_marks; debug.gore_test (seconds) brings the biped nearest
 the player's view (debug.gore_test_unit: whose tag path has this in it) in
 front of the player and gibs it, to try it.
 */
@@ -71,7 +72,14 @@ boolean network_coop_active(void);
 
 /* ---------- constants */
 
-#define GORE_MAXIMUM_PIECES 64
+#define GORE_MAXIMUM_PIECES 256
+#define GORE_MAXIMUM_VEHICLE_MARKS 256
+#define VEHICLE_TAG 'vehi'
+/* the world and scenery: not units, vehicles or each other (a piece came
+to rest on the player's head and hung there) */
+#define GORE_PIECE_COLLISION_FLAGS (FLAG(_collision_test_structure_bit) | \
+	FLAG(_collision_test_media_bit) | FLAG(_collision_test_objects_bit) | FLAG(_collision_test_objects_scenery_bit) | \
+	FLAG(_collision_test_objects_machines_bit))
 #define GORE_MAXIMUM_PENDING 16
 #define GORE_MAXIMUM_NODES 64
 #define GORE_GRAVITY (9.8f/3.048f/900.f) /* world units a tick squared */
@@ -143,8 +151,8 @@ struct gore_piece
 {
 	long object_index;
 	long garbage; /* TRUE: a stock bit flying on its own physics */
-	short age;
-	short life;
+	long age;
+	long life;
 	boolean resting;
 	boolean impacted;
 	long blood_effect_index;
@@ -176,6 +184,400 @@ static struct gore_pending gore_pending[GORE_MAXIMUM_PENDING];
 static unsigned long gore_seed = 0x6f726531;
 static short gore_test_done;
 static real gore_last_force = 1.f; /* gore_unit_hit's, for gore_unit_gib_later */
+
+static struct gore_unit_type const *gore_unit_type_get(long definition_index);
+static struct model *gore_model_get(long definition_index);
+
+/* ---------- blood on vehicles
+
+A mark is a one-quad decal (effects/decals.c decal_quad_new) whose corners
+are kept in the space of the vehicle node it is on (the hull's, a wheel's)
+and are put back into the world every tick, so the blood rides on the
+vehicle and turns with its wheels. Marks come from hits (where the unit met
+the hull; more and bigger the harder the hit) and from driving over corpses
+and pieces (on the wheel that went over, and a smear on the ground). The
+cap (game.gore_vehicle_marks) takes the oldest mark first. */
+
+struct gore_vehicle_mark
+{
+	long vehicle_index; /* NONE: free */
+	long decal_index;
+	long definition_index;
+	long time;
+	short node_index;
+	short cluster_index;
+	real alpha;
+	real_point3d local[4];
+};
+
+static struct gore_vehicle_mark gore_vehicle_marks[GORE_MAXIMUM_VEHICLE_MARKS];
+
+struct gore_vehicle_wheel_contact
+{
+	long vehicle_index;
+	long object_index;
+	long time;
+};
+
+#define GORE_MAXIMUM_WHEEL_CONTACTS 32
+static struct gore_vehicle_wheel_contact gore_wheel_contacts[GORE_MAXIMUM_WHEEL_CONTACTS];
+
+static boolean gore_far_from_players(real_point3d const *point)
+{
+	real far_metres = (real)config_real("game.gore_piece_far_distance");
+	real far_units = far_metres / 3.048f;
+	struct object_iterator iterator;
+	struct biped_datum *biped;
+	boolean any = FALSE;
+
+	if (far_metres <= 0.f)
+		return FALSE;
+	object_iterator_new(&iterator, _object_mask_biped, 0);
+	while ((biped = (struct biped_datum *)object_iterator_next(&iterator)) != NULL)
+	{
+		if (biped->unit.player_index == NONE)
+			continue;
+		any = TRUE;
+		if (distance_squared3d(&biped->object.position, point) < far_units * far_units)
+			return FALSE;
+	}
+	return any;
+}
+
+static void gore_vehicle_mark_free(struct gore_vehicle_mark *mark)
+{
+	decal_quad_delete(mark->decal_index);
+	mark->decal_index = NONE;
+	mark->vehicle_index = NONE;
+}
+
+/* the mark's corners in the world now; FALSE if its vehicle is gone */
+static boolean gore_vehicle_mark_corners(struct gore_vehicle_mark const *mark, real_point3d corners[4], short *cluster_index)
+{
+	struct object_datum *vehicle = object_try_and_get_and_verify_type(mark->vehicle_index, _object_mask_vehicle);
+	real_matrix4x3 const *matrix;
+	short corner;
+
+	if (!vehicle || mark->node_index < 0 ||
+		mark->node_index >= (short)(vehicle->object.node_matrices.size / sizeof(real_matrix4x3)))
+		return FALSE;
+	matrix = &object_get_node_matrices(mark->vehicle_index)[mark->node_index];
+	for (corner = 0; corner < 4; corner++)
+		matrix4x3_transform_point(matrix, &mark->local[corner], &corners[corner]);
+	*cluster_index = vehicle->object.location.cluster_index;
+	return TRUE;
+}
+
+/* blood on the vehicle at a world point, facing out along the normal */
+static void gore_vehicle_mark_add(long vehicle_index, short node_index, real_point3d const *point,
+	real_vector3d const *normal, real radius, long definition_index, real alpha)
+{
+	struct object_datum *vehicle = object_try_and_get_and_verify_type(vehicle_index, _object_mask_vehicle);
+	long maximum = PIN(config_integer("game.gore_vehicle_marks"), 0, GORE_MAXIMUM_VEHICLE_MARKS);
+	struct gore_vehicle_mark *mark = NULL;
+	real_matrix4x3 const *matrix;
+	real_vector3d n = *normal;
+	real_vector3d u;
+	real_vector3d v;
+	real angle;
+	real c;
+	real si;
+	short index;
+	short corner;
+
+	if (!vehicle || maximum <= 0 || definition_index == NONE ||
+		node_index < 0 || node_index >= (short)(vehicle->object.node_matrices.size / sizeof(real_matrix4x3)))
+		return;
+	for (index = 0; index < maximum; index++)
+	{
+		struct gore_vehicle_mark *candidate = &gore_vehicle_marks[index];
+
+		if (candidate->vehicle_index == NONE)
+		{
+			mark = candidate;
+			break;
+		}
+		if (!mark || candidate->time < mark->time)
+			mark = candidate;
+	}
+	if (!mark)
+		return;
+	if (mark->vehicle_index != NONE)
+		gore_vehicle_mark_free(mark);
+	if (normalize3d(&n) == 0.f)
+		n = *global_up3d;
+	perpendicular3d(&n, &u);
+	normalize3d(&u);
+	cross_product3d(&n, &u, &v);
+	/* a random turn, so marks do not all line up */
+	angle = real_seed_random_range(&gore_seed, 0.f, 6.2831853f);
+	c = cosf(angle);
+	si = sinf(angle);
+	{
+		real_vector3d a;
+		real_vector3d b;
+
+		a.i = u.i * c + v.i * si; a.j = u.j * c + v.j * si; a.k = u.k * c + v.k * si;
+		b.i = v.i * c - u.i * si; b.j = v.j * c - u.j * si; b.k = v.k * c - u.k * si;
+		u = a;
+		v = b;
+	}
+	matrix = &object_get_node_matrices(vehicle_index)[node_index];
+	for (corner = 0; corner < 4; corner++)
+	{
+		/* (clockwise seen from outside: the decals cull counterclockwise) */
+		static real const su[4] = { -1.f, -1.f, 1.f, 1.f };
+		static real const sv[4] = { -1.f, 1.f, 1.f, -1.f };
+		real_point3d world;
+
+		world.x = point->x + n.i * 0.02f + (u.i * su[corner] + v.i * sv[corner]) * radius;
+		world.y = point->y + n.j * 0.02f + (u.j * su[corner] + v.j * sv[corner]) * radius;
+		world.z = point->z + n.k * 0.02f + (u.k * su[corner] + v.k * sv[corner]) * radius;
+		matrix4x3_inverse_transform_point(matrix, &world, &mark->local[corner]);
+	}
+	mark->vehicle_index = vehicle_index;
+	mark->node_index = node_index;
+	mark->definition_index = definition_index;
+	mark->alpha = alpha;
+	mark->time = game_time_get();
+	mark->decal_index = NONE;
+	mark->cluster_index = NONE;
+}
+
+static void gore_vehicle_marks_update(void)
+{
+	short index;
+
+	for (index = 0; index < GORE_MAXIMUM_VEHICLE_MARKS; index++)
+	{
+		struct gore_vehicle_mark *mark = &gore_vehicle_marks[index];
+		real_point3d corners[4];
+		short cluster_index;
+
+		if (mark->vehicle_index == NONE)
+			continue;
+		if (!gore_vehicle_mark_corners(mark, corners, &cluster_index))
+		{
+			gore_vehicle_mark_free(mark);
+			continue;
+		}
+		if (cluster_index == NONE)
+			continue;
+		/* a new cluster, or the vertex cache took it: made again */
+		if (cluster_index != mark->cluster_index || !decal_quad_set(mark->decal_index, corners))
+		{
+			decal_quad_delete(mark->decal_index);
+			mark->decal_index = decal_quad_new(mark->definition_index, cluster_index, corners, mark->alpha);
+			if (config_boolean("game.gore_log") && mark->cluster_index == NONE)
+				error(_error_silent, "gore: vehicle mark decal %s (node %d, cluster %d)",
+					mark->decal_index != NONE ? "made" : "NOT made", mark->node_index, cluster_index);
+			mark->cluster_index = cluster_index;
+		}
+	}
+}
+
+static long gore_vehicle_blood_decal(long unit_definition_index)
+{
+	long decal_index = tag_loaded(DECAL_TAG, gore_unit_type_get(unit_definition_index)->decal_name);
+
+	if (decal_index == NONE)
+		decal_index = tag_loaded(DECAL_TAG, "effects\\decals\\blood splats\\blood splat");
+	return decal_index;
+}
+
+/* a unit hit by a vehicle: blood where it met the hull, as much as the
+hit was hard (force: the speed over the unit's gib speed) */
+static void gore_vehicle_hit_blood(long vehicle_index, long unit_index, real force)
+{
+	struct object_datum *vehicle = object_try_and_get_and_verify_type(vehicle_index, _object_mask_vehicle);
+	struct object_datum *unit = object_try_and_get_and_verify_type(unit_index, _object_mask_biped);
+	long decal_index;
+	short count;
+	short index;
+
+	if (!vehicle || !unit || !config_boolean("game.gore_vehicle_blood"))
+		return;
+	decal_index = gore_vehicle_blood_decal(unit->definition_index);
+	count = (short)PIN(1.f + force * 2.f, 1.f, 6.f);
+	for (index = 0; index < count; index++)
+	{
+		struct collision_result collision;
+		real_point3d from = unit->object.bounding_sphere_center;
+		real_vector3d to;
+		real_vector3d jitter;
+
+		seed_random_direction3d(&gore_seed, &jitter);
+		from.x += jitter.i * unit->object.bounding_sphere_radius * 0.6f;
+		from.y += jitter.j * unit->object.bounding_sphere_radius * 0.6f;
+		from.z += jitter.k * unit->object.bounding_sphere_radius * 0.6f;
+		vector_from_points3d(&from, &vehicle->object.bounding_sphere_center, &to);
+		if (collision_test_vector(FLAG(_collision_test_front_facing_surfaces_bit) | FLAG(_collision_test_objects_bit) |
+				FLAG(_collision_test_objects_vehicles_bit), &from, &to, unit_index, &collision) &&
+			collision.object_index == vehicle_index)
+		{
+			gore_vehicle_mark_add(vehicle_index, collision.node_index != NONE ? collision.node_index : 0,
+				&collision.point, &collision.plane.n,
+				real_seed_random_range(&gore_seed, 0.08f, 0.14f) * PIN(force, 0.7f, 1.6f),
+				decal_index, PIN(0.5f + 0.3f * force, 0.5f, 1.f));
+			if (config_boolean("game.gore_log"))
+				error(_error_silent, "gore: blood on %s node %d (force %.2f)",
+					tag_get_name(vehicle->definition_index), collision.node_index, force);
+		}
+	}
+}
+
+/* the vehicle's wheel nodes (names with wheel or tire in them) */
+static short gore_vehicle_wheel_nearest(long vehicle_index, real_point3d const *point, real *distance)
+{
+	struct object_datum *vehicle = object_get(vehicle_index);
+	struct model *model = gore_model_get(vehicle->definition_index);
+	real_matrix4x3 const *matrices = object_get_node_matrices(vehicle_index);
+	short count = (short)(vehicle->object.node_matrices.size / sizeof(real_matrix4x3));
+	short best = NONE;
+	short index;
+
+	if (!model)
+		return NONE;
+	for (index = 0; index < MIN(count, (short)model->nodes.count); index++)
+	{
+		char const *name = TAG_BLOCK_GET_ELEMENT(&model->nodes, index, struct model_node)->name;
+		real d;
+
+		if (!strstr(name, "wheel") && !strstr(name, "tire") && !strstr(name, "tread"))
+			continue;
+		d = distance_squared3d(&matrices[index].position, point);
+		if (best == NONE || d < *distance)
+		{
+			best = index;
+			*distance = d;
+		}
+	}
+	if (best != NONE)
+		*distance = (real)sqrt(*distance);
+	return best;
+}
+
+/* a vehicle going over a corpse or a piece: blood on the wheel that went
+over it (on its side, so it turns with it), a smear on the ground */
+static void gore_vehicle_run_over(long vehicle_index, long object_index, real_point3d const *point, long decal_index)
+{
+	struct object_datum *vehicle = object_get(vehicle_index);
+	real distance = 0.f;
+	short wheel = gore_vehicle_wheel_nearest(vehicle_index, point, &distance);
+	short index;
+	short free_index = NONE;
+	short oldest = 0;
+
+	if (wheel == NONE || distance > 0.6f)
+		return;
+	/* once for each wheel and body a second */
+	for (index = 0; index < GORE_MAXIMUM_WHEEL_CONTACTS; index++)
+	{
+		struct gore_vehicle_wheel_contact *contact = &gore_wheel_contacts[index];
+
+		if (contact->vehicle_index == vehicle_index && contact->object_index == object_index &&
+			game_time_get() - contact->time < 30)
+			return;
+		if (free_index == NONE && (contact->vehicle_index == NONE || game_time_get() - contact->time >= 30))
+			free_index = index;
+		if (contact->time < gore_wheel_contacts[oldest].time)
+			oldest = index;
+	}
+	if (free_index == NONE)
+		free_index = oldest;
+	gore_wheel_contacts[free_index].vehicle_index = vehicle_index;
+	gore_wheel_contacts[free_index].object_index = object_index;
+	gore_wheel_contacts[free_index].time = game_time_get();
+	{
+		real_matrix4x3 const *matrix = &object_get_node_matrices(vehicle_index)[wheel];
+		real_vector3d side;
+		real_vector3d out;
+		real_point3d center;
+		short marks;
+
+		/* the wheel's outer face: away from the vehicle's middle, along
+		the vehicle's left */
+		side = object_get_node_matrices(vehicle_index)[0].left;
+		vector_from_points3d(&vehicle->object.bounding_sphere_center, &matrix->position, &out);
+		if (dot_product3d(&out, &side) < 0.f)
+			scale_vector3d(&side, -1.f, &side);
+		for (marks = 0; marks < 2; marks++)
+		{
+			real_vector3d offset;
+
+			seed_random_direction3d(&gore_seed, &offset);
+			offset.i -= side.i * dot_product3d(&offset, &side);
+			offset.j -= side.j * dot_product3d(&offset, &side);
+			offset.k -= side.k * dot_product3d(&offset, &side);
+			center.x = matrix->position.x + side.i * 0.12f + offset.i * 0.12f;
+			center.y = matrix->position.y + side.j * 0.12f + offset.j * 0.12f;
+			center.z = matrix->position.z + side.k * 0.12f + offset.k * 0.12f;
+			gore_vehicle_mark_add(vehicle_index, wheel, &center, &side,
+				real_seed_random_range(&gore_seed, 0.06f, 0.1f), decal_index, 0.9f);
+		}
+		/* the tread: on the wheel's rolling face, under it now */
+		center = matrix->position;
+		center.z -= 0.12f;
+		gore_vehicle_mark_add(vehicle_index, wheel, &center, global_down3d, 0.09f, decal_index, 0.9f);
+	}
+	{
+		struct collision_result collision;
+		real_vector3d down = { 0.f, 0.f, -0.6f };
+		real_point3d above = *point;
+
+		above.z += 0.2f;
+		if (decal_index != NONE &&
+			collision_test_vector(FLAG(_collision_test_front_facing_surfaces_bit) | FLAG(_collision_test_structure_bit),
+				&above, &down, NONE, &collision))
+		{
+			decal_new_from_collision(decal_index, &collision, &down, 0.8f, FALSE, NONE, NULL);
+		}
+	}
+	if (config_boolean("game.gore_log"))
+		error(_error_silent, "gore: %s ran over a body (wheel node %d)", tag_get_name(vehicle->definition_index), wheel);
+}
+
+static void gore_vehicles_update(void)
+{
+	struct object_iterator iterator;
+	struct object_datum *vehicle;
+
+	if (!config_boolean("game.gore_vehicle_blood") || (game_time_get() % 3) != 0)
+		return;
+	object_iterator_new(&iterator, _object_mask_vehicle, 0);
+	while ((vehicle = (struct object_datum *)object_iterator_next(&iterator)) != NULL)
+	{
+		long vehicle_index = iterator.index;
+		real reach = vehicle->object.bounding_sphere_radius;
+		struct object_iterator bodies;
+		struct biped_datum *biped;
+		short index;
+
+		if (magnitude3d(&vehicle->object.translational_velocity) < 0.03f) /* about 1 m/s */
+			continue;
+		object_iterator_new(&bodies, _object_mask_biped, 0);
+		while ((biped = (struct biped_datum *)object_iterator_next(&bodies)) != NULL)
+		{
+			if (!TEST_FLAG(biped->object.damage_flags, _object_dead_bit) ||
+				distance_squared3d(&biped->object.position, &vehicle->object.bounding_sphere_center) > reach * reach)
+				continue;
+			gore_vehicle_run_over(vehicle_index, bodies.index, &biped->object.position,
+				gore_vehicle_blood_decal(biped->definition_index));
+		}
+		for (index = 0; index < GORE_MAXIMUM_PIECES; index++)
+		{
+			struct gore_piece *piece = &gore_pieces[index];
+			struct object_datum *object;
+
+			if (piece->object_index == NONE ||
+				!(object = object_try_and_get_and_verify_type(piece->object_index, 0xFFFFFFFF)) ||
+				distance_squared3d(&object->object.bounding_sphere_center, &vehicle->object.bounding_sphere_center) > reach * reach)
+				continue;
+			gore_vehicle_run_over(vehicle_index, piece->object_index, &object->object.bounding_sphere_center,
+				piece->decal_index);
+		}
+	}
+}
 
 /* ---------- private code */
 
@@ -395,7 +797,7 @@ static void gore_spawn_copy(long unit_index, unsigned long region_mask, short pi
 	piece->object_index = object_index;
 	piece->garbage = FALSE;
 	piece->age = 0;
-	piece->life = (short)(PIN(config_real("game.gore_piece_seconds"), 1.0, 600.0) * 30.0);
+	piece->life = (long)(PIN(config_real("game.gore_piece_seconds"), 1.0, 3600.0) * 30.0);
 	piece->resting = FALSE;
 	piece->impacted = FALSE;
 	piece->blood_effect_index = blood_effect_index;
@@ -429,7 +831,7 @@ static void gore_spawn_garbage(char const *name, real_point3d const *position,
 	piece->object_index = object_index;
 	piece->garbage = TRUE;
 	piece->age = 0;
-	piece->life = (short)(PIN(config_real("game.gore_piece_seconds"), 1.0, 600.0) * 30.0);
+	piece->life = (long)(PIN(config_real("game.gore_piece_seconds"), 1.0, 3600.0) * 30.0);
 	piece->resting = FALSE;
 	piece->impacted = FALSE;
 	piece->blood_effect_index = blood_effect_index;
@@ -713,6 +1115,9 @@ static void gore_piece_update(struct gore_piece *piece)
 		return;
 	}
 	piece->age++;
+	/* far from the player for a while: gone sooner (every second) */
+	if (piece->age > 300 && (piece->age % 30) == 0 && gore_far_from_players(&object->object.position))
+		piece->age = piece->life;
 	if (piece->age >= piece->life)
 	{
 		object_delete(piece->object_index);
@@ -754,7 +1159,7 @@ static void gore_piece_update(struct gore_piece *piece)
 		{
 			struct collision_result collision;
 
-			if (collision_test_vector(_collision_test_environment_flags, &piece->position, &step, piece->object_index, &collision))
+			if (collision_test_vector(GORE_PIECE_COLLISION_FLAGS, &piece->position, &step, piece->object_index, &collision))
 			{
 				real into = dot_product3d(&piece->velocity, &collision.plane.n);
 
@@ -818,7 +1223,12 @@ static void gore_test_update(void)
 	static real const sweep[] = { 1.f, 1.5f, 2.f, 2.5f, 3.f };
 	real test_distance = (real)config_real("debug.gore_test_distance");
 	short sweep_count = test_distance < 0.f ? (short)NUMBEROF(sweep) : 1;
+	real vehicle_speed = (real)config_real("debug.gore_test_vehicle"); /* metres a second */
+	static long test_vehicle_index = NONE;
+	static real_vector3d test_vehicle_side;
 
+	if (vehicle_speed > 0.f)
+		sweep_count = 2;
 	if (seconds <= 0.f || gore_test_done >= sweep_count ||
 		game_time_get() < (long)((seconds + 4.f * gore_test_done) * 30.f))
 		return;
@@ -832,6 +1242,48 @@ static void gore_test_update(void)
 	}
 	if (!player)
 		return;
+	if (vehicle_speed > 0.f && gore_test_done == 1)
+	{
+		/* the second pass: the warthog back the other way, slowly, over
+		what is left */
+		struct object_datum *vehicle = object_try_and_get_and_verify_type(test_vehicle_index, _object_mask_vehicle);
+		struct unit_datum *player_unit = (struct unit_datum *)player;
+		real_vector3d forward = player_unit->unit.looking_vector;
+		real_point3d position;
+		real_vector3d back;
+
+		gore_test_done++;
+		if (!vehicle)
+			return;
+		forward.k = 0.f;
+		normalize3d(&forward);
+		/* (farther out than the remains, to be in view) */
+		point_from_line3d(&player->object.position, &forward, 3.5f, &position);
+		position.z += 0.3f;
+		back = test_vehicle_side;
+		object_set_position(test_vehicle_index, &position, &back, global_up3d);
+		/* parked, side on, to be seen */
+		vehicle->object.translational_velocity = *global_zero_vector3d;
+		vehicle->object.angular_velocity = *global_zero_vector3d;
+		error(_error_silent, "gore: test: the warthog parked in view");
+		/* and a big mark on its hood, to see that marks draw and ride */
+		{
+			real_point3d top = vehicle->object.bounding_sphere_center;
+			struct collision_result collision;
+			real_vector3d down = { 0.f, 0.f, -2.f };
+
+			top.z += 1.f;
+			if (collision_test_vector(FLAG(_collision_test_objects_bit) | FLAG(_collision_test_objects_vehicles_bit),
+					&top, &down, NONE, &collision) && collision.object_index == test_vehicle_index)
+			{
+				gore_vehicle_mark_add(test_vehicle_index, collision.node_index != NONE ? collision.node_index : 0,
+					&collision.point, &collision.plane.n, 0.35f,
+					tag_loaded(DECAL_TAG, "effects\\decals\\blood splats\\blood splat"), 1.f);
+				error(_error_silent, "gore: test: a big mark on the hood (node %d)", collision.node_index);
+			}
+		}
+		return;
+	}
 	object_iterator_new(&iterator, _object_mask_biped, 0);
 	while ((biped = (struct biped_datum *)object_iterator_next(&iterator)) != NULL)
 	{
@@ -876,6 +1328,39 @@ static void gore_test_update(void)
 			point_from_line3d(&player->object.position, &forward, 1.2f, &position);
 			object_set_position(best, &position, NULL, NULL);
 			object_compute_node_matrices_recursive(best);
+		}
+		if (vehicle_speed > 0.f)
+		{
+			/* a warthog from the side, across in front of the player, at
+			this speed */
+			long warthog = tag_loaded(VEHICLE_TAG, "vehicles\\warthog\\warthog");
+			struct unit_datum *player_unit = (struct unit_datum *)player;
+			struct object_datum *target = object_get(best);
+			struct object_placement_data placement;
+			real_vector3d forward = player_unit->unit.looking_vector;
+			real_vector3d side;
+
+			if (warthog == NONE)
+			{
+				error(_error_silent, "gore: test: no warthog on this map");
+				return;
+			}
+			forward.k = 0.f;
+			normalize3d(&forward);
+			side.i = -forward.j;
+			side.j = forward.i;
+			side.k = 0.f;
+			test_vehicle_side = side;
+			object_placement_data_new(&placement, warthog, NONE);
+			point_from_line3d(&target->object.position, &side, 2.5f, &placement.position);
+			placement.position.z += 0.3f;
+			scale_vector3d(&side, -1.f, &placement.forward);
+			placement.up = *global_up3d;
+			scale_vector3d(&side, -vehicle_speed / 3.048f / 30.f, &placement.translational_velocity);
+			test_vehicle_index = object_new(&placement);
+			error(_error_silent, "gore: test: a warthog at %.1f m/s at %s", vehicle_speed,
+				tag_get_name(target->definition_index));
+			return;
 		}
 		if (test_distance > 0.f)
 		{
@@ -955,6 +1440,15 @@ void gore_reset(void)
 		gore_pieces[index].object_index = NONE;
 	for (index = 0; index < GORE_MAXIMUM_PENDING; index++)
 		gore_pending[index].unit_index = NONE;
+	/* (the decals went with the map or the loaded game: forgotten, not
+	deleted) */
+	for (index = 0; index < GORE_MAXIMUM_VEHICLE_MARKS; index++)
+	{
+		gore_vehicle_marks[index].vehicle_index = NONE;
+		gore_vehicle_marks[index].decal_index = NONE;
+	}
+	for (index = 0; index < GORE_MAXIMUM_WHEEL_CONTACTS; index++)
+		gore_wheel_contacts[index].vehicle_index = NONE;
 	gore_test_done = 0;
 }
 
@@ -1030,6 +1524,12 @@ boolean gore_unit_hit(long unit_index, struct damage_data const *damage, real no
 		return FALSE;
 	force = gore_unit_force(unit_index, damage, normalized_damage, &type);
 	gore_last_force = force;
+	if (damage->vehicle_impact_speed > 0.f && type && force > 0.f)
+	{
+		decal_lifetime_minimum = (real)config_real("game.gore_blood_seconds");
+		gore_vehicle_hit_blood(damage->vehicle_impact_object_index, unit_index, force);
+		decal_lifetime_minimum = 0.f;
+	}
 	if (!type || type->disabled || force < 1.f)
 		return FALSE;
 	for (index = 0; index < GORE_MAXIMUM_PENDING; index++)
@@ -1085,6 +1585,7 @@ void gore_update(void)
 		gore_reset();
 		initialized = TRUE;
 	}
+	decal_lifetime_minimum = (real)config_real("game.gore_blood_seconds");
 	gore_test_update();
 	for (index = 0; index < GORE_MAXIMUM_PENDING; index++)
 	{
@@ -1105,4 +1606,7 @@ void gore_update(void)
 		if (gore_pieces[index].object_index != NONE)
 			gore_piece_update(&gore_pieces[index]);
 	}
+	gore_vehicles_update();
+	gore_vehicle_marks_update();
+	decal_lifetime_minimum = 0.f;
 }
