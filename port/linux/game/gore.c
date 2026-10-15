@@ -613,7 +613,8 @@ static boolean gore_vehicle_node_is_wheel(long vehicle_index, short node_index)
 	if (!model || node_index < 0 || node_index >= (short)model->nodes.count)
 		return FALSE;
 	name = TAG_BLOCK_GET_ELEMENT(&model->nodes, node_index, struct model_node)->name;
-	return strstr(name, "wheel") || strstr(name, "tire") || strstr(name, "tread");
+	/* (not the warthog's "frame steering wheel") */
+	return !strstr(name, "steering") && (strstr(name, "wheel") || strstr(name, "tire") || strstr(name, "tread"));
 }
 
 /* the vehicle's wheel nodes (names with wheel or tire in them) */
@@ -633,7 +634,7 @@ static short gore_vehicle_wheel_nearest(long vehicle_index, real_point3d const *
 		char const *name = TAG_BLOCK_GET_ELEMENT(&model->nodes, index, struct model_node)->name;
 		real d;
 
-		if (!strstr(name, "wheel") && !strstr(name, "tire") && !strstr(name, "tread"))
+		if (strstr(name, "steering") || (!strstr(name, "wheel") && !strstr(name, "tire") && !strstr(name, "tread")))
 			continue;
 		d = distance_squared3d(&matrices[index].position, point);
 		if (best == NONE || d < *distance)

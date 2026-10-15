@@ -730,12 +730,20 @@ char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
 	{
 		xgpu_text_append(&text,
 			"\t{\n"
-			"\t\tvec2 blood_uv = xT0.xy * 9.0;\n"
-			"\t\tfloat n = 0.55 * blood_noise(blood_uv) + 0.3 * blood_noise(blood_uv * 2.7 + 5.3) + 0.15 * blood_noise(blood_uv * 7.1 + 1.7);\n"
-			"\t\tfloat edge = 1.0 - clamp(blood_color.a, 0.0, 1.0) * 0.9;\n"
-			"\t\tfloat cover = smoothstep(edge, edge + 0.08, n);\n"
-			"\t\tfloat shade = 0.25 + 0.75 * dot(result.rgb, vec3(0.3, 0.59, 0.11));\n"
-			"\t\tresult.rgb = mix(result.rgb, blood_color.rgb * shade, cover * 0.75);\n"
+			/* patchy and subtle even fully soaked: at most ~35-40% of the
+			surface, more in the dark texels (tread grooves), holed by a fine
+			speckle, and mostly a darkening with only a little of the blood's
+			colour */
+			"\t\tvec2 blood_uv = xT0.xy * 14.0;\n"
+			"\t\tfloat lum = dot(result.rgb, vec3(0.3, 0.59, 0.11));\n"
+			"\t\tfloat n = 0.5 * blood_noise(blood_uv) + 0.3 * blood_noise(blood_uv * 3.1 + 5.3) + 0.2 * blood_noise(blood_uv * 8.3 + 1.7);\n"
+			"\t\tn += (0.35 - lum) * 0.25;\n"
+			"\t\tfloat soak = clamp(blood_color.a, 0.0, 1.0);\n"
+			"\t\tfloat edge = 1.0 - soak * 0.45;\n"
+			"\t\tfloat cover = smoothstep(edge, edge + 0.05, n);\n"
+			"\t\tcover *= step(0.42, blood_noise(xT0.xy * 41.0 + 3.1)) * (0.35 + 0.35 * soak);\n"
+			"\t\tvec3 tint = mix(result.rgb * 0.55, blood_color.rgb * (0.25 + 0.75 * lum) * 0.7, 0.35);\n"
+			"\t\tresult.rgb = mix(result.rgb, tint, cover);\n"
 			"\t}\n");
 	}
 	if (key->alpha_test_function)
