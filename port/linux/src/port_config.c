@@ -296,7 +296,7 @@ static const struct config_setting config_settings[] =
 	{ "game.gore_threshold_scale", _config_real, "1.0", "HALO_GORE_THRESHOLD_SCALE", _environment_value, _platform_all,
 		"Scales the force each unit needs to come apart: 0.5 gibs at half the\n"
 		"force, 2 at twice it." },
-	{ "game.gore_blood_seconds", _config_real, "300.0", "HALO_GORE_BLOOD_SECONDS", _environment_value, _platform_all,
+	{ "game.gore_blood_seconds", _config_real, "900.0", "HALO_GORE_BLOOD_SECONDS", _environment_value, _platform_all,
 		"Gore: blood decals last at least this long (seconds; 0: as the map's decals say). The 8192-decal pool takes the oldest first when full." },
 	{ "game.gore_piece_far_distance", _config_real, "100.0", "HALO_GORE_PIECE_FAR_DISTANCE", _environment_value, _platform_all,
 		"Gore: pieces farther than this from every player (metres) go after 10 seconds (0: never early)." },
@@ -306,9 +306,9 @@ static const struct config_setting config_settings[] =
 		"Gore: blood soaks over vehicles (the hull, the wheels), more with each hit and each body run over." },
 	{ "game.gore_vehicle_marks", _config_integer, "0", "HALO_GORE_VEHICLE_MARKS", _environment_value, _platform_all,
 		"Gore: blood splat decals on vehicles, the most at once (0-256; 0: none, the coverage instead; the oldest goes first)." },
-	{ "game.gore_max_pieces", _config_integer, "192", "HALO_GORE_MAX_PIECES", _environment_value, _platform_all,
-		"The most gore pieces at once (6 to 256); the oldest goes first." },
-	{ "game.gore_piece_seconds", _config_real, "180.0", "HALO_GORE_PIECE_SECONDS", _environment_value, _platform_all,
+	{ "game.gore_max_pieces", _config_integer, "384", "HALO_GORE_MAX_PIECES", _environment_value, _platform_all,
+		"The most gore pieces at once (6 to 512); the oldest goes first." },
+	{ "game.gore_piece_seconds", _config_real, "600.0", "HALO_GORE_PIECE_SECONDS", _environment_value, _platform_all,
 		"How long a gore piece stays, in seconds." },
 	{ "game.gore_log", _config_boolean, "false", "HALO_GORE_LOG", _environment_value, _platform_all,
 		"Log each explosion or vehicle hit on a unit to the console: its\n"
@@ -1230,6 +1230,35 @@ static void config_load(void)
 			}
 			for (index = 0; index < NUMBER_OF_CONFIG_SETTINGS; index++)
 				config_set_from_file(&config_values[index], &config_settings[index], result.toptab);
+			/* a value an older build wrote as its default is taken as that
+			default's successor (config.toml keeps every value it was given) */
+			{
+				static struct { const char *name; double old_value; } const superseded[] =
+				{
+					{ "game.gore_max_pieces", 48 }, { "game.gore_max_pieces", 192 },
+					{ "game.gore_piece_seconds", 20 }, { "game.gore_piece_seconds", 180 },
+					{ "game.gore_blood_seconds", 300 },
+				};
+				size_t old_index;
+
+				for (old_index = 0; old_index < sizeof(superseded) / sizeof(superseded[0]); old_index++)
+				{
+					for (index = 0; index < NUMBER_OF_CONFIG_SETTINGS; index++)
+					{
+						const struct config_setting *setting = &config_settings[index];
+						double value;
+
+						if (strcmp(setting->name, superseded[old_index].name))
+							continue;
+						value = setting->type == _config_integer ? (double)config_values[index].integer : config_values[index].real;
+						if (value == superseded[old_index].old_value)
+						{
+							config_set_from_text(&config_values[index], setting->type, setting->default_value);
+							platform_log("settings: %s %g was an old default; using %s", setting->name, value, setting->default_value);
+						}
+					}
+				}
+			}
 			config_report_unknown_keys(result.toptab);
 			platform_log("settings: %s", path);
 			completed = config_add_missing(text, result.toptab);

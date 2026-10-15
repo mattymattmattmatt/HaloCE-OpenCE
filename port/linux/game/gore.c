@@ -72,7 +72,7 @@ boolean network_coop_active(void);
 
 /* ---------- constants */
 
-#define GORE_MAXIMUM_PIECES 256
+#define GORE_MAXIMUM_PIECES 512
 #define GORE_MAXIMUM_VEHICLE_MARKS 256
 #define VEHICLE_TAG 'vehi'
 /* the world and scenery: not units, vehicles or each other (a piece came
@@ -121,6 +121,7 @@ static struct gore_unit_type const gore_unit_types[] =
 	{ "jackal", 2.5f, 3.5f, "effects\\decals\\blood splats\\blood grunt splat", FALSE },
 	{ "elite", 2.f, 5.f, "effects\\decals\\blood splats\\blood elite splat", FALSE },
 	{ "flood", 2.8f, 3.f, "effects\\decals\\blood splats\\blood elite splat", FALSE },
+	{ "cyborg", 2.5f, 4.f, "effects\\decals\\blood splats\\blood splat", FALSE },
 	{ "marine", 2.5f, 4.f, "effects\\decals\\blood splats\\blood splat", FALSE },
 	{ "crewman", 2.5f, 4.f, "effects\\decals\\blood splats\\blood splat", FALSE },
 	{ "captain", 2.5f, 4.f, "effects\\decals\\blood splats\\blood splat", FALSE },
@@ -176,11 +177,13 @@ struct gore_pending
 	long time;
 	real_vector3d direction;
 	real force; /* over the threshold, 1 and up */
+	boolean player; /* a player's unit (kept, hidden; its player lets go of it as it dies) */
 };
 
 /* ---------- globals */
 
 static struct gore_piece gore_pieces[GORE_MAXIMUM_PIECES];
+static boolean gore_last_player;
 static struct gore_pending gore_pending[GORE_MAXIMUM_PENDING];
 static unsigned long gore_seed = 0x6f726531;
 static short gore_test_done;
@@ -758,6 +761,7 @@ static void gore_vehicles_update(void)
 		while ((biped = (struct biped_datum *)object_iterator_next(&bodies)) != NULL)
 		{
 			if (!TEST_FLAG(biped->object.damage_flags, _object_dead_bit) ||
+				TEST_FLAG(biped->object.flags, _object_invisible_bit) ||
 				distance_squared3d(&biped->object.position, &vehicle->object.bounding_sphere_center) > reach * reach)
 				continue;
 			/* units that never gib (hunters) leave no blood on vehicles */
@@ -1244,6 +1248,15 @@ static void gore_unit_gib(struct gore_pending const *pending)
 		error(_error_silent, "gore: %s came apart into %d pieces (%d split), force %.2f",
 			tag_get_name(unit->definition_index), count, parts, pending->force);
 	}
+	if (pending->player || ((struct biped_datum *)object_get(unit_index))->unit.player_index != NONE)
+	{
+		/* a player's unit stays (hidden, untouchable): the death camera, the
+		revert to the checkpoint and the respawn all go on with it */
+		object_set_visibility(unit_index, FALSE);
+		SET_FLAG(object_get(unit_index)->object.flags, _object_no_collisions_bit, TRUE);
+		error(_error_silent, "gore: the player's unit is hidden, not deleted");
+		return;
+	}
 	object_delete(unit_index);
 }
 
@@ -1326,6 +1339,8 @@ static void gore_piece_update(struct gore_piece *piece)
 
 	if (!object)
 	{
+		if (config_boolean("game.gore_log"))
+			error(_error_silent, "gore: a piece (age %ld s) was deleted by the game", piece->age / 30);
 		piece->object_index = NONE;
 		return;
 	}
@@ -1440,6 +1455,7 @@ static void gore_test_update(void)
 	short sweep_count = test_distance < 0.f ? (short)NUMBEROF(sweep) : 1;
 	real vehicle_speed = (real)config_real("debug.gore_test_vehicle"); /* metres a second */
 	static long test_vehicle_index = NONE;
+	long player_object_index = NONE;
 	static real_vector3d test_vehicle_side;
 
 	if (vehicle_speed > 0.f)
@@ -1453,7 +1469,10 @@ static void gore_test_update(void)
 	while ((biped = (struct biped_datum *)object_iterator_next(&iterator)) != NULL)
 	{
 		if (biped->unit.player_index != NONE)
+		{
 			player = object_get(iterator.index);
+			player_object_index = iterator.index;
+		}
 	}
 	if (!player)
 		return;
@@ -1499,6 +1518,16 @@ static void gore_test_update(void)
 		}
 		return;
 	}
+	/* debug.gore_test_unit "player": the player's own unit, its shield
+	down and its body nearly gone, to see the player come apart */
+	if (!strcmp(config_string("debug.gore_test_unit"), "player"))
+	{
+		best = player_object_index;
+		player->object.shield_vitality = 0.f;
+		player->object.body_vitality = 0.05f;
+	}
+	else
+	{
 	object_iterator_new(&iterator, _object_mask_biped, 0);
 	while ((biped = (struct biped_datum *)object_iterator_next(&iterator)) != NULL)
 	{
@@ -1526,6 +1555,7 @@ static void gore_test_update(void)
 			best_distance = distance;
 		}
 	}
+	}
 	gore_test_done++;
 	if (best != NONE)
 	{
@@ -1533,6 +1563,7 @@ static void gore_test_update(void)
 
 		error(_error_silent, "gore: test gib of %s", tag_get_name(object_get(best)->definition_index));
 		/* in front of the player, to see it */
+		if (best != player_object_index)
 		{
 			struct unit_datum *player_unit = (struct unit_datum *)player;
 			real_point3d position;
@@ -1593,7 +1624,12 @@ static void gore_test_update(void)
 			}
 			vector_from_points3d(&player->object.position, &target->object.position, &away);
 			away.k = 0.f;
-			normalize3d(&away);
+			if (normalize3d(&away) == 0.f)
+			{
+				away = ((struct unit_datum *)player)->unit.looking_vector;
+				away.k = 0.f;
+				normalize3d(&away);
+			}
 			point_from_line3d(&target->object.position, &away,
 				test_distance / GORE_METRES_PER_WORLD_UNIT, &point);
 			point.z += 0.1f; /* (a grenade going off just above the ground by the unit's feet) */
@@ -1738,10 +1774,14 @@ boolean gore_unit_hit(long unit_index, struct damage_data const *damage, real no
 	short index;
 	real force;
 
-	if (!unit || !gore_enabled() || ((struct biped_datum *)unit)->unit.player_index != NONE)
+	if (!unit || !gore_enabled())
+		return FALSE;
+	/* (a gibbed player's hidden unit: once is enough) */
+	if (TEST_FLAG(unit->object.flags, _object_invisible_bit))
 		return FALSE;
 	force = gore_unit_force(unit_index, damage, normalized_damage, &type);
 	gore_last_force = force;
+	gore_last_player = ((struct biped_datum *)unit)->unit.player_index != NONE;
 	if (damage->vehicle_impact_speed > 0.f && type && force > 0.f)
 	{
 		decal_lifetime_minimum = (real)config_real("game.gore_blood_seconds");
@@ -1785,6 +1825,7 @@ void gore_unit_gib_later(long unit_index, struct damage_data const *damage, real
 			pending->unit_index = unit_index;
 			pending->time = game_time_get();
 			pending->force = MAX(force, 1.f);
+			pending->player = gore_last_player;
 			pending->direction = damage->direction;
 			if (normalize3d(&pending->direction) == 0.f)
 				pending->direction = *global_up3d;
@@ -1828,7 +1869,19 @@ void gore_update(void)
 	gore_vehicle_marks_update();
 	gore_coverage_update();
 	if (config_boolean("game.gore_log") && (game_time_get() % 300) == 0)
-		error(_error_silent, "gore: decals now %ld (refused off the structure: %ld)",
-			decal_count_get(), decal_refused_count);
+	{
+		long pieces = 0, bytes = 0;
+
+		for (index = 0; index < GORE_MAXIMUM_PIECES; index++)
+		{
+			if (gore_pieces[index].object_index != NONE && object_try_and_get_and_verify_type(gore_pieces[index].object_index, 0xFFFFFFFF))
+			{
+				pieces++;
+				bytes += object_header_get(gore_pieces[index].object_index)->data_size;
+			}
+		}
+		error(_error_silent, "gore: decals now %ld (refused off the structure: %ld), pieces %ld using %ld bytes of object memory",
+			decal_count_get(), decal_refused_count, pieces, bytes);
+	}
 	decal_lifetime_minimum = 0.f;
 }
