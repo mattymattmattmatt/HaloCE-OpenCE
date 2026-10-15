@@ -1373,7 +1373,9 @@ static boolean track_loop_impulse_sound(
 		}
 		else
 		{
-			source->location.forward = *global_forward3d;
+			source->location.forward.i = 1.f;
+		source->location.forward.j = 0.f;
+		source->location.forward.k = 0.f;
 			source->location.translational_velocity = *global_zero_vector3d;
 		}
 
@@ -2436,7 +2438,9 @@ long sound_new_impulse(
 	if (source->spatialization_mode!=_sound_spatialization_mode_none &&
 		!valid_real_normal3d(&source->location.forward))
 	{
-		source->location.forward = *global_forward3d;
+		source->location.forward.i = 1.f;
+		source->location.forward.j = 0.f;
+		source->location.forward.k = 0.f;
 	}
 	match_assert(
 		"c:\\halo\\SOURCE\\sound\\sound_manager.c",
@@ -2620,7 +2624,9 @@ boolean sound_refresh_looping(
 	if (source->spatialization_mode!=_sound_spatialization_mode_none &&
 		!valid_real_normal3d(&source->location.forward))
 	{
-		source->location.forward = *global_forward3d;
+		source->location.forward.i = 1.f;
+		source->location.forward.j = 0.f;
+		source->location.forward.k = 0.f;
 	}
 	match_assert(
 		"c:\\halo\\SOURCE\\sound\\sound_manager.c",
@@ -3519,7 +3525,9 @@ static void update_channels(
 						with no axes */
 						if (!valid_real_normal3d(&location.forward))
 						{
-							location.forward = *global_forward3d;
+							location.forward.i = 1.f;
+							location.forward.j = 0.f;
+							location.forward.k = 0.f;
 						}
 						matrix4x3_inverse_transform_vector(
 							&listener->matrix,
