@@ -60,6 +60,9 @@ struct damage_data
 	real material_effect_scale;
 	short material_type;
 	struct projectile_material_response_definition const *material_response;
+	/* port: a vehicle hit's speed, world units a second (physics.c), for
+	the gore prototype (port/linux/game/gore.c); 0 for other damage */
+	real vehicle_impact_speed;
 };
 
 /* an object's vitality and recent damage, as the distributed netcode's host

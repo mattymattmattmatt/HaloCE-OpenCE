@@ -1171,6 +1171,9 @@ static boolean physics_compute_biped_collision(
 				damage.epicenter = vehicle->object.bounding_sphere_center;
 				damage.direction = acceleration;
 				normalize3d(&damage.direction);
+				/* port: the hit's speed (world units a tick, 30 ticks a
+				second), for the gore prototype (port/linux/game/gore.c) */
+				damage.vehicle_impact_speed = vehicle_speed*30.f;
 				object_cause_damage(&damage, biped_index, NONE, NONE, NONE, NULL);
 			}
 

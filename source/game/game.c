@@ -388,6 +388,8 @@ void game_tick(
 		profile_scope(game_tick_hs_section, hs_update();)
 	profile_scope(game_tick_recorded_animations_section, recorded_animations_update();)
 	profile_scope(game_tick_objects_section, objects_update();)
+	/* port: the gore prototype's pieces (port/linux/game/gore.c) */
+	gore_update();
 	profile_scope(game_tick_players_after_section, players_update_after_game();)
 	profile_scope(game_tick_hud_section, hud_update();)
 	profile_scope(game_tick_player_effect_section, player_effect_update();)
@@ -643,6 +645,8 @@ void network_objects_placed(void);
 void game_initialize_for_new_map(
 	void)
 {
+	/* port: the gore prototype (port/linux/game/gore.c) */
+	gore_reset();
 	match_assert(
 		"c:\\halo\\SOURCE\\game\\game.c",
 		0x1D1,

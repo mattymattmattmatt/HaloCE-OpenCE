@@ -138,6 +138,7 @@ symbols in this file:
 #include "units/bipeds.h"
 #include "units/units.h"
 #include "units/vehicles.h"
+#include "gore.h"
 
 /* network_game_globals.c's */
 boolean network_game_distributed_client(void);
@@ -1367,6 +1368,10 @@ static void object_damage_body(
 
 				object_deplete_body(object_index);
 				SET_FLAG(*being_damaged_flags, _object_being_damaged_body_depleted_bit, TRUE);
+				/* port: the gore prototype: a hard enough hit gibs the body
+				(port/linux/game/gore.c); else the normal limp-body death */
+				if (TEST_FLAG(_object_mask_biped, object->object.type))
+					gore_unit_body_depleted(object_index, damage, actual_damage);
 			}
 		}
 		else if (body_vitality < damage_resistance->body_damaged_effect_threshold &&

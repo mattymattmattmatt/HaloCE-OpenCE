@@ -289,6 +289,17 @@ static const struct config_setting config_settings[] =
 		"chatter too), or \"none\" (the asserts that stop the game only). What\n"
 		"a command prints shows whatever this is, and debug.txt has every line." },
 
+	{ "game.gore", _config_boolean, "true", "HALO_GORE", _environment_value, _platform_all,
+		"The gore prototype (single player): a unit killed by a close enough\n"
+		"explosion or a fast enough vehicle comes apart into flying pieces,\n"
+		"with blood; false: the normal deaths." },
+	{ "game.gore_threshold_scale", _config_real, "1.0", "HALO_GORE_THRESHOLD_SCALE", _environment_value, _platform_all,
+		"Scales the force each unit needs to come apart: 0.5 gibs at half the\n"
+		"force, 2 at twice it." },
+	{ "game.gore_max_pieces", _config_integer, "48", "HALO_GORE_MAX_PIECES", _environment_value, _platform_all,
+		"The most gore pieces at once (6 to 64); the oldest goes first." },
+	{ "game.gore_piece_seconds", _config_real, "20.0", "HALO_GORE_PIECE_SECONDS", _environment_value, _platform_all,
+		"How long a gore piece stays, in seconds." },
 	{ "game.language", _config_string, "\"\"", "HALO_LANGUAGE", _environment_value, _platform_all,
 		"The language the game asks the Xbox for: \"ja\", \"de\", \"fr\", \"es\" or \"it\";\n"
 		"empty for English. The game data decides what is translated." },
@@ -505,6 +516,12 @@ static const struct config_setting config_settings[] =
 		_platform_all,
 		"The network test's host lists its game in the server browser, as Create\n"
 		"Game > Internet's PUBLIC does (debug.network_test \"browse\" joins it)." },
+	{ "debug.gore_test", _config_real, "0.0", "HALO_GORE_TEST", _environment_value, _platform_all,
+		"Seconds into a map: then the biped nearest the player comes apart, to\n"
+		"try the gore prototype. 0: never." },
+	{ "debug.gore_test_unit", _config_string, "\"\"", "HALO_GORE_TEST_UNIT", _environment_value, _platform_all,
+		"With gore_test: only a biped whose tag path has this in it (\"elite\");\n"
+		"empty for any." },
 	{ "debug.telnet_console", _config_boolean, "false", "HALO_TELNET_CONSOLE", _environment_set_is_true, _platform_all,
 		"Listen on 127.0.0.1 (port telnet_console_port) for a script console that\n"
 		"runs what it is sent as the game's console does, with no password; false\n"

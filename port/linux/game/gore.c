@@ -1,0 +1,847 @@
+/*
+GORE.C
+The gore prototype. A biped whose body is depleted by a strong enough hit
+comes apart a tick later, when the game has run its death (statistics, AI,
+dropped weapon):
+
+- the hit's force: an area-of-effect hit's body damage over the unit's
+  maximum vitality (the blast's distance falloff is already in it), or a
+  vehicle hit's speed in world units a second (physics.c fills
+  damage_data.vehicle_impact_speed). Each is compared with the unit's
+  threshold (the table below, keyed by the biped tag's path, times
+  game.gore_threshold_scale).
+- the pieces: copies of the unit's own biped, each drawing only some of its
+  model's regions (a region drawn with permutation NONE draws nothing,
+  models.c), posed by the dying unit's node matrices and then moved here as
+  a rigid body (their own node matrices are never recomputed). Head, arms
+  and legs where the model has those regions (Flood combat forms: each arm).
+  Units with no such regions (Grunt, Hunter, ...) throw the map's stock
+  Flood bits (garbage objects with their own physics) when the map has them.
+- the pieces collide with the world only from their third tick; they fly
+  along the force with a random spin, bounce, and leave blood: a burst at
+  the cut, drops while they fly, a splat decal at their first impact.
+- the dying unit is deleted (its kill was counted by its death).
+
+Settings: game.gore, game.gore_threshold_scale, game.gore_max_pieces,
+game.gore_piece_seconds; debug.gore_test (seconds) gibs the biped nearest a
+player that many seconds into a map, to try it.
+*/
+
+#include "cseries.h"
+#include "gore.h"
+#include "cseries/errors.h"
+#include "effects/decals.h"
+#include "effects/effects.h"
+#include "game/game.h"
+#include "game/game_engine.h"
+#include "math/real_math.h"
+#include "models/model_definitions.h"
+#include "objects/damage.h"
+#include "objects/damage_resistances.h"
+#include "objects/object_definitions.h"
+#include "objects/objects.h"
+#include "physics/collision_model_definitions.h"
+#include "physics/collisions.h"
+#include "tag_files/tag_files.h"
+#include "tag_files/tag_groups.h"
+#include "units/bipeds.h"
+#include "units/units.h"
+
+#include <math.h>
+
+float cosf(float);
+float sinf(float);
+float fabsf(float);
+#include <string.h>
+
+int config_boolean(const char *name);
+long config_integer(const char *name);
+double config_real(const char *name);
+const char *config_string(const char *name);
+boolean network_game_distributed_client(void);
+boolean network_coop_active(void);
+
+/* ---------- constants */
+
+#define GORE_MAXIMUM_PIECES 64
+#define GORE_MAXIMUM_PENDING 16
+#define GORE_MAXIMUM_NODES 64
+#define GORE_GRAVITY (9.8f/3.048f/900.f) /* world units a tick squared */
+#define GARBAGE_TAG 'garb'
+#define EFFECT_TAG 'effe'
+#define DECAL_TAG 'deca'
+
+enum
+{
+	_gore_part_head = 0,
+	_gore_part_arms,
+	_gore_part_left_arm,
+	_gore_part_right_arm,
+	_gore_part_legs,
+	_gore_part_torso,
+	NUMBER_OF_GORE_PARTS
+};
+
+/* ---------- definitions */
+
+struct gore_unit_type
+{
+	char const *tag_path_part; /* a substring of the biped's tag path */
+	real explosion_threshold; /* body damage over maximum vitality */
+	real vehicle_threshold; /* world units a second */
+	char const *decal_name;
+};
+
+static struct gore_unit_type const gore_unit_types[] =
+{
+	{ "grunt", 1.2f, 3.f, "effects\\decals\\blood splats\\blood grunt splat" },
+	{ "jackal", 1.2f, 3.5f, "effects\\decals\\blood splats\\blood grunt splat" },
+	{ "elite", 1.6f, 5.f, "effects\\decals\\blood splats\\blood elite splat" },
+	{ "hunter", 3.f, 9.f, "effects\\decals\\blood splats\\blood hunter splat" },
+	{ "flood", 1.f, 3.f, "effects\\decals\\blood splats\\blood elite splat" },
+	{ "marine", 1.3f, 4.f, "effects\\decals\\blood splats\\blood splat" },
+	{ "crewman", 1.3f, 4.f, "effects\\decals\\blood splats\\blood splat" },
+	{ "", 1.5f, 4.5f, "effects\\decals\\blood splats\\blood splat" },
+};
+
+/* the region names each part keeps (the stock models', d20 .. a10) */
+static char const *const gore_part_regions[NUMBER_OF_GORE_PARTS][3] =
+{
+	{ "head", NULL, NULL },
+	{ "arms", NULL, NULL },
+	{ "left arm", "left_arm", NULL },
+	{ "right arm", "right_arm", NULL },
+	{ "legs", NULL, NULL },
+	{ "torso", "shield", NULL },
+};
+
+static char const *const gore_part_pivots[NUMBER_OF_GORE_PARTS] =
+{
+	"bip01 head", "bip01 spine1", "bip01 l upperarm", "bip01 r upperarm", "bip01 pelvis", "bip01 spine",
+};
+
+struct gore_piece
+{
+	long object_index;
+	long garbage; /* TRUE: a stock bit flying on its own physics */
+	short age;
+	short life;
+	boolean resting;
+	boolean impacted;
+	long blood_effect_index;
+	long decal_index;
+	real_point3d pivot0;
+	real_point3d position;
+	real_vector3d velocity;
+	real_vector3d spin; /* axis times radians a tick */
+	real rotation[3][3];
+	short node_count;
+	real_matrix4x3 base_matrices[GORE_MAXIMUM_NODES];
+};
+
+struct gore_pending
+{
+	long unit_index;
+	long time;
+	real_vector3d direction;
+	real force; /* over the threshold, 1 and up */
+};
+
+/* ---------- globals */
+
+static struct gore_piece gore_pieces[GORE_MAXIMUM_PIECES];
+static struct gore_pending gore_pending[GORE_MAXIMUM_PENDING];
+static unsigned long gore_seed = 0x6f726531;
+static boolean gore_test_done;
+
+/* ---------- private code */
+
+static boolean gore_enabled(void)
+{
+	if (!config_boolean("game.gore"))
+		return FALSE;
+	/* single player only for now: network games keep their pieces in step
+	with no one */
+	if (game_engine_running() || game_is_cooperative() || network_game_distributed_client() || network_coop_active())
+		return FALSE;
+	return TRUE;
+}
+
+static struct gore_unit_type const *gore_unit_type_get(long definition_index)
+{
+	char const *name = tag_get_name(definition_index);
+	short index;
+
+	for (index = 0; index < (short)NUMBEROF(gore_unit_types) - 1; index++)
+	{
+		if (name && strstr(name, gore_unit_types[index].tag_path_part))
+			return &gore_unit_types[index];
+	}
+	return &gore_unit_types[NUMBEROF(gore_unit_types) - 1];
+}
+
+static struct damage_resistance const *gore_resistance_get(long definition_index)
+{
+	struct object_definition *definition = object_definition_get(definition_index);
+
+	if (definition->object.collision_model.index == NONE)
+		return NULL;
+	return &collision_model_definition_get(definition->object.collision_model.index)->resistance;
+}
+
+static struct model *gore_model_get(long definition_index)
+{
+	struct object_definition *definition = object_definition_get(definition_index);
+
+	if (definition->object.model.index == NONE)
+		return NULL;
+	return (struct model *)tag_get(MODELS_GROUP_TAG, definition->object.model.index);
+}
+
+static short gore_model_node_find(struct model *model, char const *name)
+{
+	short index;
+
+	for (index = 0; index < (short)model->nodes.count; index++)
+	{
+		if (!strcmp(TAG_BLOCK_GET_ELEMENT(&model->nodes, index, struct model_node)->name, name))
+			return index;
+	}
+	return NONE;
+}
+
+static short gore_model_region_find(struct model *model, char const *name)
+{
+	short index;
+
+	for (index = 0; index < (short)MIN(model->regions.count, MAXIMUM_REGIONS_PER_OBJECT); index++)
+	{
+		if (!strcmp(TAG_BLOCK_GET_ELEMENT(&model->regions, index, struct model_region)->name, name))
+			return index;
+	}
+	return NONE;
+}
+
+/* the regions of the part the model has; 0 if none */
+static unsigned long gore_part_region_mask(struct model *model, short part)
+{
+	unsigned long mask = 0;
+	short name_index;
+
+	for (name_index = 0; name_index < 3 && gore_part_regions[part][name_index]; name_index++)
+	{
+		short region_index = gore_model_region_find(model, gore_part_regions[part][name_index]);
+
+		if (region_index != NONE)
+			mask |= 1UL << region_index;
+	}
+	return mask;
+}
+
+static void gore_effect_at(long effect_index, real_point3d const *position, real_vector3d const *normal)
+{
+	char const *marker_names[5] = { "normal", "incident", "negative incident", "reflection", "gravity" };
+	real_point3d points[5];
+	real_vector3d forwards[5];
+	short index;
+
+	if (effect_index == NONE)
+		return;
+	for (index = 0; index < 5; index++)
+	{
+		points[index] = *position;
+		forwards[index] = *normal;
+	}
+	forwards[4] = *global_down3d;
+	effect_new_unattached_from_markers(effect_index, NONE, global_zero_vector3d, 5, marker_names, points,
+		forwards, 1.f, 0.f, NULL, NULL, FALSE);
+}
+
+static struct gore_piece *gore_piece_new(void)
+{
+	long maximum = PIN(config_integer("game.gore_max_pieces"), 6, GORE_MAXIMUM_PIECES);
+	short index;
+	short oldest = NONE;
+
+	for (index = 0; index < maximum; index++)
+	{
+		if (gore_pieces[index].object_index == NONE)
+			return &gore_pieces[index];
+		if (oldest == NONE || gore_pieces[index].age > gore_pieces[oldest].age)
+			oldest = index;
+	}
+	/* the cap: the oldest piece goes */
+	if (oldest != NONE)
+	{
+		if (object_try_and_get_and_verify_type(gore_pieces[oldest].object_index, 0xFFFFFFFF))
+			object_delete(gore_pieces[oldest].object_index);
+		gore_pieces[oldest].object_index = NONE;
+		return &gore_pieces[oldest];
+	}
+	return NULL;
+}
+
+static void gore_piece_launch(struct gore_piece *piece, real_vector3d const *direction, real force)
+{
+	real_vector3d random;
+	real speed = PIN(force, 1.f, 4.f) * real_seed_random_range(&gore_seed, 0.12f, 0.25f); /* world units a tick */
+
+	seed_random_direction3d(&gore_seed, &random);
+	piece->velocity.i = direction->i * speed + random.i * speed * 0.5f;
+	piece->velocity.j = direction->j * speed + random.j * speed * 0.5f;
+	piece->velocity.k = direction->k * speed + fabsf(random.k) * speed * 0.6f + 0.05f;
+	seed_random_direction3d(&gore_seed, &piece->spin);
+	scale_vector3d(&piece->spin, real_seed_random_range(&gore_seed, 0.1f, 0.45f), &piece->spin);
+}
+
+/* a copy of the unit showing the given regions only */
+static void gore_spawn_copy(long unit_index, unsigned long region_mask, short pivot_node,
+	real_vector3d const *direction, real force, long blood_effect_index, long decal_index)
+{
+	struct object_datum *unit = object_get(unit_index);
+	struct object_placement_data placement;
+	struct gore_piece *piece;
+	struct object_datum *object;
+	real_matrix4x3 *source_matrices;
+	real_matrix4x3 *matrices;
+	short node_count;
+	short region_index;
+	short node_index;
+	long object_index;
+
+	object_placement_data_new(&placement, unit->definition_index, NONE);
+	placement.position = unit->object.position;
+	placement.forward = unit->object.forward;
+	placement.up = unit->object.up;
+	placement.variant_number = unit->object.variant_number;
+	object_index = object_new(&placement);
+	if (object_index == NONE)
+		return;
+	piece = gore_piece_new();
+	if (!piece)
+	{
+		object_delete(object_index);
+		return;
+	}
+	unit = object_get(unit_index);
+	object = object_get(object_index);
+
+	node_count = (short)MIN(unit->object.node_matrices.size, object->object.node_matrices.size) /
+		(short)sizeof(real_matrix4x3);
+	node_count = MIN(node_count, GORE_MAXIMUM_NODES);
+	source_matrices = object_get_node_matrices(unit_index);
+	matrices = object_get_node_matrices(object_index);
+	for (node_index = 0; node_index < node_count; node_index++)
+	{
+		matrices[node_index] = source_matrices[node_index];
+		piece->base_matrices[node_index] = source_matrices[node_index];
+	}
+	piece->node_count = node_count;
+
+	for (region_index = 0; region_index < MAXIMUM_REGIONS_PER_OBJECT; region_index++)
+	{
+		object->object.region_permutations[region_index] = TEST_FLAG(region_mask, region_index) ?
+			unit->object.region_permutations[region_index] : (byte)NONE;
+	}
+	SET_FLAG(object->object.flags, _object_do_not_recompute_node_matrices_bit, TRUE);
+	SET_FLAG(object->object.flags, _object_no_collisions_bit, TRUE);
+	SET_FLAG(object->object.flags, _object_cannot_be_garbage_bit, TRUE);
+	SET_FLAG(object->object.damage_flags, _object_dead_bit, TRUE);
+	SET_FLAG(object->object.damage_flags, _object_cannot_take_damage_bit, TRUE);
+	object->object.body_vitality = 0.f;
+	{
+		/* no limp body: its relaxing would move the nodes this moves */
+		struct biped_datum *biped = (struct biped_datum *)object_try_and_get_and_verify_type(object_index, _object_mask_biped);
+
+		if (biped)
+		{
+			SET_FLAG(biped->biped.flags, _biped_limp_body_physics_active_bit, TRUE);
+			biped->biped.limp_body_current_relaxation_iterations = 0;
+			biped->biped.limp_body_max_relaxation_iterations = 0;
+		}
+	}
+
+	csmemset(piece->rotation, 0, sizeof(piece->rotation));
+	piece->rotation[0][0] = piece->rotation[1][1] = piece->rotation[2][2] = 1.f;
+	if (pivot_node == NONE || pivot_node >= node_count)
+		pivot_node = 0;
+	piece->pivot0 = matrices[pivot_node].position;
+	piece->position = piece->pivot0;
+	piece->object_index = object_index;
+	piece->garbage = FALSE;
+	piece->age = 0;
+	piece->life = (short)(PIN(config_real("game.gore_piece_seconds"), 1.0, 600.0) * 30.0);
+	piece->resting = FALSE;
+	piece->impacted = FALSE;
+	piece->blood_effect_index = blood_effect_index;
+	piece->decal_index = decal_index;
+	gore_piece_launch(piece, direction, force);
+	/* the cut's burst */
+	gore_effect_at(blood_effect_index, &piece->pivot0, direction);
+}
+
+static void gore_spawn_garbage(char const *name, real_point3d const *position,
+	real_vector3d const *direction, real force, long blood_effect_index, long decal_index)
+{
+	long definition_index = tag_loaded(GARBAGE_TAG, name);
+	struct object_placement_data placement;
+	struct gore_piece *piece;
+	long object_index;
+
+	if (definition_index == NONE)
+		return;
+	piece = gore_piece_new();
+	if (!piece)
+		return;
+	gore_piece_launch(piece, direction, force);
+	object_placement_data_new(&placement, definition_index, NONE);
+	placement.position = *position;
+	placement.translational_velocity = piece->velocity;
+	placement.angular_velocity = piece->spin;
+	object_index = object_new(&placement);
+	if (object_index == NONE)
+		return;
+	piece->object_index = object_index;
+	piece->garbage = TRUE;
+	piece->age = 0;
+	piece->life = (short)(PIN(config_real("game.gore_piece_seconds"), 1.0, 600.0) * 30.0);
+	piece->resting = FALSE;
+	piece->impacted = FALSE;
+	piece->blood_effect_index = blood_effect_index;
+	piece->decal_index = decal_index;
+	piece->node_count = 0;
+	piece->position = *position;
+}
+
+static void gore_unit_gib(struct gore_pending const *pending)
+{
+	long unit_index = pending->unit_index;
+	struct object_datum *unit = object_try_and_get_and_verify_type(unit_index, _object_mask_biped);
+	struct gore_unit_type const *type;
+	struct damage_resistance const *resistance;
+	struct model *model;
+	long blood_effect_index = NONE;
+	long trail_effect_index = NONE;
+	long decal_index;
+	unsigned long used = 0;
+	short parts = 0;
+	short part;
+	real_point3d center;
+
+	if (!unit)
+		return;
+	type = gore_unit_type_get(unit->definition_index);
+	model = gore_model_get(unit->definition_index);
+	resistance = gore_resistance_get(unit->definition_index);
+	if (resistance)
+	{
+		blood_effect_index = resistance->area_damage_effect.index != NONE ?
+			resistance->area_damage_effect.index : resistance->body_destroyed_effect.index;
+		trail_effect_index = resistance->localized_damage_effect.index;
+	}
+	decal_index = tag_loaded(DECAL_TAG, type->decal_name);
+	if (decal_index == NONE)
+		decal_index = tag_loaded(DECAL_TAG, "effects\\decals\\blood splats\\blood splat");
+	center = unit->object.bounding_sphere_center;
+
+	if (model && unit->object.node_matrices.size > 0)
+	{
+		/* each part that has its own regions; what is left goes with the torso */
+		for (part = 0; part < NUMBER_OF_GORE_PARTS; part++)
+		{
+			unsigned long mask;
+
+			if (part == _gore_part_torso)
+			{
+				mask = 0;
+				{
+					short region_index;
+
+					for (region_index = 0; region_index < (short)MIN(model->regions.count, MAXIMUM_REGIONS_PER_OBJECT); region_index++)
+					{
+						if (!TEST_FLAG(used, region_index))
+							mask |= 1UL << region_index;
+					}
+				}
+				if (!parts)
+					break; /* a unit of one piece: it is not split */
+			}
+			else
+			{
+				mask = gore_part_region_mask(model, part) & ~used;
+			}
+			if (!mask)
+				continue;
+			used |= mask;
+			parts++;
+			gore_spawn_copy(unit_index, mask, gore_model_node_find(model, gore_part_pivots[part]),
+				&pending->direction, pending->force, blood_effect_index, decal_index);
+		}
+	}
+	if (parts < 2)
+	{
+		/* not split by regions: the map's Flood bits, if it has them */
+		static char const *const bits[] =
+		{
+			"characters\\floodcombat_human\\flood_bit_limbs\\flood_bit_limbs",
+			"characters\\floodcombat_human\\flood_bit_limbs\\flood_bit_limbs",
+			"characters\\floodcombat_human\\flood_bit_limbs\\flood_bit_limbs",
+			"characters\\floodcombat_human\\flood_bit_limbs\\flood_bit_limbs",
+			"characters\\floodcombat_human\\flood_bit_innards\\flood_bit_innards",
+			"characters\\floodcombat_human\\flood_bit_skin\\flood_bit_skin",
+		};
+		short bit;
+
+		if (tag_loaded(GARBAGE_TAG, bits[0]) == NONE)
+		{
+			/* no bits on this map: blood only, and the unit stays a corpse */
+			gore_effect_at(blood_effect_index, &center, &pending->direction);
+			error(_error_silent, "gore: %s has no regions to split and the map no Flood bits: blood only",
+				tag_get_name(unit->definition_index));
+			return;
+		}
+		for (bit = 0; bit < (short)NUMBEROF(bits); bit++)
+			gore_spawn_garbage(bits[bit], &center, &pending->direction, pending->force, trail_effect_index, decal_index);
+		gore_effect_at(blood_effect_index, &center, &pending->direction);
+	}
+
+	/* the trail effect for the region copies */
+	{
+		short index;
+
+		for (index = 0; index < GORE_MAXIMUM_PIECES; index++)
+		{
+			if (gore_pieces[index].object_index != NONE && gore_pieces[index].age == 0 && !gore_pieces[index].garbage)
+				gore_pieces[index].blood_effect_index = trail_effect_index != NONE ? trail_effect_index : blood_effect_index;
+		}
+	}
+	{
+		short index;
+		short count = 0;
+
+		for (index = 0; index < GORE_MAXIMUM_PIECES; index++)
+		{
+			if (gore_pieces[index].object_index != NONE && gore_pieces[index].age == 0)
+				count++;
+		}
+		error(_error_silent, "gore: %s came apart into %d pieces (%d by its regions), force %.2f",
+			tag_get_name(unit->definition_index), count, parts, pending->force);
+	}
+	object_delete(unit_index);
+}
+
+static void gore_rotate(real rotation[3][3], real_vector3d const *spin)
+{
+	real angle = magnitude3d(spin);
+	real_vector3d axis;
+	real c, s, t;
+	real r[3][3];
+	real result[3][3];
+	short i, j, k;
+
+	if (angle < 1e-5f)
+		return;
+	scale_vector3d(spin, 1.f / angle, &axis);
+	c = cosf(angle); s = sinf(angle); t = 1.f - c;
+	r[0][0] = t*axis.i*axis.i + c; r[0][1] = t*axis.i*axis.j - s*axis.k; r[0][2] = t*axis.i*axis.k + s*axis.j;
+	r[1][0] = t*axis.i*axis.j + s*axis.k; r[1][1] = t*axis.j*axis.j + c; r[1][2] = t*axis.j*axis.k - s*axis.i;
+	r[2][0] = t*axis.i*axis.k - s*axis.j; r[2][1] = t*axis.j*axis.k + s*axis.i; r[2][2] = t*axis.k*axis.k + c;
+	for (i = 0; i < 3; i++)
+		for (j = 0; j < 3; j++)
+		{
+			result[i][j] = 0.f;
+			for (k = 0; k < 3; k++)
+				result[i][j] += r[i][k] * rotation[k][j];
+		}
+	csmemcpy(rotation, result, sizeof(result));
+}
+
+static void gore_apply(real const rotation[3][3], real_vector3d const *v, real_vector3d *result)
+{
+	real_vector3d out;
+
+	out.i = rotation[0][0]*v->i + rotation[0][1]*v->j + rotation[0][2]*v->k;
+	out.j = rotation[1][0]*v->i + rotation[1][1]*v->j + rotation[1][2]*v->k;
+	out.k = rotation[2][0]*v->i + rotation[2][1]*v->j + rotation[2][2]*v->k;
+	*result = out;
+}
+
+static void gore_piece_pose(struct gore_piece *piece)
+{
+	real_matrix4x3 *matrices = object_get_node_matrices(piece->object_index);
+	short node_index;
+	real_vector3d forward, up;
+
+	gore_apply(piece->rotation, &object_get(piece->object_index)->object.forward, &forward);
+	for (node_index = 0; node_index < piece->node_count; node_index++)
+	{
+		real_matrix4x3 const *base = &piece->base_matrices[node_index];
+		real_matrix4x3 *matrix = &matrices[node_index];
+		real_vector3d offset;
+
+		vector_from_points3d(&piece->pivot0, &base->position, &offset);
+		gore_apply(piece->rotation, &offset, &offset);
+		point_from_line3d(&piece->position, &offset, 1.f, &matrix->position);
+		gore_apply(piece->rotation, &base->forward, &matrix->forward);
+		gore_apply(piece->rotation, &base->left, &matrix->left);
+		gore_apply(piece->rotation, &base->up, &matrix->up);
+		matrix->scale = base->scale;
+	}
+	(void)forward; (void)up;
+}
+
+static void gore_piece_update(struct gore_piece *piece)
+{
+	struct object_datum *object = object_try_and_get_and_verify_type(piece->object_index, 0xFFFFFFFF);
+
+	if (!object)
+	{
+		piece->object_index = NONE;
+		return;
+	}
+	piece->age++;
+	if (piece->age >= piece->life)
+	{
+		object_delete(piece->object_index);
+		piece->object_index = NONE;
+		return;
+	}
+	if (piece->garbage)
+	{
+		/* its own physics; blood drops while it flies, a splat where it lands */
+		if (piece->age == 2)
+			SET_FLAG(object->object.flags, _object_no_collisions_bit, FALSE);
+		if (!piece->impacted && piece->age > 3 && magnitude3d(&object->object.translational_velocity) < 0.02f)
+		{
+			struct collision_result collision;
+			real_vector3d down = { 0.f, 0.f, -0.5f };
+
+			piece->impacted = TRUE;
+			if (piece->decal_index != NONE &&
+				collision_test_vector(_collision_test_environment_flags, &object->object.position, &down, piece->object_index, &collision))
+			{
+				decal_new_from_collision(piece->decal_index, &collision, &down, 1.f, FALSE, NONE, NULL);
+			}
+		}
+		else if (!piece->impacted && (piece->age % 6) == 0)
+		{
+			gore_effect_at(piece->blood_effect_index, &object->object.position, global_down3d);
+		}
+		return;
+	}
+
+	if (!piece->resting)
+	{
+		real_vector3d step = piece->velocity;
+
+		piece->velocity.k -= GORE_GRAVITY;
+		/* collision from the third tick: the copies start inside each other
+		and the body */
+		if (piece->age >= 3)
+		{
+			struct collision_result collision;
+
+			if (collision_test_vector(_collision_test_environment_flags, &piece->position, &step, piece->object_index, &collision))
+			{
+				real into = dot_product3d(&piece->velocity, &collision.plane.n);
+
+				piece->position = collision.point;
+				point_from_line3d(&piece->position, &collision.plane.n, 0.03f, &piece->position);
+				/* bounce, lose most of it */
+				point_from_line3d((real_point3d *)&piece->velocity, &collision.plane.n, -1.6f*into,
+					(real_point3d *)&piece->velocity);
+				scale_vector3d(&piece->velocity, 0.35f, &piece->velocity);
+				scale_vector3d(&piece->spin, 0.5f, &piece->spin);
+				if (!piece->impacted)
+				{
+					error(_error_silent, "gore: piece %ld landed at tick %d (%.2f %.2f %.2f)", piece->object_index,
+						piece->age, piece->position.x, piece->position.y, piece->position.z);
+					piece->impacted = TRUE;
+					if (piece->decal_index != NONE)
+						decal_new_from_collision(piece->decal_index, &collision, &step, 1.f, FALSE, NONE, NULL);
+					gore_effect_at(piece->blood_effect_index, &collision.point, &collision.plane.n);
+				}
+				if (magnitude3d(&piece->velocity) < 0.02f && collision.plane.n.k > 0.5f)
+					piece->resting = TRUE;
+			}
+			else
+			{
+				point_from_line3d(&piece->position, &step, 1.f, &piece->position);
+			}
+		}
+		else
+		{
+			point_from_line3d(&piece->position, &step, 1.f, &piece->position);
+		}
+		gore_rotate(piece->rotation, &piece->spin);
+		if (!piece->impacted && (piece->age % 5) == 0)
+			gore_effect_at(piece->blood_effect_index, &piece->position, global_down3d);
+
+		/* the object follows the piece (its clusters, its bounds) */
+		{
+			real_point3d origin;
+			real_vector3d offset;
+
+			vector_from_points3d(&piece->pivot0, &piece->base_matrices[0].position, &offset);
+			gore_apply(piece->rotation, &offset, &offset);
+			point_from_line3d(&piece->position, &offset, 1.f, &origin);
+			object_set_position(piece->object_index, &origin, NULL, NULL);
+		}
+	}
+	object = object_get(piece->object_index);
+	object->object.translational_velocity = *global_zero_vector3d;
+	gore_piece_pose(piece);
+}
+
+static void gore_test_update(void)
+{
+	real seconds = (real)config_real("debug.gore_test");
+	struct object_iterator iterator;
+	struct biped_datum *biped;
+	struct object_datum *player = NULL;
+	long best = NONE;
+	real best_distance = 0.f;
+
+	if (seconds <= 0.f || gore_test_done || game_time_get() < (long)(seconds * 30.f))
+		return;
+	object_iterator_new(&iterator, _object_mask_biped, 0);
+	while ((biped = (struct biped_datum *)object_iterator_next(&iterator)) != NULL)
+	{
+		if (biped->unit.player_index != NONE)
+			player = object_get(iterator.index);
+	}
+	if (!player)
+		return;
+	object_iterator_new(&iterator, _object_mask_biped, 0);
+	while ((biped = (struct biped_datum *)object_iterator_next(&iterator)) != NULL)
+	{
+		real distance;
+
+		if (biped->unit.player_index != NONE || TEST_FLAG(biped->object.damage_flags, _object_dead_bit))
+			continue;
+		if (*config_string("debug.gore_test_unit") &&
+			!strstr(tag_get_name(biped->definition_index), config_string("debug.gore_test_unit")))
+			continue;
+		distance = distance_squared3d(&biped->object.position, &player->object.position);
+		/* one in front of the player (in view), when there is one */
+		{
+			real_vector3d to;
+			struct unit_datum *player_unit = (struct unit_datum *)player;
+
+			vector_from_points3d(&player->object.position, &biped->object.position, &to);
+			normalize3d(&to);
+			if (dot_product3d(&to, &player_unit->unit.looking_vector) < 0.7f)
+				distance += 10000.f;
+		}
+		if (best == NONE || distance < best_distance)
+		{
+			best = iterator.index;
+			best_distance = distance;
+		}
+	}
+	gore_test_done = TRUE;
+	if (best != NONE)
+	{
+		struct damage_data damage;
+
+		error(_error_silent, "gore: test gib of %s", tag_get_name(object_get(best)->definition_index));
+		damage_data_new(&damage, NONE);
+		SET_FLAG(damage.flags, _damage_area_of_effect_bit, TRUE);
+		vector_from_points3d(&player->object.position, &object_get(best)->object.position, &damage.direction);
+		normalize3d(&damage.direction);
+		object_get(best)->object.body_vitality = 0.f;
+		unit_kill(best);
+		gore_unit_body_depleted(best, &damage, 100.f);
+	}
+	else
+	{
+		error(_error_silent, "gore: test found no biped");
+	}
+}
+
+/* ---------- public code */
+
+void gore_reset(void)
+{
+	short index;
+
+	for (index = 0; index < GORE_MAXIMUM_PIECES; index++)
+		gore_pieces[index].object_index = NONE;
+	for (index = 0; index < GORE_MAXIMUM_PENDING; index++)
+		gore_pending[index].unit_index = NONE;
+	gore_test_done = FALSE;
+}
+
+void gore_unit_body_depleted(long unit_index, struct damage_data const *damage, real normalized_damage)
+{
+	struct object_datum *unit = object_try_and_get_and_verify_type(unit_index, _object_mask_biped);
+	struct gore_unit_type const *type;
+	real scale = (real)config_real("game.gore_threshold_scale");
+	real force = 0.f;
+	short index;
+
+	if (!unit || !gore_enabled() || ((struct biped_datum *)unit)->unit.player_index != NONE)
+		return;
+	if (scale <= 0.f)
+		scale = 1.f;
+	type = gore_unit_type_get(unit->definition_index);
+	if (damage->vehicle_impact_speed > 0.f)
+		force = damage->vehicle_impact_speed / (type->vehicle_threshold * scale);
+	else if (TEST_FLAG(damage->flags, _damage_area_of_effect_bit))
+		force = normalized_damage / (type->explosion_threshold * scale);
+	if (force < 1.f)
+		return;
+
+	for (index = 0; index < GORE_MAXIMUM_PENDING; index++)
+	{
+		if (gore_pending[index].unit_index == unit_index)
+			return;
+	}
+	for (index = 0; index < GORE_MAXIMUM_PENDING; index++)
+	{
+		if (gore_pending[index].unit_index == NONE)
+		{
+			struct gore_pending *pending = &gore_pending[index];
+
+			pending->unit_index = unit_index;
+			pending->time = game_time_get();
+			pending->force = force;
+			pending->direction = damage->direction;
+			if (normalize3d(&pending->direction) == 0.f)
+				pending->direction = *global_up3d;
+			return;
+		}
+	}
+}
+
+void gore_update(void)
+{
+	short index;
+	static boolean initialized;
+
+	if (!initialized)
+	{
+		gore_reset();
+		initialized = TRUE;
+	}
+	gore_test_update();
+	for (index = 0; index < GORE_MAXIMUM_PENDING; index++)
+	{
+		struct gore_pending *pending = &gore_pending[index];
+
+		/* a tick after the hit: the unit's death has run */
+		if (pending->unit_index != NONE && game_time_get() > pending->time)
+		{
+			struct gore_pending copy = *pending;
+
+			pending->unit_index = NONE;
+			if (gore_enabled())
+				gore_unit_gib(&copy);
+		}
+	}
+	for (index = 0; index < GORE_MAXIMUM_PIECES; index++)
+	{
+		if (gore_pieces[index].object_index != NONE)
+			gore_piece_update(&gore_pieces[index]);
+	}
+}
