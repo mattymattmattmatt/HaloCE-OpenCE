@@ -30,10 +30,12 @@ echo "--- launch ---"
 # while Mali's EGL owned the other. Remove the bundled pair (this script
 # can, an unzip-overwrite cannot) so the loader takes the system armhf
 # libgbm/libdrm the Mali driver was built against.
-if [ -e ./libs/libgbm.so.1 ] || [ -e ./libs/libdrm.so.2 ]; then
-  rm -f ./libs/libgbm.so.1 ./libs/libdrm.so.2
-  echo "removed bundled libs/libgbm.so.1 and libs/libdrm.so.2 (device graphics stack takes over)"
-fi
+# libs/libgbm.so.1 is the package's forwarding shim (it passes through
+# to the device's real libgbm and supplies the newer plane/modifier
+# entry points the firmware's copy lacks); libs/libdrm.so.2 stays the
+# bundled one, which has the symbols SDL wants. Do NOT delete either -
+# updates before 5 removed them and SDL died on the old system libgbm.
+echo "gbm/drm setup: libs/libgbm.so.1 is the forwarding shim, libs/libdrm.so.2 bundled (kept on purpose)"
 echo "system graphics libraries on this device:"
 ls -l /usr/lib/arm-linux-gnueabihf/libgbm.so.1 /usr/lib/arm-linux-gnueabihf/libdrm.so.2       /usr/local/lib/arm-linux-gnueabihf/libgbm.so.1 /usr/local/lib/arm-linux-gnueabihf/libdrm.so.2 2>&1
 chmod +x ./halo 2>/dev/null

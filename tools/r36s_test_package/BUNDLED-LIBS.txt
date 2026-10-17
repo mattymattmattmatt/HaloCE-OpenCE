@@ -7,12 +7,16 @@ package shipped only libc/libm/the loader; the loader then took the
 firmware's GLIBC 2.30 librt.so.1, which demands its own libc's
 GLIBC_PRIVATE symbols (__clock_nanosleep) and the game died at launch
 with "symbol lookup error". If any (glibc) member is missing, the same
-mix happens. libgbm.so.1 and libdrm.so.2 are NOT bundled any more (round 4,
-2026-10-17): SDL swapped through the bundled Debian libgbm (a Mesa
-frontend) while the firmware's Mali GBM blob owned the EGL side, and the
-first SDL_GL_SwapWindow died on a null call. The launcher deletes any
-bundled copies before starting, so SDL uses the device's system armhf
-libgbm/libdrm matched to its Mali stack. Keep it that way.
+mix happens. libgbm.so.1 in this folder is NOT Mesa's: it is the package's own
+forwarding shim (source: tools/r36s_gbm_shim.c), which passes every
+call to the device's real libgbm and implements the plane/modifier
+family the firmware's old libgbm lacks (gbm_bo_get_offset and friends -
+SDL treats them as optional, but a hard-linked SDL dies on the missing
+symbol before it can fall back; rounds 4-5, 2026-10-17). Do not replace
+it with a stock libgbm, and do not delete it. libdrm.so.2 stays the
+bundled Debian one (the firmware's libdrm lacks
+drmModeGetConnectorTypeName, which the bundled one has); the DRM ioctl
+interface it talks is stable across the gap.
 
 libEGL/libGLESv2/libGLdispatch are deliberately NOT bundled:
 they must come from the device's Mali stack.
