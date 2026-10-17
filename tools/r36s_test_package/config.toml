@@ -1,0 +1,861 @@
+# R36S TEST BUILD defaults: 640x480 original scaling, interpolation off,
+# gore_max_pieces lowered to 64 for the 1 GB handheld (not 48: the config
+# loader treats 48 as a superseded old default and restores 384), gore_log on so the
+# log Matty sends back shows gore decisions. Everything else is stock.
+# Halo settings
+#
+# The game writes this file with the defaults when it is missing: delete
+# it to go back to them. Each setting can also be set for one run with
+# the environment variable named with it, which wins over this file.
+
+[display]
+
+# Where display.mode is empty: start borderless over the whole display;
+# false starts in a window. F11 switches.
+# (for one run: HALO_FULLSCREEN=<value>)
+fullscreen = true
+
+# "fullscreen" takes the display (at display.resolution's mode),
+# "borderless" is a window over the whole desktop, "windowed" a window
+# (display.window_size). Empty: display.fullscreen's (true: borderless).
+# F11 switches to the window and back.
+# (for one run: HALO_DISPLAY_MODE=<value>)
+mode = ""
+
+# What fullscreen and borderless draw at: "native", the display's own, or
+# "<width>x<height>" ("1920x1080"), 640x480 or more. Fullscreen sets the
+# display to it; borderless draws it scaled to the display.
+# (for one run: HALO_RESOLUTION=<value>)
+resolution = "640x480"
+
+# "native" draws at the window's resolution (fullscreen, the display's or
+# display.resolution); "original" draws the Xbox's 640x480 and scales it
+# up.
+# (for one run: HALO_RESOLUTION_SCALING=<value>)
+resolution_scaling = "original"
+
+# The window's size, "<width>x<height>" ("1920x1080"), 640x480 or more (it
+# can be resized). Empty: display.window_scale's.
+# (for one run: HALO_WINDOW_SIZE=<value>)
+window_size = ""
+
+# Where display.window_size is empty: the window's size as a multiple of
+# 640x480.
+# (for one run: HALO_WINDOW_SCALE=<value>)
+window_scale = 2
+
+# Wait for the display between frames; false draws as fast as possible.
+# (for one run: HALO_NO_VSYNC=1 makes it false)
+vsync = true
+
+# With vsync off, the most frames a second: 0 for twice the display's
+# refresh rate, -1 for no limit (which can hang some Intel graphics).
+# (for one run: HALO_MAX_FPS=<value>)
+max_fps = 0
+
+# Smoothing of jagged edges, which the Xbox did not have: "off"; "fxaa"
+# or "smaa" smooth the 3D view once it is drawn (the HUD and menus stay
+# sharp); "ssaa2x" draws at twice the resolution each way (four times
+# the work); "msaa2x", "msaa4x" or "msaa8x" draw with that many samples
+# a pixel. Android has "fxaa" for "smaa", and no "ssaa2x".
+# (for one run: HALO_ANTI_ALIASING=<value>)
+anti_aliasing = "off"
+
+# Draw a frame for every display refresh, blending between the game's 30
+# ticks a second; false keeps the original 30 frames a second.
+# (for one run: HALO_INTERPOLATION=<value>)
+interpolation = false
+
+# In first person, point the view where the player aims now instead of
+# where the last tick left it: the view turns the frame the mouse moves,
+# not up to two ticks (66 ms) later.
+# (for one run: HALO_DIRECT_CAMERA=<value>)
+direct_camera = true
+
+# The first-person view's field of view on foot, in degrees across at
+# 16:9 (20 to 150); 0 keeps the stock view. Vehicles, cinematics and
+# scripted cameras keep their own.
+# (for one run: HALO_FOV=<value>)
+fov = 0.0
+
+# The first-person weapon's and hands' field of view, in degrees across
+# at 16:9 (20 to 150); 0 keeps the weapon's stock view, also when
+# display.fov widens the world.
+# (for one run: HALO_VIEWMODEL_FOV=<value>)
+viewmodel_fov = 0.0
+
+# Draw the first-person weapon, hands and what is attached to them.
+# Off, they are not drawn; firing, animation, sound and lights go on.
+# (for one run: HALO_VIEWMODEL_VISIBLE=<value>)
+viewmodel_visible = true
+
+# Draw the HUD (meters, counters, panels, motion sensor, reticles,
+# waypoints, scopes) from the high-res assets (8x the maps' bitmaps);
+# false draws the maps' own bitmaps.
+# (for one run: HALO_HIGH_RES_HUD=<value>)
+high_res_hud = true
+
+# In play, the gamepad Back (Select) button steps the HUD and reticle
+# through shown, HUD hidden with the reticle shown, and both hidden
+# (the reticle and scope stay while zoomed); false: no cycle, both
+# shown. The keyboard's scoreboard key (Tab by default) is its twin.
+# (for one run: HALO_HUD_TOGGLE=<value>)
+hud_toggle = true
+
+# The state the HUD/reticle cycle starts a map in: 0 both shown,
+# 1 HUD hidden (reticle shown), 2 both hidden (reticle while zoomed).
+# (for one run: HALO_HUD_TOGGLE_START=<value>)
+hud_toggle_start = 0
+
+# Draw the menus' and HUD's text with the fonts in port/assets/fonts
+# (Overpass) at the resolution the game draws at, and the menus' titles
+# from port/assets/titles; false draws the maps' bitmap fonts and titles.
+# (for one run: HALO_HIGH_RES_TEXT=<value>)
+high_res_text = true
+
+# The size the objects' shadows are drawn at, in pixels each way: 128 as
+# on the Xbox, or 256, 512 or 1024 for smoother edges, as soft.
+# (for one run: HALO_SHADOW_RESOLUTION=<value>)
+shadow_resolution = 128
+
+# The menus: "pc" for the PC version's main menu (port/assets/menus,
+# and a menus folder here for your own), "xbox" for the Xbox's.
+# (for one run: HALO_MENUS=<value>)
+menus = "pc"
+
+# In multiplayer, whose names are drawn above their heads: "all",
+# "allies", "enemies" or "none". An enemy's shows only within the
+# motion sensor's reach, in sight and not camouflaged; none show if the
+# gametype's motion tracker shows no players, only allies' if it shows
+# only friends.
+# (for one run: HALO_PLAYER_NAMES=<value>)
+player_names = "all"
+
+# How large the players' names are drawn: 1.0 three quarters of the size of
+# the HUD's text, 0.25 to 4.
+# (for one run: HALO_PLAYER_NAME_SCALE=<value>)
+player_name_scale = 1.0
+
+# How the scoreboard lists a team game's players: "teams" in a column for
+# each team (red on the left, blue on the right), "score" all in order of
+# score.
+# (for one run: HALO_SCOREBOARD_TEAM_LAYOUT=<value>)
+scoreboard_team_layout = "teams"
+
+# Draw a panel behind the multiplayer scoreboard, for clearer text.
+# (for one run: HALO_SCOREBOARD_BACKGROUND=<value>)
+scoreboard_background = true
+
+# The scoreboard panel's colour: "red, green, blue, alpha", each 0 to 255
+# (alpha 0 is see-through, 255 solid).
+# (for one run: HALO_SCOREBOARD_BACKGROUND_COLOR=<value>)
+scoreboard_background_color = "16, 16, 16, 150"
+
+# Light the models (characters, weapons, vehicles, scenery) for each
+# pixel by the lights the game gives them, without the facets the light
+# of each vertex shows across curved surfaces; false lights each vertex,
+# as the Xbox does.
+# (for one run: HALO_PER_PIXEL_LIGHTING=<value>)
+per_pixel_lighting = false
+
+# The energy shield's flare on the first-person arms too, as on the body
+# (the stock game draws it on the body only).
+# (for one run: HALO_VIEWMODEL_SHIELD=<value>)
+viewmodel_shield = false
+
+# Your own legs in first person, seen looking down: your body as others
+# see it, drawn from the waist down, moving as it moves.
+# (for one run: HALO_FIRST_PERSON_LEGS=<value>)
+first_person_legs = false
+
+# Energy shields light what is around them as they flare, as plasma
+# does, in the shield's own color.
+# (for one run: HALO_SHIELD_GLOW=<value>)
+shield_glow = false
+
+# How far the shield glow reaches: "default" or "light_show" (three
+# times as far, and at full strength from a third of the flare).
+# (for one run: HALO_SHIELD_GLOW_INTENSITY=<value>)
+shield_glow_intensity = "default"
+
+# Your energy shield's color, as this machine draws it: "default" (the
+# shield's own) or a multiplayer armor color: white, black, red, blue,
+# gray, yellow, green, pink, purple, cyan, cobalt, orange, teal, sage,
+# brown, tan, maroon or salmon.
+# (for one run: HALO_SHIELD_COLOR=<value>)
+shield_color = "default"
+
+[audio]
+
+# Play sound.
+# (for one run: HALO_NO_AUDIO=1 makes it false)
+enabled = true
+
+# The volume of everything, 0.0 to 1.0.
+# (for one run: HALO_VOLUME=<value>)
+volume = 1.0
+
+# The music's volume, 0.0 to 1.0 (of audio.volume).
+# (for one run: HALO_MUSIC_VOLUME=<value>)
+music_volume = 1.0
+
+# The volume of every other sound (effects and speech), 0.0 to 1.0 (of
+# audio.volume).
+# (for one run: HALO_EFFECTS_VOLUME=<value>)
+effects_volume = 1.0
+
+# Reverberate the world's sounds as the place the player is in does (the
+# maps' sound environments, as the Xbox's I3DL2 reverb did); false keeps
+# them dry.
+# (for one run: HALO_REVERB=<value>)
+reverb = true
+
+# Talking in network games' voice chat: "push_to_talk" (while
+# controls.push_to_talk is held; the microphone opens the first time),
+# "open_mic" (whenever the microphone hears speech), or "off". Others'
+# voices play whatever this is (audio.voice_volume 0 silences them).
+# (for one run: HALO_VOICE_CHAT=<value>)
+voice_chat = "push_to_talk"
+
+# The volume of the other players' voices (0 to 2).
+# (for one run: HALO_VOICE_VOLUME=<value>)
+voice_volume = 1.0
+
+# Where the game's sound and the voices play: a device's name as Settings >
+# Audio lists it, or "default" for the system's (also if it is not found).
+# (for one run: HALO_AUDIO_OUTPUT_DEVICE=<value>)
+output_device = "default"
+
+# The microphone voice chat listens to: a device's name as Settings >
+# Audio lists it, or "default" for the system's (also if it is not found).
+# (for one run: HALO_AUDIO_INPUT_DEVICE=<value>)
+input_device = "default"
+
+# For those making sounds: play each of a map's sounds that has a Halo PC
+# sound tag file of its name under the data root's tags folder
+# (tags/sound/.../name.sound) from that file. At the console,
+# loose_sounds_reload reads the files again and loose_sounds false gives
+# the map's sounds back.
+# (for one run: HALO_LOOSE_SOUNDS=<value>)
+loose_sounds = false
+
+[input]
+
+# How far the view turns for the mouse's movement.
+# (for one run: HALO_MOUSE_SENSITIVITY=<value>)
+mouse_sensitivity = 1.0
+
+# Moving the mouse forward looks down.
+# (for one run: HALO_MOUSE_INVERT=1 makes it true)
+invert_mouse = false
+
+# Magnetism while aiming with the mouse, as with a controller: the view
+# slowed and dragged along by a target. The last of the mouse and the
+# right stick to move decides. The bullets' autoaim (bent toward the
+# target) stays either way.
+# (for one run: HALO_MOUSE_AIM_ASSIST=<value>)
+mouse_aim_assist = false
+
+# How far the view turns up and down for the mouse's movement; 0 for the
+# same as input.mouse_sensitivity.
+# (for one run: HALO_MOUSE_VERTICAL_SENSITIVITY=<value>)
+mouse_vertical_sensitivity = 0.0
+
+[controls]
+
+# The keyboard and mouse's controls, which Settings > Controls Setup
+# changes: up to two keys or buttons each, separated by a comma. Keys by
+# their names ("W", "Space", "Left Ctrl", "F1"), and "Mouse Left",
+# "Mouse Right", "Mouse Middle", "Mouse 4", "Mouse 5", "Wheel" (either
+# way), "Wheel Up" and "Wheel Down"; empty for none. Moving forward:
+# (for one run: HALO_KEY_MOVE_FORWARD=<value>)
+move_forward = "W"
+
+# Moving backward.
+# (for one run: HALO_KEY_MOVE_BACKWARD=<value>)
+move_backward = "S"
+
+# Moving left.
+# (for one run: HALO_KEY_STRAFE_LEFT=<value>)
+strafe_left = "A"
+
+# Moving right.
+# (for one run: HALO_KEY_STRAFE_RIGHT=<value>)
+strafe_right = "D"
+
+# Jumping (and skipping cutscenes).
+# (for one run: HALO_KEY_JUMP=<value>)
+jump = "Space"
+
+# Crouching.
+# (for one run: HALO_KEY_CROUCH=<value>)
+crouch = "Left Ctrl, C"
+
+# Firing.
+# (for one run: HALO_KEY_FIRE=<value>)
+fire = "Mouse Left"
+
+# Throwing a grenade.
+# (for one run: HALO_KEY_THROW_GRENADE=<value>)
+throw_grenade = "Mouse Right, G"
+
+# Melee attack.
+# (for one run: HALO_KEY_MELEE=<value>)
+melee = "F, Mouse 4"
+
+# Reloading.
+# (for one run: HALO_KEY_RELOAD=<value>)
+reload = "R"
+
+# Zooming the scope.
+# (for one run: HALO_KEY_ZOOM=<value>)
+zoom = "Z, Mouse Middle"
+
+# Switching weapons.
+# (for one run: HALO_KEY_SWITCH_WEAPON=<value>)
+switch_weapon = "Wheel, 1"
+
+# Switching grenades.
+# (for one run: HALO_KEY_SWITCH_GRENADE=<value>)
+switch_grenade = "X"
+
+# The action: picking up (held: swapping weapons), entering and leaving
+# vehicles, pressing switches; never reloading (the controller's X does
+# when there is nothing to act on).
+# (for one run: HALO_KEY_ACTION=<value>)
+action = "E"
+
+# The flashlight.
+# (for one run: HALO_KEY_FLASHLIGHT=<value>)
+flashlight = "Q"
+
+# Showing the scores (the controller's Back).
+# (for one run: HALO_KEY_SCOREBOARD=<value>)
+scoreboard = "Tab"
+
+# The pause menu (the controller's Start).
+# (for one run: HALO_KEY_PAUSE=<value>)
+pause = "Escape"
+
+# Save a PNG screenshot beside maps/ (press once per capture).
+# (for one run: HALO_KEY_SCREENSHOT=<value>)
+screenshot = "F10"
+
+# Voice chat: talk while it is held (audio.voice_chat "push_to_talk").
+# (for one run: HALO_KEY_PUSH_TO_TALK=<value>)
+push_to_talk = "V"
+
+[game]
+
+# What the game's console shows on screen of what it logs: "important"
+# (bans, players dropped for cheating, what refuses a command, and the
+# asserts that stop the game), "all" (every line, the game's own
+# chatter too), or "none" (the asserts that stop the game only). What
+# a command prints shows whatever this is, and debug.txt has every line.
+# (for one run: HALO_CONSOLE_LOG=<value>)
+console_log = "important"
+
+# The gore prototype (single player): a unit killed by a close enough
+# explosion or a fast enough vehicle comes apart into flying pieces,
+# with blood; false: the normal deaths.
+# (for one run: HALO_GORE=<value>)
+gore = true
+
+# Scales the force each unit needs to come apart: 0.5 gibs at half the
+# force, 2 at twice it.
+# (for one run: HALO_GORE_THRESHOLD_SCALE=<value>)
+gore_threshold_scale = 1.0
+
+# Gore: blood decals last at least this long (seconds; 0: as the map's decals say). The 8192-decal pool takes the oldest first when full.
+# (for one run: HALO_GORE_BLOOD_SECONDS=<value>)
+gore_blood_seconds = 900.0
+
+# Gore: pieces farther than this from every player (metres) go after 10 seconds (0: never early).
+# (for one run: HALO_GORE_PIECE_FAR_DISTANCE=<value>)
+gore_piece_far_distance = 100.0
+
+# Gore: blood on vehicles where they hit units, and on their wheels when they run over bodies and pieces.
+# (for one run: HALO_GORE_VEHICLE_BLOOD=<value>)
+gore_vehicle_blood = true
+
+# Gore: blood soaks over vehicles (the hull, the wheels), more with each hit and each body run over.
+# (for one run: HALO_GORE_VEHICLE_COVERAGE=<value>)
+gore_vehicle_coverage = true
+
+# Gore: blood splat decals on vehicles, the most at once (0-256; 0: none, the coverage instead; the oldest goes first).
+# (for one run: HALO_GORE_VEHICLE_MARKS=<value>)
+gore_vehicle_marks = 0
+
+# The most gore pieces at once (6 to 512); the oldest goes first.
+# (for one run: HALO_GORE_MAX_PIECES=<value>)
+gore_max_pieces = 64
+
+# How long a gore piece stays, in seconds.
+# (for one run: HALO_GORE_PIECE_SECONDS=<value>)
+gore_piece_seconds = 600.0
+
+# Gore: a sniper rifle kill on the head of a grunt, jackal, elite, marine or the player takes only the head off.
+# (for one run: HALO_GORE_HEADSHOTS=<value>)
+gore_headshots = true
+
+# Gore: any shotgun kill at point blank (below)
+# makes its victim come apart, however soft a pellet's force is.
+# (for one run: HALO_GORE_SHOTGUN=<value>)
+gore_shotgun = true
+
+# Gore shotgun: the farthest clear distance for that, in metres
+# (shooter to victim, less the two bodies' radii; 2 is arm's length).
+# (for one run: HALO_GORE_SHOTGUN_RANGE=<value>)
+gore_shotgun_range = 2.0
+
+# Gore: a hunter killed by a direct hit from a scorpion's cannon
+# shell comes apart, with extra blood; hunters otherwise never gib.
+# A shell landing beside it (splash) does not count.
+# (for one run: HALO_GORE_HUNTER_TANK=<value>)
+gore_hunter_tank = true
+
+# Log each explosion or vehicle hit on a unit to the console: its
+# distance, the gore force and whether it came apart.
+# (for one run: HALO_GORE_LOG=<value>)
+gore_log = true
+
+# The language the game asks the Xbox for: "ja", "de", "fr", "es" or "it";
+# empty for English. The game data decides what is translated.
+# (for one run: HALO_LANGUAGE=<value>)
+language = ""
+
+# The player bipeds' grenade throws keep their legs moving (crouched,
+# in the air and in a vehicle's seat too), riders' hands leave the grips
+# to throw and reload, and a player turns with the aim while throwing;
+# false: the original animations, which freeze the legs and stand a
+# rider up.
+# (for one run: HALO_ENHANCED_ANIMATIONS=<value>)
+enhanced_animations = true
+
+# Load and run Halo Custom Edition maps (not those that need OpenSauce):
+# put them and Custom Edition's bitmaps.map, sounds.map and loc.map in
+# the custom_maps folder beside the maps folder; the map lists show them
+# as CUSTOM SINGLEPLAYER and CUSTOM MULTIPLAYER. Their tags are checked
+# as the game's own maps' are before they run; false refuses them
+# (docs/custom_edition_caches.md).
+# (for one run: HALO_CUSTOM_EDITION=<value>)
+custom_edition = true
+
+[paths]
+
+# The folder holding the game data's maps folder; empty looks in the
+# working directory and its assets folder. Windows paths are easiest in
+# single quotes: 'C:\Games\Halo'.
+# (for one run: HALO_DATA_ROOT=<value>)
+data = ""
+
+# Where saved games and profiles go; empty for the usual place
+# (~/.local/share/halo-linux, or %APPDATA%\halo on Windows).
+# (for one run: HALO_SAVE_ROOT=<value>)
+saves = ""
+
+# A Halo Custom Edition install whose maps folder is looked in after the
+# custom_maps folder for Custom Edition maps and their bitmaps.map,
+# sounds.map and loc.map (game.custom_edition); empty for none.
+# (for one run: HALO_CUSTOM_EDITION_ROOT=<value>)
+custom_edition = ""
+
+[network]
+
+# This machine's IPv4 address for system link, for a machine on several
+# networks; empty chooses one.
+# (for one run: HALO_NET_ADDRESS=<value>)
+address = ""
+
+# Comma-separated IPv4 addresses system link sends its announcements to
+# instead of the local network's broadcast address (for VPNs); empty for
+# the local network.
+# (for one run: HALO_NET_BROADCAST=<value>)
+broadcast = ""
+
+# Internet play: hosting makes an invite link (logged, and put on the
+# clipboard) that lets whoever has it join over the internet; opening a
+# link (or copying one before switching to the game) joins. Only people
+# with the invite can join. Off keeps system link to the local network.
+# (for one run: HALO_NET_ONLINE=<value>)
+online = true
+
+# Join the game of an invite link found on the clipboard when the game
+# comes to the front.
+# (for one run: HALO_NET_JOIN_FROM_CLIPBOARD=<value>)
+join_from_clipboard = true
+
+# The UDP port internet play uses; 0 picks one. A fixed one can be
+# forwarded on the router, for networks whose NAT stops connections.
+# (for one run: HALO_NET_TUNNEL_PORT=<value>)
+tunnel_port = 0
+
+# Let internet play ask the router (UPnP) to forward its port, for
+# networks whose NAT stops connections: when a player joins this
+# machine's game, and when joining a game takes too long. False never
+# asks.
+# (for one run: HALO_NET_ALLOW_UPNP=<value>)
+allow_upnp = true
+
+# The server browser: public games are listed through the signalling
+# brokers, and Join Game > Server Browser shows them. False lists no
+# game of this machine's and shows none.
+# (for one run: HALO_NET_PUBLIC_LOBBY=<value>)
+public_lobby = true
+
+# Whether a new game of Create Game > Internet starts as PUBLIC (listed
+# in everyone's server browser: anyone can see and join it) or, false,
+# PRIVATE (only players with its invite link can join). Server Setup's
+# LISTING changes it for each game.
+# (for one run: HALO_NET_HOST_PUBLIC=<value>)
+host_public = true
+
+# Hosting: voice chat in the lobby, before and after a game, where every
+# player hears every other.
+# (for one run: HALO_NET_VOICE_LOBBY=<value>)
+voice_lobby = true
+
+# Hosting: voice chat in a game: "off"; "team_proximity" (teammates
+# near); "team_enemy_proximity" (anyone near); "team_global" (all
+# teammates); or "team_global_enemy_proximity" (all teammates, and
+# enemies near). A game without teams has only enemies; co-op only
+# teammates.
+# (for one run: HALO_NET_VOICE_MODE=<value>)
+voice_mode = "team_global_enemy_proximity"
+
+# Hosting: the voices' quality, in the lobby and in a game, in kilobits a
+# second (8 to 64).
+# (for one run: HALO_NET_VOICE_KBPS=<value>)
+voice_kbps = 24
+
+# Hosting: how near (world units: 1 is about 3 metres) a player must be
+# to be heard by proximity voice chat (5 to 100).
+# (for one run: HALO_NET_VOICE_PROXIMITY=<value>)
+voice_proximity = 15.0
+
+# Hosting: let the players vote to kick a player (the scoreboard's
+# right-click, or the console's votekick). More than half of the players
+# must vote, counted once per address.
+# (for one run: HALO_NET_VOTEKICK=<value>)
+votekick = true
+
+# Hosting: the minutes a player must have played on this server to start
+# a vote to kick (0 to 60); to vote, 2 minutes or this, the less.
+# (for one run: HALO_NET_VOTEKICK_MINUTES=<value>)
+votekick_minutes = 5
+
+# Hosting: the minutes a player kicked by a vote cannot join again (1 to
+# 1440).
+# (for one run: HALO_NET_VOTEKICK_BAN_MINUTES=<value>)
+votekick_ban_minutes = 30
+
+# Hosting: send a player who joins without the game's Custom Edition map
+# the map (from custom_maps), and the resource maps it needs that the
+# player lacks (bitmaps.map, sounds.map, loc.map). The game's other
+# players help (network.map_seed).
+# (for one run: HALO_NET_MAP_SHARE=<value>)
+map_share = true
+
+# Hosting: the most kilobytes a second the host sends of maps (16 to
+# 65536), so that the game's own traffic keeps the rest of the upload.
+# (for one run: HALO_NET_MAP_SHARE_UPLOAD=<value>)
+map_share_upload = 1024
+
+# Playing in another's game: help send its map to players who join
+# without it, as a torrent's peers do (the pieces this machine has, at
+# most network.map_seed_upload).
+# (for one run: HALO_NET_MAP_SEED=<value>)
+map_seed = true
+
+# Playing in another's game: the most kilobytes a second this machine
+# sends of maps to other players (16 to 65536).
+# (for one run: HALO_NET_MAP_SEED_UPLOAD=<value>)
+map_seed_upload = 256
+
+# Joining a game on a Custom Edition map this machine does not have:
+# download it (and the resource maps it needs) from the game's players
+# into custom_maps, if its host shares it (network.map_share); false
+# leaves the game, saying which map is missing.
+# (for one run: HALO_NET_MAP_DOWNLOAD=<value>)
+map_download = true
+
+# Whether an online co-op game (Create Game > Internet, a SINGLEPLAYER
+# map) starts as PUBLIC or, false, PRIVATE: Server Setup's LISTING in
+# co-op, which writes its choice here.
+# (for one run: HALO_NET_COOP_PUBLIC=<value>)
+coop_public = false
+
+# Whether the players of an online co-op game hurt each other: "off",
+# "on", "shields_only" or "explosives_only" (FRIENDLY FIRE in
+# co-op's Server Setup > Co-op Options writes its choice here). Their AI
+# allies they always can, as in the campaign.
+# (for one run: HALO_NET_COOP_FRIENDLY_FIRE=<value>)
+coop_friendly_fire = "on"
+
+# Whether the players of an online co-op game bump into each other;
+# false, they walk through each other (the AI's characters they still
+# bump into). PLAYER COLLISIONS in co-op's Server Setup > Co-op Options
+# writes its choice here.
+# (for one run: HALO_NET_COOP_PLAYER_COLLISIONS=<value>)
+coop_player_collisions = true
+
+# Online co-op's extra enemies: "none", "per_player" (each squad of
+# enemies grows by coop_enemies for each player past the first) or
+# "multiplier" (each is coop_enemies_multiplier times as large, for any
+# number of players). EXTRA ENEMIES in co-op's Server Setup > Co-op
+# Options writes its choice here.
+# (for one run: HALO_NET_COOP_ENEMIES_MODE=<value>)
+coop_enemies_mode = "per_player"
+
+# Online co-op's extra enemies per player, a percentage: for each player
+# past the first, each squad of enemies a level places gets this much of
+# itself more (100: as many again; 25 to 200). PER PLAYER in co-op's
+# Server Setup > Co-op Options writes its choice here.
+# (for one run: HALO_NET_COOP_ENEMIES=<value>)
+coop_enemies = 50
+
+# Online co-op's static multiplier of its enemies: each squad of enemies
+# a level places is this many times as large (2 to 32). MULTIPLIER in
+# co-op's Server Setup > Co-op Options writes its choice here.
+# (for one run: HALO_NET_COOP_ENEMIES_MULTIPLIER=<value>)
+coop_enemies_multiplier = 2
+
+# The file of the public MQTT brokers through which the machines of an
+# invite find each other (its messages are encrypted), beside this file
+# unless a full path: one host:port on each line, up to 4. Updates
+# replace brokers.txt: keep a list of your own under another name.
+# (for one run: HALO_NET_BROKERS_FILE=<value>)
+brokers_file = "brokers.txt"
+
+# Public STUN servers that tell this machine its internet address;
+# comma-separated host:port.
+# (for one run: HALO_NET_STUN=<value>)
+stun_servers = "stun.l.google.com:19302,stun.cloudflare.com:3478"
+
+[discord]
+
+# The Discord application internet play invites go through while the
+# Discord desktop client runs; empty for none.
+# (for one run: HALO_DISCORD_APPLICATION=<value>)
+application_id = "1553978809840050229"
+
+[update]
+
+# Look for a new version when the game starts, and offer to update to it;
+# false never looks (the game's "Do not ask again" writes false here).
+# (for one run: HALO_UPDATE_AUTO=<value>)
+auto = true
+
+[debug]
+
+# Automated system link sessions for testing (port/linux/game/network_test.c):
+# "host:<map>" hosts a game on that map, "join" joins the first game found,
+# "browse" the one with the most players the server browser lists (not
+# co-op, if it can); empty for none.
+# (for one run: HALO_NETWORK_TEST=<value>)
+network_test = ""
+
+# Seconds after hosting that an automated test game starts.
+# (for one run: HALO_NETWORK_TEST_START=<value>)
+network_test_start = 15.0
+
+# Every this many seconds an automated test host kills its last player; 0 never.
+# (for one run: HALO_NETWORK_TEST_KILL=<value>)
+network_test_kill = 0.0
+
+# The score an automated test host's game type plays to (a short game, to
+# test the next); 0 the game type's own.
+# (for one run: HALO_NETWORK_TEST_SCORE=<value>)
+network_test_score = 0
+
+# Every this many seconds each automated test player hits the next with
+# their weapon, within its reach (the host brings far players near the
+# first a second before); 0 never.
+# (for one run: HALO_NETWORK_TEST_SHOOT=<value>)
+network_test_shoot = 0.0
+
+# This many seconds into an automated test game the host seats its last
+# player as a vehicle's driver (and out 15 seconds on); 0 never.
+# (for one run: HALO_NETWORK_TEST_VEHICLE=<value>)
+network_test_vehicle = 0.0
+
+# This many seconds into an automated test game the host stands its last
+# player on a weapon, which a joining player then picks up; 0 never.
+# (for one run: HALO_NETWORK_TEST_PICKUP=<value>)
+network_test_pickup = 0.0
+
+# The weapon network_test_pickup stands the player on: the first whose tag
+# name has this in it ("sniper", say); empty any.
+# (for one run: HALO_NETWORK_TEST_PICKUP_WEAPON=<value>)
+network_test_pickup_weapon = ""
+
+# The network test's host lists its game in the server browser, as Create
+# Game > Internet's PUBLIC does (debug.network_test "browse" joins it).
+# (for one run: HALO_NETWORK_TEST_PUBLIC=<value>)
+network_test_public = false
+
+# Seconds into a map: then the biped nearest the player comes apart, to
+# try the gore prototype. 0: never.
+# (for one run: HALO_GORE_TEST=<value>)
+gore_test = 0.0
+
+# With gore_test: only a biped whose tag path has this in it ("elite");
+# empty for any.
+# (for one run: HALO_GORE_TEST_UNIT=<value>)
+gore_test_unit = ""
+
+# With gore_test: instead, a frag grenade goes off this many metres from
+# the biped's centre; -1: 1, 1.5, 2, 2.5 and 3 m, four seconds apart, a
+# biped each; 0: the biped is gibbed outright.
+# (for one run: HALO_GORE_TEST_DIST=<value>)
+gore_test_distance = 0.0
+
+# With debug.gore_test: a warthog at this speed (m/s) at the unit, then 4 s later parked side on in view (to see its blood).
+# (for one run: HALO_GORE_TEST_VEHICLE=<value>)
+gore_test_vehicle = 0
+
+# With debug.gore_test: instead, a sniper rifle bullet's damage on the unit's head (the map needs the sniper rifle).
+# (for one run: HALO_GORE_TEST_SNIPER=<value>)
+gore_test_sniper = false
+
+# With gore_test_distance: drop a live frag grenade there instead.
+# (for one run: HALO_GORE_TEST_PROJECTILE=<value>)
+gore_test_projectile = false
+
+# Listen on 127.0.0.1 (port telnet_console_port) for a script console that
+# runs what it is sent as the game's console does, with no password; false
+# none.
+# (for one run: HALO_TELNET_CONSOLE=1 makes it true)
+telnet_console = false
+
+# The port of the script console (telnet_console); the Xbox's was 23, which
+# only the administrator can listen on.
+# (for one run: HALO_TELNET_CONSOLE_PORT=<value>)
+telnet_console_port = 2323
+
+# Outline the menus' tap targets (item green, value blue, list slot yellow,
+# legend button red, the band beside a list's slots orange; the virtual
+# keyboard's keys white), mark where the last finger went down and the
+# last tap landed for 3 seconds, and log each tap with the target it hit
+# (and a value's split); to judge touch accuracy.
+# (for one run: HALO_TOUCH_TARGETS=1 makes it true)
+touch_targets = false
+
+# Milliseconds everything received is held back (a round trip between two
+# machines of twice it), to test the netcode as over the internet; 0 none.
+# (for one run: HALO_NETWORK_LATENCY=<value>)
+network_latency = 0.0
+
+# Percent of datagrams received that are dropped, for the same; 0 none.
+# (for one run: HALO_NETWORK_LOSS=<value>)
+network_loss = 0.0
+
+# Percent of the datagrams received that are damaged at random, to test
+# that nothing a machine sends can crash the game; 0 none.
+# (for one run: HALO_NETWORK_CORRUPT=<value>)
+network_corrupt = 0.0
+
+# Percent of the reads of streams that are damaged at random, for the
+# same (a damaged stream is closed, so a little goes a long way); 0 none.
+# (for one run: HALO_NETWORK_CORRUPT_STREAM=<value>)
+network_corrupt_stream = 0.0
+
+# Seconds after the start before anything is damaged, so that a game can
+# be set up and started first (a host's messages to its own client are
+# damaged too).
+# (for one run: HALO_NETWORK_CORRUPT_AFTER=<value>)
+network_corrupt_after = 0.0
+
+# "bot:<seed>" plays controller 1 with a scripted pattern (automated
+# network tests); "look:<seed>" stands still, only turning and looking
+# up and down; empty for none.
+# (for one run: HALO_TEST_INPUT=<value>)
+test_input = ""
+
+# The answer to the new version question, for automated tests: "yes",
+# "no" or "never" (do not ask again, confirmed); empty asks.
+# (for one run: HALO_UPDATE_ANSWER=<value>)
+update_answer = ""
+
+# Quit this many seconds after the window opens; 0 never.
+# (for one run: HALO_EXIT_AFTER=<value>)
+exit_after = 0.0
+
+# Keep the window hidden (and never fullscreen).
+# (for one run: HALO_HIDDEN_WINDOW=1 makes it true)
+hidden_window = false
+
+# Voice chat's automated tests: a tone instead of the microphone, and
+# each voice heard logged once a second.
+# (for one run: HALO_VOICE_TEST=1 makes it true)
+voice_test = false
+
+# Run without a window, drawing nothing.
+# (for one run: HALO_NULL_RENDERER=1 makes it true)
+null_renderer = false
+
+# Report OpenGL errors in the log.
+# (for one run: HALO_GL_DEBUG=1 makes it true)
+gl_debug = false
+
+# Start on this screen of the menus (port/assets/menus) instead of the main
+# menu, a player profile being edited; empty for the main menu.
+# (for one run: HALO_MENU_OPEN=<value>)
+menu_open = ""
+
+# Flush the GPU's pipeline every this many draws: -1 for every 3 on Intel
+# graphics with Mesa's driver (which can hang without), 0 never.
+# (for one run: HALO_GPU_FLUSH_DRAWS=<value>)
+gpu_flush_draws = -1
+
+# Log the renderer's draw counts once a second.
+# (for one run: HALO_GPU_STATS=1 makes it true)
+gpu_stats = false
+
+# Log every draw of this frame; -1 none.
+# (for one run: HALO_GPU_TRACE=<value>)
+gpu_trace_frame = -1
+
+# With gpu_trace_frame, also the vertex shader constants.
+# (for one run: HALO_GPU_TRACE_CONSTANTS=1 makes it true)
+gpu_trace_constants = false
+
+# Comma-separated ids of vertex shaders not to draw with.
+# (for one run: HALO_GPU_SKIP_VS=<value>)
+gpu_skip_vertex_shaders = ""
+
+# A folder to write the generated GLSL to; empty none.
+# (for one run: HALO_GPU_DUMP_SHADERS=<value>)
+gpu_dump_shaders = ""
+
+# A GLSL expression every pixel shader shows instead of its result.
+# (for one run: HALO_GPU_DEBUG_EXPR=<value>)
+gpu_debug_expression = ""
+
+# Pixel shaders show their first texture.
+# (for one run: HALO_GPU_DEBUG_T0=1 makes it true)
+gpu_debug_texture0 = false
+
+# Pixel shaders show their vertex colour.
+# (for one run: HALO_GPU_DEBUG_FLAT=1 makes it true)
+gpu_debug_flat = false
+
+# A folder to save frames to (with screenshot_every); empty none.
+# (for one run: HALO_SCREENSHOT_DIR=<value>)
+screenshot_directory = ""
+
+# Save every this many frames to screenshot_directory; 0 none.
+# (for one run: HALO_SCREENSHOT_EVERY=<value>)
+screenshot_every = 0
+
+# A folder to write every texture to as it is uploaded; empty none.
+# (for one run: HALO_TEXTURE_DUMP=<value>)
+texture_dump_directory = ""
+
+# Log texture uploads.
+# (for one run: HALO_TEXTURE_LOG=1 makes it true)
+texture_log = false
+
+# Upload textures again every time they are used.
+# (for one run: HALO_TEXTURE_NO_CACHE=1 makes it true)
+texture_no_cache = false
