@@ -24,6 +24,18 @@ else
   exit 1
 fi
 echo "--- launch ---"
+# Graphics stack must be the DEVICE's matched set: our bundled Debian
+# libgbm/libdrm (a Mesa frontend + newer libdrm) mixed with the firmware's
+# Mali GBM blob killed the first swap in round 4 - SDL talked to one GBM
+# while Mali's EGL owned the other. Remove the bundled pair (this script
+# can, an unzip-overwrite cannot) so the loader takes the system armhf
+# libgbm/libdrm the Mali driver was built against.
+if [ -e ./libs/libgbm.so.1 ] || [ -e ./libs/libdrm.so.2 ]; then
+  rm -f ./libs/libgbm.so.1 ./libs/libdrm.so.2
+  echo "removed bundled libs/libgbm.so.1 and libs/libdrm.so.2 (device graphics stack takes over)"
+fi
+echo "system graphics libraries on this device:"
+ls -l /usr/lib/arm-linux-gnueabihf/libgbm.so.1 /usr/lib/arm-linux-gnueabihf/libdrm.so.2       /usr/local/lib/arm-linux-gnueabihf/libgbm.so.1 /usr/local/lib/arm-linux-gnueabihf/libdrm.so.2 2>&1
 chmod +x ./halo 2>/dev/null
 export LD_LIBRARY_PATH="$PWD/libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
