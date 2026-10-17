@@ -46,7 +46,7 @@ at the half's aspect, as a split-screen view does.
 #include <math.h>
 
 int config_boolean(const char *name);
-real config_real(const char *name);
+double config_real(const char *name); /* port_config.c: a double, not the game's real */
 
 boolean stereo_sbs_enabled(void)
 {
