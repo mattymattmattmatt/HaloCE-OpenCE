@@ -95,8 +95,13 @@ public final class TouchLayoutTest {
         sized.layout.setOpacity(0.45f);
         String translucent = sized.layout.exportConfiguration(2.25f);
         check(TouchLayout.importConfiguration(translucent).layout.opacity == 0.45f, "Opacity must survive export/import");
-        reject(translucent.replace("opacity=0.45", "opacity=0.05"));
+        reject(translucent.replace("opacity=0.45", "opacity=-0.05"));
         reject(translucent.replace("opacity=0.45", "opacity=NaN"));
+        // Opacity may now reach zero: fully invisible controls must round-trip.
+        sized.layout.setOpacity(0f);
+        check(TouchLayout.importConfiguration(sized.layout.exportConfiguration(2.25f)).layout.opacity == 0f,
+              "Zero opacity must survive export/import");
+        sized.layout.setOpacity(0.45f);
         sized.layout.floatingStick = true;
         check(TouchLayout.importConfiguration(sized.layout.exportConfiguration(2.25f)).layout.floatingStick,
               "The floating stick must survive export/import");
