@@ -88,14 +88,25 @@ static void segv_handler(int signal_number, siginfo_t *information, void *contex
 		void *frames[48];
 		int count, length;
 
+#ifdef __arm__
+		/* (the r36s-test armhf build: ARM's registers in the crash report) */
+		length = snprintf(line, sizeof(line), "halo-linux: segmentation fault at %p, pc %08x fp %08x sp %08x\n",
+			information->si_addr, (unsigned)ucontext->uc_mcontext.arm_pc,
+			(unsigned)ucontext->uc_mcontext.arm_fp, (unsigned)ucontext->uc_mcontext.arm_sp);
+#else
 		length = snprintf(line, sizeof(line), "halo-linux: segmentation fault at %p, eip %08x ebp %08x esp %08x\n",
 			information->si_addr, (unsigned)ucontext->uc_mcontext.gregs[REG_EIP],
 			(unsigned)ucontext->uc_mcontext.gregs[REG_EBP], (unsigned)ucontext->uc_mcontext.gregs[REG_ESP]);
+#endif
 		write(STDERR_FILENO, line, (size_t)length);
 		crash_debug_line(line);
 		{
 			/* the return address a call through a bad pointer left behind */
+#ifdef __arm__
+			const unsigned *stack = (const unsigned *)ucontext->uc_mcontext.arm_sp;
+#else
 			const unsigned *stack = (const unsigned *)ucontext->uc_mcontext.gregs[REG_ESP];
+#endif
 
 			length = snprintf(line, sizeof(line), "halo-linux: stack %08x %08x %08x %08x %08x %08x\n",
 				stack[0], stack[1], stack[2], stack[3], stack[4], stack[5]);

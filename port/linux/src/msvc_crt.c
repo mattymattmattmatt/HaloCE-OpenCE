@@ -295,7 +295,47 @@ static unsigned short msvc_to_control_word(unsigned int value, unsigned short wo
 	return word;
 }
 
-#ifdef HALO_ARM64_GUEST
+#if defined(__arm__) && !defined(HALO_ARM64_GUEST)
+/* 32-bit ARM (the r36s-test armhf build): as AArch64 below, but the
+rounding mode lives in FPSCR bits 22-23. */
+static unsigned int msvc_control_word_arm = CW_DEFAULT;
+
+unsigned int _control87(unsigned int new_value, unsigned int mask)
+{
+	unsigned int fpscr;
+
+	if (mask)
+	{
+		msvc_control_word_arm = (msvc_control_word_arm & ~mask) | (new_value & mask);
+		fpscr = __builtin_arm_rsr("fpscr");
+		fpscr &= ~(3U << 22);
+		switch (msvc_control_word_arm & _MCW_RC)
+		{
+		case _RC_UP: fpscr |= 1U << 22; break;
+		case _RC_DOWN: fpscr |= 2U << 22; break;
+		case _RC_CHOP: fpscr |= 3U << 22; break;
+		default: break;
+		}
+		__builtin_arm_wsr("fpscr", fpscr);
+	}
+	return msvc_control_word_arm;
+}
+
+unsigned int _controlfp(unsigned int new_value, unsigned int mask)
+{
+	return _control87(new_value, mask & ~_EM_DENORMAL);
+}
+
+unsigned int _statusfp(void)
+{
+	return 0;
+}
+
+unsigned int _clearfp(void)
+{
+	return 0;
+}
+#elif defined(HALO_ARM64_GUEST)
 /* AArch64: the rounding mode lives in FPCR.RMode, the sticky exception
 flags in FPSR. Precision control and exception unmasking have no
 equivalent; the rest of the MSVC control word is only remembered. */
