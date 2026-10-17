@@ -63,6 +63,7 @@ symbols in this file:
 #include "interface/hud.h"
 #include "interface/hud_definitions.h"
 #include "interface/hud_weapon.h"
+#include "hud_toggle.h" /* port: port/linux/game/hud_toggle.c */
 #include "interface/unit_hud_interface_definition.h"
 #include "interface/weapon_hud_interface_definition.h"
 #include "items/weapon_definitions.h"
@@ -414,6 +415,18 @@ static boolean weapon_hud_state_index_valid(
 static struct weapon_hud_globals *weapon_hud_globals = NULL;
 /* port: a crosshair's bad sequence or bitmap was reported (once) */
 static boolean crosshair_bad_bitmap_reported = FALSE;
+
+/* port: the HUD/reticle cycle (hud_toggle.c): an element of the weapon
+HUD is drawn when the HUD is shown, or it is a zoomed view's element (its
+overlays follow the zoom, or it shows only when zoomed: the sniper scope
+and its numbers) and the player is in fact zoomed */
+static boolean port_weapon_hud_element_visible(
+	short local_player_index,
+	boolean zoomed_layout)
+{
+	return hud_toggle_hud_visible() ||
+		(zoomed_layout && player_control_get_zoom_level(local_player_index) != NONE);
+}
 
 /* ---------- public code */
 
@@ -1732,6 +1745,9 @@ static void render_weapon_hud(
 			rectangle2d window_bounds;
 			boolean zoomed_layout = hud_multitexture_overlays_follow_zoom(&element->static_element.multitexture_overlays);
 
+			/* port: HUD/reticle cycle: only the zoomed view's when hidden */
+			if (!port_weapon_hud_element_visible(local_player_index, zoomed_layout))
+				continue;
 			if (zoomed_layout)
 				hud_zoomed_layout_begin(&window_bounds);
 			state_index = element->header.state_type;
@@ -1763,6 +1779,9 @@ static void render_weapon_hud(
 			rectangle2d window_bounds;
 			boolean zoomed_layout = hud_multitexture_overlays_follow_zoom(&element->meter_element.multitexture_overlays);
 
+			/* port: HUD/reticle cycle: only the zoomed view's when hidden */
+			if (!port_weapon_hud_element_visible(local_player_index, zoomed_layout))
+				continue;
 			if (zoomed_layout)
 				hud_zoomed_layout_begin(&window_bounds);
 
@@ -1800,6 +1819,10 @@ static void render_weapon_hud(
 			short decimal_value;
 			rectangle2d window_bounds;
 			boolean zoomed_layout = hud_number_shows_only_when_zoomed(&element->number_element);
+
+			/* port: HUD/reticle cycle: only the zoomed view's when hidden */
+			if (!port_weapon_hud_element_visible(local_player_index, zoomed_layout))
+				continue;
 
 			if (TEST_FLAG(
 				element->weapon_flags,
@@ -1871,6 +1894,7 @@ static void render_weapon_hud(
 
 		if (!TEST_FLAG(element->runtime_flags, _hud_element_runtime_invalid_bit) &&
 			TEST_FLAG(map_type_flags, element->use_on_map_type) &&
+			hud_toggle_hud_visible() && /* port: HUD/reticle cycle: no zoomed overlays */
 			weapon_hud_state_index_valid(element->state_type, NUMBER_OF_WEAPON_HUD_FLASH_REFERENCES))
 		{
 			state_index = element->state_type;
@@ -2059,39 +2083,51 @@ void hud_render_weapon_interface(
 		hud_index = definition->weapon.interface_definition.hud_interface.index;
 		if (hud_index != NONE)
 		{
-			crosshairs_draw(
-				player,
-				weapon_index,
-				hud_index,
-				&weapon_state);
-			render_weapon_hud(
-				hud_index,
-				player->local_player_index,
-				definition,
-				&weapon_state,
-				NULL,
-				NULL,
-				NULL);
-			play_weapon_hud_sounds(
-				player->local_player_index,
-				hud_index,
-				&weapon_state);
+			/* port: the HUD/reticle cycle (hud_toggle.c): the reticle
+			whenever it shows (always while zoomed); the weapon HUD
+			proper when the HUD shows, its zoomed elements alone (the
+			scope) while zoomed with the HUD hidden (render_weapon_hud
+			filters them); its sounds with the HUD */
+			if (hud_toggle_reticle_visible(player->local_player_index))
+				crosshairs_draw(
+					player,
+					weapon_index,
+					hud_index,
+					&weapon_state);
+			if (hud_toggle_hud_visible() ||
+				player_control_get_zoom_level(player->local_player_index) != NONE)
+				render_weapon_hud(
+					hud_index,
+					player->local_player_index,
+					definition,
+					&weapon_state,
+					NULL,
+					NULL,
+					NULL);
+			if (hud_toggle_hud_visible())
+				play_weapon_hud_sounds(
+					player->local_player_index,
+					hud_index,
+					&weapon_state);
 		}
 	}
 	else if (!seat_disallows_hud && !unit_get_weapon_count(player->unit_index))
 	{
 		struct weapon_interface_state weapon_state = { 0 };
 
-		crosshairs_draw(
-			player,
-			NONE,
-			hud_globals->defaults.default_weapon_hud.index,
-			&weapon_state);
+		if (hud_toggle_reticle_visible(player->local_player_index))
+			crosshairs_draw(
+				player,
+				NONE,
+				hud_globals->defaults.default_weapon_hud.index,
+				&weapon_state);
 	}
 
-	render_grenade_hud(
-		player->local_player_index,
-		player->unit_index);
+	/* port: grenades are the HUD proper: only when it shows */
+	if (hud_toggle_hud_visible())
+		render_grenade_hud(
+			player->local_player_index,
+			player->unit_index);
 	if (player->local_player_index != NONE)
 	{
 		get_hud_state(player->local_player_index)->last_weapon_index = weapon_index;

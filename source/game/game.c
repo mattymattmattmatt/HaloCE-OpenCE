@@ -121,6 +121,7 @@ struct game_options;
 #include "cseries/cseries.h"
 #include "game/game.h"
 #include "gore.h"
+#include "hud_toggle.h" /* port: port/linux/game/hud_toggle.c */
 #include "ai/ai.h"
 #include "bink/bink_playback.h"
 #include "bungie_net/network/transport.h"
@@ -391,6 +392,8 @@ void game_tick(
 	profile_scope(game_tick_objects_section, objects_update();)
 	/* port: the gore prototype's pieces (port/linux/game/gore.c) */
 	gore_update();
+	/* port: the HUD/reticle cycle's Back button (port/linux/game/hud_toggle.c) */
+	hud_toggle_update();
 	profile_scope(game_tick_players_after_section, players_update_after_game();)
 	profile_scope(game_tick_hud_section, hud_update();)
 	profile_scope(game_tick_player_effect_section, player_effect_update();)
@@ -648,6 +651,8 @@ void game_initialize_for_new_map(
 {
 	/* port: the gore prototype (port/linux/game/gore.c) */
 	gore_reset();
+	/* port: the HUD/reticle cycle back to its start state */
+	hud_toggle_reset();
 	match_assert(
 		"c:\\halo\\SOURCE\\game\\game.c",
 		0x1D1,

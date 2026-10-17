@@ -109,6 +109,7 @@ symbols in this file:
 #include "text/draw_string.h"
 #include "coop_spectate.h" /* port: port/linux/game/coop_spectate.c */
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
+#include "hud_toggle.h" /* port: port/linux/game/hud_toggle.c */
 #include "text/font_group.h"
 #include "text/text_group.h"
 #include "units/unit_definitions.h"
@@ -1436,12 +1437,29 @@ void hud_draw_screen(
 				perspective != _director_perspective_scripted &&
 				player->unit_index != NONE)
 			{
-				hud_render_weapon_interface(player);
-				hud_show_action_response(player_index);
-				hud_play_unit_sounds(player, hud_scripted_globals->show_hud);
-				hud_render_unit_interface(player);
-				hud_render_nav_points(render.local_player_index);
-				hud_render_damage_indicators(render.local_player_index);
+				/* port: the HUD/reticle cycle (hud_toggle.c): the HUD proper
+				(unit and weapon panels, action prompt, nav points, damage
+				direction) only in its first state; the weapon interface is
+				called whenever the reticle shows (it draws the reticle, and
+				while zoomed its scope, alone then: hud_weapon.c) */
+				if (hud_toggle_hud_visible())
+				{
+					hud_render_weapon_interface(player);
+					hud_show_action_response(player_index);
+					hud_play_unit_sounds(player, hud_scripted_globals->show_hud);
+					hud_render_unit_interface(player);
+					hud_render_nav_points(render.local_player_index);
+					hud_render_damage_indicators(render.local_player_index);
+				}
+				else if (hud_toggle_reticle_visible(render.local_player_index))
+				{
+					hud_render_weapon_interface(player);
+					hud_play_unit_sounds(player, FALSE);
+				}
+				else
+				{
+					hud_play_unit_sounds(player, FALSE);
+				}
 			}
 			else
 			{

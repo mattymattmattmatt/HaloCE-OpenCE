@@ -137,6 +137,14 @@ static const struct config_setting config_settings[] =
 		"Draw the HUD (meters, counters, panels, motion sensor, reticles,\n"
 		"waypoints, scopes) from the high-res assets (8x the maps' bitmaps);\n"
 		"false draws the maps' own bitmaps." },
+	{ "display.hud_toggle", _config_boolean, "true", "HALO_HUD_TOGGLE", _environment_value, _platform_all,
+		"In play, the gamepad Back (Select) button steps the HUD and reticle\n"
+		"through shown, HUD hidden with the reticle shown, and both hidden\n"
+		"(the reticle and scope stay while zoomed); false: no cycle, both\n"
+		"shown. The keyboard's scoreboard key (Tab by default) is its twin." },
+	{ "display.hud_toggle_start", _config_integer, "0", "HALO_HUD_TOGGLE_START", _environment_value, _platform_all,
+		"The state the HUD/reticle cycle starts a map in: 0 both shown,\n"
+		"1 HUD hidden (reticle shown), 2 both hidden (reticle while zoomed)." },
 	{ "display.high_res_text", _config_boolean, "true", "HALO_HIGH_RES_TEXT", _environment_value, _platform_all,
 		"Draw the menus' and HUD's text with the fonts in port/assets/fonts\n"
 		"(Overpass) at the resolution the game draws at, and the menus' titles\n"
