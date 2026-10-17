@@ -49,6 +49,8 @@ front of the player and gibs it, to try it.
 #include "math/real_math.h"
 #include "models/model_definitions.h"
 #include "objects/damage.h"
+#include "game/game_globals.h" /* MAXIMUM_NUMBER_OF_MATERIAL_TYPES, for the next */
+#include "objects/damage_effect_definitions.h"
 #include "objects/damage_resistances.h"
 #include "objects/object_definitions.h"
 #include "objects/objects.h"
@@ -207,6 +209,8 @@ struct gore_hunter_hit
 	long unit_index;
 	long time;
 	real_vector3d direction; /* the shell's way */
+	real_point3d epicenter; /* where the shell went off (the kill's match) */
+	long owner_object_index; /* who fired it (the kill's other match) */
 };
 static struct gore_hunter_hit gore_hunter_hits[GORE_MAXIMUM_HUNTER_HITS];
 static struct gore_headless *gore_headless_find(long unit_index);
@@ -2071,16 +2075,85 @@ static boolean gore_is_hunter(long definition_index)
 	return name && strstr(name, "hunter") != NULL;
 }
 
-/* a scorpion cannon shell's direct impact on a hunter, remembered for its
-detonation's killing blow: the impact damage's tag names the scorpion and
-its category is an explosive or mounted-weapon one (damage.c), which a bullet (the tank's other
-weapons and every splash hit are not. Name guards: both are the map's own
+/* damage categories, mirroring damage.c's own (file-local) enum, for the
+hunter log below */
+static char const *gore_damage_category_name(short category)
+{
+	static char const *const names[] = {
+		"none", "falling", "bullet", "grenade", "highexplosive", "sniper",
+		"melee", "flame", "mountedweapon", "vehicle", "plasma", "needle",
+		"shotgun",
+	};
+
+	return category >= 0 && category < NUMBEROF(names) ? names[category] : "?";
+}
+
+/* every damage event on a hunter, logged behind game.gore_log: a retest
+must be able to see exactly what the tank (or anything else) delivered */
+static void gore_hunter_log_damage(long unit_index, struct damage_data const *damage)
+{
+	struct object_datum *victim = object_try_and_get_and_verify_type(unit_index, _object_mask_biped);
+	struct object_datum *owner;
+	real dx, dy, dz;
+
+	if (!victim || !gore_is_hunter(victim->definition_index))
+		return;
+	owner = damage->owner_object_index != NONE ?
+		(struct object_datum *)object_try_and_get(damage->owner_object_index) : NULL;
+	dx = damage->epicenter.x - victim->object.bounding_sphere_center.x;
+	dy = damage->epicenter.y - victim->object.bounding_sphere_center.y;
+	dz = damage->epicenter.z - victim->object.bounding_sphere_center.z;
+	error(_error_silent,
+		"[Gore] hunter damage: '%s' cat %s(%ld) aoe %ld from_weapon %ld owner '%s' epicentre %.2f wu from centre, %.2f clear (radius %.2f)",
+		damage->definition_index != NONE ? tag_get_name(damage->definition_index) : "(no damage tag)",
+		damage->definition_index != NONE ?
+			gore_damage_category_name(damage_effect_definition_get(damage->definition_index)->damage.category) : "?",
+		damage->definition_index != NONE ?
+			(long)damage_effect_definition_get(damage->definition_index)->damage.category : -1L,
+		(long)TEST_FLAG(damage->flags, _damage_area_of_effect_bit),
+		(long)TEST_FLAG(damage->flags, _damage_from_weapon_bit),
+		owner ? tag_get_name(owner->definition_index) : "(none)",
+		(double)sqrtf(dx * dx + dy * dy + dz * dz),
+		(double)(sqrtf(dx * dx + dy * dy + dz * dz) - victim->object.bounding_sphere_radius),
+		(double)victim->object.bounding_sphere_radius);
+	(void)unit_index;
+}
+
+/* a scorpion cannon shell's direct hit on a hunter, remembered for the
+kill that follows (GORE_HUNTER_DIRECT_TICKS).
+
+WHY THIS SHAPE (found the hard way, 2026-10-17: a reported tank kill on a
+hunter did not gib): this build's first version asked for a NON-area-of-
+effect, from-a-weapon, scorpion-named damage event - the shell's own
+impact damage. That event never happens. In this engine a projectile
+applies a separate impact damage on an object collision only if its tag
+has one (projectiles.c, projectile_collision), and the scorpion shell's
+tag has none: it only detonates. The detonation is an effect whose
+damage-effect part calls area_of_effect_cause_damage (effects.c), which
+flags the damage area-of-effect BEFORE object_cause_damage sees it
+(damage.c, area_of_effect_cause_damage_to_object) and never flags it
+from-a-weapon - so the old record condition refused every real hit, and
+the kill judgement's own scorpion-name demand refused the rest (one
+detonation also delivers a generic 'weapons\frag grenade\shock wave'
+event at the same epicentre, which can be the killing event). Signals
+that DO exist, and that a frag grenade cannot fake:
+  A) a scorpion-named non-AoE impact (kept, in case a map's shell has one);
+  B) a scorpion-named AoE blast whose epicentre is at the hunter's body
+     (inside its bounding sphere, or within 0.30 wu past it): the shell
+     went off ON the hunter, not beside it. A grenade's damage is never
+     scorpion-named ('weapons\frag grenade\...', category grenade), so
+     it records nothing, at the feet or anywhere else; the record this
+     leaves is then matched to the kill by epicentre and owner (below).
+The candidate category (explosive or mounted-weapon) is damage.c's part;
+the name, geometry and bookkeeping are here. Name guards: the map's own
 strings, compared only, never passed on as a name to load. */
 static void gore_hunter_direct_record(long unit_index, struct damage_data const *damage)
 {
 	struct object_datum *victim;
 	struct gore_hunter_hit *hit = NULL;
 	char const *damage_name;
+	boolean area_of_effect, direct;
+	real dx, dy, dz, centre_distance, clear;
 	short index;
 
 	if (!gore_enabled() || !config_boolean("game.gore_hunter_tank"))
@@ -2091,6 +2164,26 @@ static void gore_hunter_direct_record(long unit_index, struct damage_data const 
 		return;
 	damage_name = damage->definition_index != NONE ? tag_get_name(damage->definition_index) : NULL;
 	if (!damage_name || !strstr(damage_name, "scorpion"))
+	{
+		if (config_boolean("game.gore_log"))
+			error(_error_silent, "[Gore] hunter hit by '%s': not scorpion damage, no record",
+				damage_name ? damage_name : "(unnamed damage)");
+		return;
+	}
+	dx = damage->epicenter.x - victim->object.bounding_sphere_center.x;
+	dy = damage->epicenter.y - victim->object.bounding_sphere_center.y;
+	dz = damage->epicenter.z - victim->object.bounding_sphere_center.z;
+	centre_distance = sqrtf(dx * dx + dy * dy + dz * dz);
+	clear = centre_distance - victim->object.bounding_sphere_radius;
+	area_of_effect = TEST_FLAG(damage->flags, _damage_area_of_effect_bit);
+	direct = !area_of_effect || clear <= 0.30f;
+	if (config_boolean("game.gore_log"))
+		error(_error_silent, "[Gore] hunter hit by scorpion damage '%s': %s (epicentre %.2f wu from centre, %.2f clear) %s",
+			damage_name,
+			area_of_effect ? "blast" : "impact",
+			(double)centre_distance, (double)clear,
+			direct ? "-> DIRECT HIT recorded" : "-> splash, no record");
+	if (!direct)
 		return;
 	for (index = 0; index < GORE_MAXIMUM_HUNTER_HITS; index++)
 	{
@@ -2103,57 +2196,79 @@ static void gore_hunter_direct_record(long unit_index, struct damage_data const 
 		return;
 	hit->unit_index = unit_index;
 	hit->time = game_time_get();
+	hit->epicenter = damage->epicenter;
+	hit->owner_object_index = damage->owner_object_index;
 	hit->direction = damage->direction;
 	if (normalize3d(&hit->direction) == 0.f)
-		hit->direction = *global_up3d;
-	if (config_boolean("game.gore_log"))
-		error(_error_silent, "[Gore] scorpion shell direct hit on hunter %s (recorded)",
-			tag_get_name(victim->definition_index));
+	{
+		/* an AoE hit's direction already points from its epicentre into
+		the body (damage.c sets it so); rebuild it if it was empty */
+		hit->direction.i = dx; hit->direction.j = dy; hit->direction.k = dz;
+		if (normalize3d(&hit->direction) == 0.f)
+			hit->direction = *global_up3d;
+	}
 	return;
 }
 
-/* a hunter's killing hit judged: only a scorpion shell that hit it
-directly gibs it (its impact, or the detonation that followed within
-GORE_HUNTER_DIRECT_TICKS; gore_hunter_direct_record). A scorpion kill with
-no direct hit on record is the shell landing beside it: splash, refused.
-Anything else is refused as hunters always were. */
+/* a hunter's killing hit judged: a recorded direct shell hit (above)
+qualifies the kill that follows within GORE_HUNTER_DIRECT_TICKS - but the
+killing event itself need not be scorpion-named, because one detonation
+delivers both the scorpion blast and a generic shock-wave event at the
+same epicentre, and either can land the kill. So the kill matches the
+record on: its epicentre within a metre of the shell's, OR its own tag
+naming the scorpion - and, when both sides name an owner, the same owner
+(the tank's gunner), which a frag grenade thrown at the same corpse in
+the same third of a second would have to share to fake it; a grenade on
+its own never records, so it can never reach this test qualified. A
+scorpion kill with no record is the shell landing beside the hunter:
+splash, refused. Anything else is refused as hunters always were. */
 static boolean gore_hunter_tank_gib(long unit_index, struct damage_data const *damage, real *force_out)
 {
 	char const *damage_name;
+	boolean scorpion_named, owner_matches;
+	real dx, dy, dz, epicentre_distance;
 	short index;
 
 	*force_out = 0.f;
 	if (!config_boolean("game.gore_hunter_tank") || !gore_is_hunter(object_get(unit_index)->definition_index))
 		return FALSE;
 	damage_name = damage->definition_index != NONE ? tag_get_name(damage->definition_index) : NULL;
-	if (!damage_name || !strstr(damage_name, "scorpion"))
-	{
-		if (config_boolean("game.gore_log"))
-			error(_error_silent, "[Gore] hunter killed by %s not gibbed: only a direct scorpion shell gibs a hunter",
-				damage_name ? damage_name : "(unnamed damage)");
-		return FALSE;
-	}
+	scorpion_named = damage_name && strstr(damage_name, "scorpion") != NULL;
 	for (index = 0; index < GORE_MAXIMUM_HUNTER_HITS; index++)
 	{
 		struct gore_hunter_hit *hit = &gore_hunter_hits[index];
 
-		if (hit->unit_index == unit_index &&
-			game_time_get() - hit->time <= GORE_HUNTER_DIRECT_TICKS)
-		{
-			gore_last_direction = hit->direction;
-			gore_last_direction_valid = TRUE;
-			hit->unit_index = NONE; /* spent */
-			if (config_boolean("game.gore_log"))
-				error(_error_silent, "[Gore] hunter gibbed by direct scorpion shell hit (%s, direct impact %ld ticks ago)",
-					damage_name, game_time_get() - hit->time);
-			/* large body, hard shell: the launch caps at 3 */
-			*force_out = 2.8f;
-			return TRUE;
-		}
+		if (hit->unit_index != unit_index ||
+			game_time_get() - hit->time > GORE_HUNTER_DIRECT_TICKS)
+			continue;
+		dx = damage->epicenter.x - hit->epicenter.x;
+		dy = damage->epicenter.y - hit->epicenter.y;
+		dz = damage->epicenter.z - hit->epicenter.z;
+		epicentre_distance = sqrtf(dx * dx + dy * dy + dz * dz);
+		owner_matches = hit->owner_object_index == NONE ||
+			damage->owner_object_index == NONE ||
+			hit->owner_object_index == damage->owner_object_index;
+		if (config_boolean("game.gore_log"))
+			error(_error_silent, "[Gore] hunter kill judged: killing damage '%s', direct hit %ld ticks ago, killing epicentre %.2f wu from the shell's, owner %s -> %s",
+				damage_name ? damage_name : "(unnamed damage)",
+				game_time_get() - hit->time, (double)epicentre_distance,
+				owner_matches ? "matches" : "differs",
+				owner_matches && (scorpion_named || epicentre_distance <= 1.f) ?
+					"GIBS" : "not this shell's kill");
+		if (!owner_matches || (!scorpion_named && epicentre_distance > 1.f))
+			return FALSE;
+		gore_last_direction = hit->direction;
+		gore_last_direction_valid = TRUE;
+		hit->unit_index = NONE; /* spent */
+		/* large body, hard shell: the launch caps at 3 */
+		*force_out = 2.8f;
+		return TRUE;
 	}
 	if (config_boolean("game.gore_log"))
-		error(_error_silent, "[Gore] hunter killed by %s not gibbed: scorpion splash, no direct shell hit on record",
-			damage_name);
+		error(_error_silent, "[Gore] hunter killed by %s not gibbed: %s",
+			damage_name ? damage_name : "(unnamed damage)",
+			scorpion_named ? "scorpion splash, no direct shell hit on record" :
+				"only a direct scorpion shell gibs a hunter");
 	return FALSE;
 }
 
@@ -2178,12 +2293,15 @@ gore_unit_hit's own type check, as are victims in a vehicle (below) and
 any non-shotgun damage. The player as victim follows the explosion rules:
 gibbed and hidden, not deleted. */
 
-void gore_unit_damage_begin(long unit_index, struct damage_data const *damage, boolean shotgun, boolean shell_direct)
+void gore_unit_damage_begin(long unit_index, struct damage_data const *damage, boolean shotgun, boolean shell_candidate)
 {
 	struct object_datum *victim;
 
-	/* (a tank shell's direct impact on a hunter, for the kill that follows) */
-	if (shell_direct)
+	/* (every hunter hit logged when asked, so a retest shows what came) */
+	if (config_boolean("game.gore_log"))
+		gore_hunter_log_damage(unit_index, damage);
+	/* (a tank shell's direct hit on a hunter, for the kill that follows) */
+	if (shell_candidate)
 		gore_hunter_direct_record(unit_index, damage);
 	struct object_datum *shooter;
 	struct gore_shotgun_blast *blast = NULL;
