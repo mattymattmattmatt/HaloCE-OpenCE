@@ -1108,7 +1108,10 @@ public final class TouchControls extends View implements SensorEventListener, In
     // ---------- the gyroscope and the vibration
 
     private void updateSensors() {
-        boolean needed = deviceInputActive && showing && !hidden && layout.gyroscopeEnabled && gyroscope != null;
+        // (the gyroscope is its own switch: it aims alongside a controller
+        // too, whose connecting hides these controls - shown() - and must
+        // not stop the aiming; the guest adds its turn to the stick's)
+        boolean needed = deviceInputActive && layout.gyroscopeEnabled && gyroscope != null;
         if (needed && !gyroRegistered) {
             gyroAim.reset();
             gyroRegistered = sensors.registerListener(this, gyroscope, SensorManager.SENSOR_DELAY_GAME);
@@ -1121,7 +1124,7 @@ public final class TouchControls extends View implements SensorEventListener, In
 
     @Override
     public void onSensorChanged(SensorEvent event) {
-        if (!deviceInputActive || !showing || hidden || !layout.gyroscopeEnabled || editing || openDialogs > 0) {
+        if (!deviceInputActive || !layout.gyroscopeEnabled || editing || openDialogs > 0) {
             gyroAim.reset();
             return;
         }
@@ -1189,7 +1192,10 @@ public final class TouchControls extends View implements SensorEventListener, In
         paint.setColor(alpha(active ? 0xffaee7ff : 0xffffffff, opacity));
         canvas.drawCircle(x, y, radius, paint);
         paint.setStyle(Paint.Style.FILL);
-        paint.setColor(alpha(Color.WHITE, Math.max(opacity, 0.5f)));
+        // (opacity 0 is fully invisible, labels too; above it labels keep
+        // half strength so they stay readable - toolbarItem passes at
+        // least half itself, so the toolbar stays findable at 0)
+        paint.setColor(alpha(Color.WHITE, opacity == 0f ? 0f : Math.max(opacity, 0.5f)));
         paint.setTextAlign(Paint.Align.CENTER);
         paint.setTextSize(textSize);
         // (a long name, "Y / Weapon", is made smaller to fit inside the circle)

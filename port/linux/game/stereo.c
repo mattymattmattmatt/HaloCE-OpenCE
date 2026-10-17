@@ -53,6 +53,13 @@ whole player window per eye (windows[eye] = player) and offsets along
 the view's right vector (cinema mode), with the runtime's eye poses
 about 64 mm apart at the same 3.048 m world unit (vr.world_scale
 0.328084 wu per metre, vr.cinema_separation 0.064 m).
+
+Wide screens: the design is as many columns as the display's shape
+gives (halo_screen_width), and mono centres the 640-wide menus in it
+with an offset (halo_screen_ui_offset). The squeeze maps the whole
+design into the eye, offset included in the design's own margins, so
+an eye's menus take no offset (stereo_ui_begin) - with it, a 20:9
+phone pushed every eye's menu a fifth of the eye to the right.
 */
 
 #include "cseries.h"
@@ -66,6 +73,7 @@ about 64 mm apart at the same 3.048 m world unit (vr.world_scale
 int config_boolean(const char *name);
 double config_real(const char *name); /* port_config.c: a double, not the game's real */
 long halo_screen_width(void); /* d3d8_gl.c: the design width (640, more when wide) */
+void halo_screen_ui_offset(unsigned char centered); /* d3d8_gl.c: the wide screen's menu centering */
 
 boolean stereo_sbs_enabled(void)
 {
@@ -103,8 +111,16 @@ void stereo_ui_begin(union rectangle2d const *viewport_bounds)
 {
 	long width = viewport_bounds ? viewport_bounds->x1 - viewport_bounds->x0 : 0;
 
+	/* the menus' design is the Xbox's 640 columns, however wide the
+	screen's design runs (halo_screen_width); mono centres those in
+	the wide design with an offset (d3d8_gl.c). An eye takes the 640
+	whole: the squeeze maps them onto the eye and the offset stays
+	off, or a wide phone's menus sit a fifth of the eye to the right
+	(the offset) or left (the margins) */
 	ui_design_width = stereo_sbs_enabled() && width > 0 &&
-		2 * width == halo_screen_width() ? halo_screen_width() : 0;
+		2 * width == halo_screen_width() ? 640 : 0;
+	if (ui_design_width)
+		halo_screen_ui_offset(FALSE);
 }
 
 void stereo_ui_end(void)
