@@ -31,6 +31,8 @@ export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-alsa}"
 export HALO_DATA_ROOT="$PWD"
 echo "SDL_VIDEODRIVER=$SDL_VIDEODRIVER SDL_AUDIODRIVER=$SDL_AUDIODRIVER"
 echo "binary: $(ls -l ./halo)"
+echo "--- libraries the loader will use (all glibc must come from ./libs) ---"
+./libs/ld-linux-armhf.so.3 --library-path "$PWD/libs" --list ./halo 2>&1
 ./libs/ld-linux-armhf.so.3 --library-path "$PWD/libs" ./halo
 rc=$?
 echo "game exited with code $rc"

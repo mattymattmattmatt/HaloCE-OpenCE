@@ -1,0 +1,68 @@
+R36S test package - bundled libraries (libs/)
+==============================================
+Rule learned on-device (2026-10-17): the glibc set must be COMPLETE and
+MATCHED - every member below marked (glibc) comes from the one armhf
+sysroot the binary was built against (Debian GLIBC 2.41). The first
+package shipped only libc/libm/the loader; the loader then took the
+firmware's GLIBC 2.30 librt.so.1, which demands its own libc's
+GLIBC_PRIVATE symbols (__clock_nanosleep) and the game died at launch
+with "symbol lookup error". If any (glibc) member is missing, the same
+mix happens. libEGL/libGLESv2/libGLdispatch are deliberately NOT bundled:
+they must come from the device's Mali stack.
+
+* ld-linux-armhf.so.3  (glibc)
+* libBrokenLocale.so.1  (glibc)
+  libFLAC.so.14
+  libSDL3.so.0
+  libX11-xcb.so.1
+  libX11.so.6
+  libXau.so.6
+  libXcursor.so.1
+  libXdmcp.so.6
+  libXext.so.6
+  libXfixes.so.3
+  libXi.so.6
+  libXrandr.so.2
+  libXrender.so.1
+  libXss.so.1
+* libanl.so.1  (glibc)
+  libasound.so.2
+  libasyncns.so.0
+  libbsd.so.0
+* libc.so.6  (glibc)
+  libcap.so.2
+  libdbus-1.so.3
+  libdecor-0.so.0
+* libdl.so.2  (glibc)
+  libdrm.so.2
+  libexpat.so.1
+  libffi.so.8
+  libgbm.so.1
+  libgcc_s.so.1
+* libm.so.6  (glibc)
+  libmd.so.0
+  libmp3lame.so.0
+  libmpg123.so.0
+* libnss_compat.so.2  (glibc)
+* libnss_dns.so.2  (glibc)
+* libnss_files.so.2  (glibc)
+* libnss_hesiod.so.2  (glibc)
+  libogg.so.0
+  libopus.so.0
+  libpipewire-0.3.so.0
+* libpthread.so.0  (glibc)
+  libpulse.so.0
+  libpulsecommon-17.0.so
+* libresolv.so.2  (glibc)
+* librt.so.1  (glibc)
+  libsndfile.so.1
+  libsndio.so.7
+  libsystemd.so.0
+* libutil.so.1  (glibc)
+  libvorbis.so.0
+  libvorbisenc.so.2
+  libwayland-client.so.0
+  libwayland-cursor.so.0
+  libwayland-egl.so.1
+  libxcb.so.1
+  libxkbcommon.so.0

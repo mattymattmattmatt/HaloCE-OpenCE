@@ -10,7 +10,11 @@ halo-r36s-test/
   halo              the game (32-bit ARM, OpenGL ES build, gore mod included)
   libs/             its 32-bit libraries, bundled so the firmware's own
                     libraries (old on ArkOS) don't matter, including its
-                    own loader and libc. The Mali graphics libraries
+                    own loader and libc - the COMPLETE matched set,
+                    including librt/libpthread/libdl: missing one out
+                    makes the loader take the firmware's older copy and
+                    the game dies at launch on GLIBC_PRIVATE symbols
+                    (that was update 1's fix). The Mali graphics libraries
                     (libEGL/libGLESv2) deliberately come from the system.
   maps/             all 24 stock maps (1.8 GB) - everything the game needs
   custom_maps/      empty; Custom Edition maps would go here (untested)
