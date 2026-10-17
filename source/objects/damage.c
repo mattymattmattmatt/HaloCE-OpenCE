@@ -1479,6 +1479,9 @@ void object_cause_damage(
 
 	damage_effect = damage_effect_definition_get(damage->definition_index);
 	damage_definition = &damage_effect->damage;
+	/* port: the gore prototype aggregates a shotgun's pellets before any
+	of this pellet's damage lands (port/linux/game/gore.c) */
+	gore_unit_damage_begin(object_index, damage, damage_definition->category == _damage_category_shotgun);
 	damage_was_modified = FALSE;
 	parent_takes_body_damage = TRUE;
 

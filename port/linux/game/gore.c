@@ -27,6 +27,8 @@ dropped weapon):
   a splat decal where they first land.
 - the dying unit is deleted (its kill was counted by its death).
 
+A shotgun blast at point blank that kills in one shot also gibs (below).
+
 Settings: game.gore, game.gore_threshold_scale, game.gore_max_pieces,
 game.gore_piece_seconds, game.gore_piece_far_distance, game.gore_blood_seconds,
 game.gore_vehicle_blood, game.gore_vehicle_marks; debug.gore_test (seconds) brings the biped nearest
@@ -186,6 +188,29 @@ static struct gore_piece gore_pieces[GORE_MAXIMUM_PIECES];
 static boolean gore_last_player;
 static struct gore_headless *gore_headless_find(long unit_index);
 static struct gore_pending gore_pending[GORE_MAXIMUM_PENDING];
+
+/* a shotgun blast's pellets, aggregated as they land (gore_unit_damage_begin
+is called before each pellet's damage): the victim's vitality before the
+first pellet, the clear shooter-to-victim distance then, and how many
+pellets have hit. 6 ticks is 200 ms at 30 ticks a second: one trigger
+pull's pellets land inside it, the shotgun's next shot (about a second)
+starts a new blast on the by-then wounded victim. */
+#define GORE_SHOTGUN_WINDOW_TICKS 6
+#define GORE_MAXIMUM_SHOTGUN_BLASTS 16
+struct gore_shotgun_blast
+{
+	long victim_index;
+	long owner_object_index;
+	long owner_player_index;
+	long damage_definition_index;
+	long first_tick;
+	long last_tick;
+	short pellets;
+	boolean decided; /* a kill from this blast was judged (gib or not) */
+	real pre_vitality; /* body+shield, 0..1 of the two maxima together */
+	real distance; /* metres, clear of the two bounding spheres */
+};
+static struct gore_shotgun_blast gore_shotgun_blasts[GORE_MAXIMUM_SHOTGUN_BLASTS];
 static unsigned long gore_seed = 0x6f726531;
 static short gore_test_done;
 static long gore_piece_unit_definition = NONE; /* (the unit coming apart) */
@@ -1936,6 +1961,8 @@ void gore_reset(void)
 		gore_pending[index].unit_index = NONE;
 	for (index = 0; index < GORE_MAXIMUM_HEADLESS; index++)
 		gore_headless[index].unit_index = NONE;
+	for (index = 0; index < GORE_MAXIMUM_SHOTGUN_BLASTS; index++)
+		gore_shotgun_blasts[index].victim_index = NONE;
 	/* (the decals went with the map or the loaded game: forgotten, not
 	deleted) */
 	for (index = 0; index < GORE_MAXIMUM_VEHICLE_MARKS; index++)
@@ -1949,6 +1976,158 @@ void gore_reset(void)
 		gore_coverages[index].vehicle_index = NONE;
 	render_model_part_blood_proc = gore_render_part_blood;
 	gore_test_done = 0;
+}
+
+/* ---------- point-blank one-shot shotgun gibs
+
+A shotgun's damage arrives as a pellet at a time (15 projectiles a shot in
+the stock tags: weapons.c fires trigger projectiles_per_shot of them, each
+its own projectile and its own object_cause_damage). gore_unit_damage_begin
+(damage.c, object_cause_damage, before the pellet's shield or body damage
+is dealt) aggregates them per shooter, victim and damage tag: the first
+pellet of a blast captures the victim's body and shield together (each an
+actual vitality over its maximum, summed over the two maxima), so a victim
+already wounded below game.gore_shotgun_min_vitality when the blast began
+is not a one-shot kill however the blast ends. The clear distance is the
+shooter-to-victim centre distance less the two bounding radii, in metres:
+two bipeds touching are about two metres centre to centre, so
+game.gore_shotgun_range (2.0 m clear) is arm's length, not two metres of
+body. A kill judged within the window gibs with a fixed force along the
+killing pellet's direction (the shot's way, with gore_piece_launch's own
+upward bias); the pieces, blood and the player's hidden-not-deleted unit
+are gore_unit_gib's, as for an explosion. Hunters (and any type gore never
+gibs) are refused by gore_unit_hit's own type check, as are victims in a
+vehicle (below) and any non-shotgun damage. The player as victim follows
+the explosion rules: gibbed and hidden, not deleted. */
+
+void gore_unit_damage_begin(long unit_index, struct damage_data const *damage, boolean shotgun)
+{
+	struct object_datum *victim;
+	struct object_datum *shooter;
+	struct gore_shotgun_blast *blast = NULL;
+	struct gore_shotgun_blast *free_blast = NULL;
+	long now = game_time_get();
+	short index;
+
+	if (!shotgun || !gore_enabled() || !config_boolean("game.gore_shotgun"))
+		return;
+	victim = object_try_and_get_and_verify_type(unit_index, _object_mask_biped);
+	if (!victim || TEST_FLAG(victim->object.damage_flags, _object_dead_bit) ||
+		victim->object.parent_object_index != NONE ||
+		damage->owner_object_index == NONE || damage->owner_object_index == unit_index)
+		return;
+	shooter = object_try_and_get_and_verify_type(damage->owner_object_index, _object_mask_biped);
+	if (!shooter)
+		return;
+	for (index = 0; index < GORE_MAXIMUM_SHOTGUN_BLASTS; index++)
+	{
+		struct gore_shotgun_blast *candidate = &gore_shotgun_blasts[index];
+
+		if (!free_blast && (candidate->victim_index == NONE ||
+			now - candidate->last_tick > GORE_SHOTGUN_WINDOW_TICKS))
+			free_blast = candidate; /* an expired blast's slot serves again */
+		if (candidate->victim_index == unit_index &&
+			candidate->owner_object_index == damage->owner_object_index &&
+			candidate->damage_definition_index == damage->definition_index &&
+			now - candidate->last_tick <= GORE_SHOTGUN_WINDOW_TICKS)
+			blast = candidate;
+	}
+	if (!blast)
+	{
+		real maximum_body, maximum_shield;
+
+		blast = free_blast;
+		if (!blast)
+			return; /* sixteen blasts in flight at once: this one is untracked, and cannot gib */
+		blast->victim_index = unit_index;
+		blast->owner_object_index = damage->owner_object_index;
+		blast->owner_player_index = damage->owner_player_index;
+		blast->damage_definition_index = damage->definition_index;
+		blast->first_tick = now;
+		blast->pellets = 0;
+		blast->decided = FALSE;
+		maximum_body = object_get_maximum_body_vitality(unit_index, FALSE);
+		maximum_shield = object_get_maximum_shield_vitality(unit_index, FALSE);
+		blast->pre_vitality = (maximum_body + maximum_shield) > 0.f ?
+			(object_get_actual_body_vitality(unit_index, FALSE) +
+				object_get_actual_shield_vitality(unit_index, FALSE)) / (maximum_body + maximum_shield) :
+			victim->object.body_vitality;
+		blast->distance = (real)sqrt(distance_squared3d(&shooter->object.position, &victim->object.position)) *
+			GORE_METRES_PER_WORLD_UNIT -
+			(shooter->object.bounding_sphere_radius + victim->object.bounding_sphere_radius) *
+			GORE_METRES_PER_WORLD_UNIT;
+		if (blast->distance < 0.f)
+			blast->distance = 0.f;
+	}
+	blast->last_tick = now;
+	blast->pellets++;
+	return;
+}
+
+/* a killing shotgun hit's blast, judged once: gib (with its force), or the
+reason not, logged with game.gore_log */
+static boolean gore_shotgun_gib(long unit_index, struct damage_data const *damage, real *force_out)
+{
+	struct gore_shotgun_blast *blast = NULL;
+	long now = game_time_get();
+	short index;
+	real minimum = (real)config_real("game.gore_shotgun_min_vitality");
+	real range = (real)config_real("game.gore_shotgun_range");
+
+	*force_out = 0.f;
+	if (!config_boolean("game.gore_shotgun"))
+		return FALSE;
+	for (index = 0; index < GORE_MAXIMUM_SHOTGUN_BLASTS; index++)
+	{
+		struct gore_shotgun_blast *candidate = &gore_shotgun_blasts[index];
+
+		if (candidate->victim_index == unit_index &&
+			candidate->owner_object_index == damage->owner_object_index &&
+			candidate->damage_definition_index == damage->definition_index &&
+			now - candidate->last_tick <= GORE_SHOTGUN_WINDOW_TICKS &&
+			now - candidate->first_tick <= GORE_SHOTGUN_WINDOW_TICKS)
+			blast = candidate;
+	}
+	if (!blast)
+	{
+		char const *damage_name = damage->definition_index != NONE ?
+			tag_get_name(damage->definition_index) : NULL;
+
+		if (damage_name && strstr(damage_name, "shotgun") && config_boolean("game.gore_log"))
+			error(_error_silent, "[Gore] shotgun kill on %s not gibbed: no blast tracked (its first pellet was not seen)",
+				tag_get_name(object_get(unit_index)->definition_index));
+		return FALSE;
+	}
+	if (blast->decided)
+		return FALSE;
+	blast->decided = TRUE;
+	if (minimum <= 0.f || minimum > 1.f)
+		minimum = 0.9f;
+	if (range <= 0.f)
+		range = 2.f;
+	if (blast->pre_vitality < minimum)
+	{
+		if (config_boolean("game.gore_log"))
+			error(_error_silent, "[Gore] shotgun kill on %s not gibbed: not a one-shot (vitality %.2f before the blast, needs %.2f; %d pellets, %.2f m)",
+				tag_get_name(object_get(unit_index)->definition_index), blast->pre_vitality, minimum,
+				blast->pellets, blast->distance);
+		return FALSE;
+	}
+	if (blast->distance > range)
+	{
+		if (config_boolean("game.gore_log"))
+			error(_error_silent, "[Gore] shotgun kill on %s not gibbed: not point blank (%.2f m clear, limit %.2f m; vitality %.2f, %d pellets)",
+				tag_get_name(object_get(unit_index)->definition_index), blast->distance, range,
+				blast->pre_vitality, blast->pellets);
+		return FALSE;
+	}
+	if (config_boolean("game.gore_log"))
+		error(_error_silent, "[Gore] shotgun point-blank one-shot gibs %s (vitality %.2f before the blast, %d pellets, %.2f m)",
+			tag_get_name(object_get(unit_index)->definition_index), blast->pre_vitality,
+			blast->pellets, blast->distance);
+	/* a hard shove the shot's way; gore_piece_launch caps it and adds up */
+	*force_out = 2.2f;
+	return TRUE;
 }
 
 static real gore_unit_force(long unit_index, struct damage_data const *damage, real normalized_damage,
@@ -2032,6 +2211,19 @@ boolean gore_unit_hit(long unit_index, struct damage_data const *damage, real no
 		decal_lifetime_minimum = (real)config_real("game.gore_blood_seconds");
 		gore_vehicle_hit_blood(damage->vehicle_impact_object_index, unit_index, force);
 		decal_lifetime_minimum = 0.f;
+	}
+	/* port: a point-blank one-shot shotgun blast gibs whatever its pellet
+	force (tracked in gore_unit_damage_begin, judged there once); a type
+	gore never gibs (the hunter) is refused here as for a blast */
+	if (type && !type->disabled && force < 1.f)
+	{
+		real shotgun_force;
+
+		if (gore_shotgun_gib(unit_index, damage, &shotgun_force))
+		{
+			force = shotgun_force;
+			gore_last_force = force;
+		}
 	}
 	if (!type || type->disabled || force < 1.f)
 		return FALSE;
