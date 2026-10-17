@@ -321,15 +321,11 @@ static const struct config_setting config_settings[] =
 	{ "game.gore_headshots", _config_boolean, "true", "HALO_GORE_HEADSHOTS", _environment_value, _platform_all,
 		"Gore: a sniper rifle kill on the head of a grunt, jackal, elite, marine or the player takes only the head off." },
 	{ "game.gore_shotgun", _config_boolean, "true", "HALO_GORE_SHOTGUN", _environment_value, _platform_all,
-		"Gore: a shotgun blast that kills in one shot at point blank (below)\n"
+		"Gore: any shotgun kill at point blank (below)\n"
 		"makes its victim come apart, however soft a pellet's force is." },
 	{ "game.gore_shotgun_range", _config_real, "2.0", "HALO_GORE_SHOTGUN_RANGE", _environment_value, _platform_all,
 		"Gore shotgun: the farthest clear distance for that, in metres\n"
 		"(shooter to victim, less the two bodies' radii; 2 is arm's length)." },
-	{ "game.gore_shotgun_min_vitality", _config_real, "0.9", "HALO_GORE_SHOTGUN_MIN_VITALITY", _environment_value, _platform_all,
-		"Gore shotgun: the least body and shield together (0 to 1) the victim\n"
-		"must have had before the blast for the kill to count as one shot;\n"
-		"a wounded victim finished off point blank dies normally." },
 	{ "game.gore_log", _config_boolean, "false", "HALO_GORE_LOG", _environment_value, _platform_all,
 		"Log each explosion or vehicle hit on a unit to the console: its\n"
 		"distance, the gore force and whether it came apart." },

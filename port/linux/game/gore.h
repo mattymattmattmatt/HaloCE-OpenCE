@@ -15,9 +15,9 @@ zero (it dies, or was a corpse): whether it gibs. normalized_damage is the
 hit's body damage over the unit's maximum vitality. game.gore_log logs it. */
 boolean gore_unit_hit(long unit_index, struct damage_data const *damage, real normalized_damage);
 /* object_cause_damage (damage.c), before a pellet's damage is dealt: a
-shotgun's pellets are aggregated (one blast, its victim's vitality before
-the first of them), so a point-blank one-shot kill can gib in gore_unit_hit.
-game.gore_shotgun, game.gore_shotgun_range (m), game.gore_shotgun_min_vitality. */
+shotgun's pellets are aggregated into one blast, so a point-blank shotgun
+kill (any victim, however hurt) can gib in gore_unit_hit.
+game.gore_shotgun, game.gore_shotgun_range (m). */
 void gore_unit_damage_begin(long unit_index, struct damage_data const *damage, boolean shotgun);
 /* then, when it said so (after the unit's death, if this hit killed it) */
 void gore_unit_gib_later(long unit_index, struct damage_data const *damage, real normalized_damage);
