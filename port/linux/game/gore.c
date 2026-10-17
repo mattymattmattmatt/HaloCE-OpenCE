@@ -29,6 +29,9 @@ dropped weapon):
 
 Any shotgun kill at point blank also gibs (below).
 
+One exception to the hunters below: a hunter killed by a direct hit from
+a scorpion's cannon shell gibs, with more blood (game.gore_hunter_tank).
+
 Settings: game.gore, game.gore_threshold_scale, game.gore_max_pieces,
 game.gore_piece_seconds, game.gore_piece_far_distance, game.gore_blood_seconds,
 game.gore_vehicle_blood, game.gore_vehicle_marks; debug.gore_test (seconds) brings the biped nearest
@@ -154,6 +157,7 @@ struct gore_piece
 {
 	long object_index;
 	long garbage; /* TRUE: a stock bit flying on its own physics */
+	boolean hunter; /* a hunter's piece: more blood, bigger splats (below) */
 	long age;
 	long life;
 	boolean resting;
@@ -180,12 +184,31 @@ struct gore_pending
 	real_vector3d direction;
 	real force; /* over the threshold, 1 and up */
 	boolean player; /* a player's unit (kept, hidden; its player lets go of it as it dies) */
+	boolean hunter; /* killed by a direct scorpion shell: more blood */
 };
 
 /* ---------- globals */
 
 static struct gore_piece gore_pieces[GORE_MAXIMUM_PIECES];
 static boolean gore_last_player;
+static boolean gore_last_hunter;
+static real_vector3d gore_last_direction;
+static boolean gore_last_direction_valid;
+
+/* a scorpion shell's direct hits on hunters, remembered a third of a
+second: the shell's own detonation, not its impact damage, is usually the
+killing blow of a direct hit, so the kill that follows within the window
+counts as the direct hit's (a shell that lands beside a hunter records
+nothing here, and its splash kill does not gib) */
+#define GORE_HUNTER_DIRECT_TICKS 10
+#define GORE_MAXIMUM_HUNTER_HITS 8
+struct gore_hunter_hit
+{
+	long unit_index;
+	long time;
+	real_vector3d direction; /* the shell's way */
+};
+static struct gore_hunter_hit gore_hunter_hits[GORE_MAXIMUM_HUNTER_HITS];
 static struct gore_headless *gore_headless_find(long unit_index);
 static struct gore_pending gore_pending[GORE_MAXIMUM_PENDING];
 
@@ -1188,6 +1211,20 @@ static void gore_unit_gib(struct gore_pending const *pending)
 	decal_index = type->decal_name ? tag_loaded(DECAL_TAG, type->decal_name) : NONE;
 	if (decal_index == NONE)
 		decal_index = tag_loaded(DECAL_TAG, "effects\\decals\\blood splats\\blood splat");
+	if (pending->hunter)
+	{
+		/* a hunter's own orange splat if the map has one (both spellings
+		tried, as stock maps differ); never the red human splat, and never
+		a NULL name (tag_loaded on one crashed here before): with neither,
+		the hunter's own blood effects still give the colour, decal-less */
+		decal_index = tag_loaded(DECAL_TAG, "effects\\decals\\blood splats\\blood hunter splat");
+		if (decal_index == NONE)
+			decal_index = tag_loaded(DECAL_TAG, "effects\\decals\\blood splats\\hunter blood splat");
+		if (config_boolean("game.gore_log"))
+			error(_error_silent, "[Gore] hunter tank gib: model %ld nodes, %ld regions, splat decal %s",
+				model ? (long)model->nodes.count : 0L, model ? (long)model->regions.count : 0L,
+				decal_index != NONE ? "found" : "none on this map");
+	}
 	center = unit->object.bounding_sphere_center;
 
 	if (model && unit->object.node_matrices.size > 0 && gore_split_by_nodes(unit_index, model, pending,
@@ -1256,6 +1293,50 @@ static void gore_unit_gib(struct gore_pending const *pending)
 		gore_effect_at(blood_effect_index, &center, &pending->direction);
 	}
 
+	/* a hunter carries a lot of blood: three more bursts about its centre
+	(the split already bursts once a piece), ground splats at once, and its
+	pieces marked for longer trails and bigger landing splats below */
+	if (pending->hunter)
+	{
+		short burst;
+		short splat;
+		short made = 0;
+
+		for (burst = 0; burst < 3; burst++)
+		{
+			real_point3d point = center;
+			real_vector3d jitter;
+
+			seed_random_direction3d(&gore_seed, &jitter);
+			point.x += jitter.i * unit->object.bounding_sphere_radius * 0.6f;
+			point.y += jitter.j * unit->object.bounding_sphere_radius * 0.6f;
+			point.z += jitter.k * unit->object.bounding_sphere_radius * 0.3f;
+			gore_effect_at(blood_effect_index, &point, &pending->direction);
+		}
+		if (decal_index != NONE)
+		{
+			for (splat = 0; splat < 5; splat++)
+			{
+				struct collision_result collision;
+				real_point3d from = center;
+				real_vector3d down = { 0.f, 0.f, -1.5f };
+				real_vector3d jitter;
+
+				seed_random_direction3d(&gore_seed, &jitter);
+				from.x += jitter.i * unit->object.bounding_sphere_radius * 0.9f;
+				from.y += jitter.j * unit->object.bounding_sphere_radius * 0.9f;
+				from.z += 0.5f;
+				if (collision_test_vector(_collision_test_environment_flags, &from, &down, unit_index, &collision))
+				{
+					decal_new_from_collision(decal_index, &collision, &down, 1.4f, FALSE, NONE, NULL);
+					made++;
+				}
+			}
+		}
+		if (config_boolean("game.gore_log"))
+			error(_error_silent, "[Gore] hunter tank gib: 3 extra blood bursts, %d ground splats at the split", made);
+	}
+
 	/* the trail effect for the region copies */
 	{
 		short index;
@@ -1264,6 +1345,8 @@ static void gore_unit_gib(struct gore_pending const *pending)
 		{
 			if (gore_pieces[index].object_index != NONE && gore_pieces[index].age == 0 && !gore_pieces[index].garbage)
 				gore_pieces[index].blood_effect_index = trail_effect_index != NONE ? trail_effect_index : blood_effect_index;
+			if (pending->hunter && gore_pieces[index].object_index != NONE && gore_pieces[index].age == 0)
+				gore_pieces[index].hunter = TRUE;
 		}
 	}
 	{
@@ -1398,10 +1481,10 @@ static void gore_piece_update(struct gore_piece *piece)
 			if (piece->decal_index != NONE &&
 				collision_test_vector(_collision_test_environment_flags, &object->object.position, &down, piece->object_index, &collision))
 			{
-				decal_new_from_collision(piece->decal_index, &collision, &down, 1.f, FALSE, NONE, NULL);
+				decal_new_from_collision(piece->decal_index, &collision, &down, piece->hunter ? 1.4f : 1.f, FALSE, NONE, NULL);
 			}
 		}
-		else if (!piece->impacted && piece->age <= 36 && (piece->age % 12) == 0)
+		else if (!piece->impacted && piece->age <= (piece->hunter ? 90 : 36) && (piece->age % (piece->hunter ? 6 : 12)) == 0)
 		{
 			gore_effect_at(piece->blood_effect_index, &object->object.position, global_down3d);
 		}
@@ -1436,7 +1519,7 @@ static void gore_piece_update(struct gore_piece *piece)
 						piece->age, piece->position.x, piece->position.y, piece->position.z);
 					piece->impacted = TRUE;
 					if (piece->decal_index != NONE)
-						decal_new_from_collision(piece->decal_index, &collision, &step, 0.6f, FALSE, NONE, NULL);
+						decal_new_from_collision(piece->decal_index, &collision, &step, piece->hunter ? 1.3f : 0.6f, FALSE, NONE, NULL);
 					gore_effect_at(piece->blood_effect_index, &collision.point, &collision.plane.n);
 				}
 				if (magnitude3d(&piece->velocity) < 0.02f && collision.plane.n.k > 0.5f)
@@ -1452,7 +1535,7 @@ static void gore_piece_update(struct gore_piece *piece)
 			point_from_line3d(&piece->position, &step, 1.f, &piece->position);
 		}
 		gore_rotate(piece->rotation, &piece->spin);
-		if (!piece->impacted && piece->age <= 36 && (piece->age % 12) == 0)
+		if (!piece->impacted && piece->age <= (piece->hunter ? 90 : 36) && (piece->age % (piece->hunter ? 6 : 12)) == 0)
 			gore_effect_at(piece->blood_effect_index, &piece->position, global_down3d);
 
 		/* the object follows the piece (its clusters, its bounds) */
@@ -1963,6 +2046,8 @@ void gore_reset(void)
 		gore_headless[index].unit_index = NONE;
 	for (index = 0; index < GORE_MAXIMUM_SHOTGUN_BLASTS; index++)
 		gore_shotgun_blasts[index].victim_index = NONE;
+	for (index = 0; index < GORE_MAXIMUM_HUNTER_HITS; index++)
+		gore_hunter_hits[index].unit_index = NONE;
 	/* (the decals went with the map or the loaded game: forgotten, not
 	deleted) */
 	for (index = 0; index < GORE_MAXIMUM_VEHICLE_MARKS; index++)
@@ -1976,6 +2061,100 @@ void gore_reset(void)
 		gore_coverages[index].vehicle_index = NONE;
 	render_model_part_blood_proc = gore_render_part_blood;
 	gore_test_done = 0;
+}
+
+/* a hunter's own tag (its gore type is the disabled one) */
+static boolean gore_is_hunter(long definition_index)
+{
+	char const *name = tag_get_name(definition_index);
+
+	return name && strstr(name, "hunter") != NULL;
+}
+
+/* a scorpion cannon shell's direct impact on a hunter, remembered for its
+detonation's killing blow: the impact damage's tag names the scorpion and
+its category is an explosive or mounted-weapon one (damage.c), which a bullet (the tank's other
+weapons and every splash hit are not. Name guards: both are the map's own
+strings, compared only, never passed on as a name to load. */
+static void gore_hunter_direct_record(long unit_index, struct damage_data const *damage)
+{
+	struct object_datum *victim;
+	struct gore_hunter_hit *hit = NULL;
+	char const *damage_name;
+	short index;
+
+	if (!gore_enabled() || !config_boolean("game.gore_hunter_tank"))
+		return;
+	victim = object_try_and_get_and_verify_type(unit_index, _object_mask_biped);
+	if (!victim || !gore_is_hunter(victim->definition_index) ||
+		TEST_FLAG(victim->object.damage_flags, _object_dead_bit))
+		return;
+	damage_name = damage->definition_index != NONE ? tag_get_name(damage->definition_index) : NULL;
+	if (!damage_name || !strstr(damage_name, "scorpion"))
+		return;
+	for (index = 0; index < GORE_MAXIMUM_HUNTER_HITS; index++)
+	{
+		if (gore_hunter_hits[index].unit_index == unit_index || !hit)
+			hit = &gore_hunter_hits[index];
+		if (gore_hunter_hits[index].unit_index == unit_index)
+			break;
+	}
+	if (!hit)
+		return;
+	hit->unit_index = unit_index;
+	hit->time = game_time_get();
+	hit->direction = damage->direction;
+	if (normalize3d(&hit->direction) == 0.f)
+		hit->direction = *global_up3d;
+	if (config_boolean("game.gore_log"))
+		error(_error_silent, "[Gore] scorpion shell direct hit on hunter %s (recorded)",
+			tag_get_name(victim->definition_index));
+	return;
+}
+
+/* a hunter's killing hit judged: only a scorpion shell that hit it
+directly gibs it (its impact, or the detonation that followed within
+GORE_HUNTER_DIRECT_TICKS; gore_hunter_direct_record). A scorpion kill with
+no direct hit on record is the shell landing beside it: splash, refused.
+Anything else is refused as hunters always were. */
+static boolean gore_hunter_tank_gib(long unit_index, struct damage_data const *damage, real *force_out)
+{
+	char const *damage_name;
+	short index;
+
+	*force_out = 0.f;
+	if (!config_boolean("game.gore_hunter_tank") || !gore_is_hunter(object_get(unit_index)->definition_index))
+		return FALSE;
+	damage_name = damage->definition_index != NONE ? tag_get_name(damage->definition_index) : NULL;
+	if (!damage_name || !strstr(damage_name, "scorpion"))
+	{
+		if (config_boolean("game.gore_log"))
+			error(_error_silent, "[Gore] hunter killed by %s not gibbed: only a direct scorpion shell gibs a hunter",
+				damage_name ? damage_name : "(unnamed damage)");
+		return FALSE;
+	}
+	for (index = 0; index < GORE_MAXIMUM_HUNTER_HITS; index++)
+	{
+		struct gore_hunter_hit *hit = &gore_hunter_hits[index];
+
+		if (hit->unit_index == unit_index &&
+			game_time_get() - hit->time <= GORE_HUNTER_DIRECT_TICKS)
+		{
+			gore_last_direction = hit->direction;
+			gore_last_direction_valid = TRUE;
+			hit->unit_index = NONE; /* spent */
+			if (config_boolean("game.gore_log"))
+				error(_error_silent, "[Gore] hunter gibbed by direct scorpion shell hit (%s, direct impact %ld ticks ago)",
+					damage_name, game_time_get() - hit->time);
+			/* large body, hard shell: the launch caps at 3 */
+			*force_out = 2.8f;
+			return TRUE;
+		}
+	}
+	if (config_boolean("game.gore_log"))
+		error(_error_silent, "[Gore] hunter killed by %s not gibbed: scorpion splash, no direct shell hit on record",
+			damage_name);
+	return FALSE;
 }
 
 /* ---------- point-blank shotgun gibs
@@ -1999,9 +2178,13 @@ gore_unit_hit's own type check, as are victims in a vehicle (below) and
 any non-shotgun damage. The player as victim follows the explosion rules:
 gibbed and hidden, not deleted. */
 
-void gore_unit_damage_begin(long unit_index, struct damage_data const *damage, boolean shotgun)
+void gore_unit_damage_begin(long unit_index, struct damage_data const *damage, boolean shotgun, boolean shell_direct)
 {
 	struct object_datum *victim;
+
+	/* (a tank shell's direct impact on a hunter, for the kill that follows) */
+	if (shell_direct)
+		gore_hunter_direct_record(unit_index, damage);
 	struct object_datum *shooter;
 	struct gore_shotgun_blast *blast = NULL;
 	struct gore_shotgun_blast *free_blast = NULL;
@@ -2186,6 +2369,20 @@ boolean gore_unit_hit(long unit_index, struct damage_data const *damage, real no
 	force = gore_unit_force(unit_index, damage, normalized_damage, &type);
 	gore_last_force = force;
 	gore_last_player = ((struct biped_datum *)unit)->unit.player_index != NONE;
+	gore_last_hunter = FALSE;
+	gore_last_direction_valid = FALSE;
+	/* the one hunter exception: a direct scorpion shell (above) */
+	if (type && type->disabled && gore_is_hunter(unit->definition_index))
+	{
+		real hunter_force;
+
+		if (gore_hunter_tank_gib(unit_index, damage, &hunter_force))
+		{
+			force = hunter_force;
+			gore_last_force = force;
+			gore_last_hunter = TRUE;
+		}
+	}
 	if (damage->vehicle_impact_speed > 0.f && type && force > 0.f)
 	{
 		decal_lifetime_minimum = (real)config_real("game.gore_blood_seconds");
@@ -2205,7 +2402,7 @@ boolean gore_unit_hit(long unit_index, struct damage_data const *damage, real no
 			gore_last_force = force;
 		}
 	}
-	if (!type || type->disabled || force < 1.f)
+	if (!type || (type->disabled && !gore_last_hunter) || force < 1.f)
 		return FALSE;
 	for (index = 0; index < GORE_MAXIMUM_PENDING; index++)
 	{
@@ -2243,7 +2440,8 @@ void gore_unit_gib_later(long unit_index, struct damage_data const *damage, real
 			pending->time = game_time_get();
 			pending->force = MAX(force, 1.f);
 			pending->player = gore_last_player;
-			pending->direction = damage->direction;
+			pending->hunter = gore_last_hunter;
+			pending->direction = gore_last_direction_valid ? gore_last_direction : damage->direction;
 			if (normalize3d(&pending->direction) == 0.f)
 				pending->direction = *global_up3d;
 			return;

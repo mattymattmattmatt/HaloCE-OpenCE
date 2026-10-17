@@ -326,6 +326,10 @@ static const struct config_setting config_settings[] =
 	{ "game.gore_shotgun_range", _config_real, "2.0", "HALO_GORE_SHOTGUN_RANGE", _environment_value, _platform_all,
 		"Gore shotgun: the farthest clear distance for that, in metres\n"
 		"(shooter to victim, less the two bodies' radii; 2 is arm's length)." },
+	{ "game.gore_hunter_tank", _config_boolean, "true", "HALO_GORE_HUNTER_TANK", _environment_value, _platform_all,
+		"Gore: a hunter killed by a direct hit from a scorpion's cannon\n"
+		"shell comes apart, with extra blood; hunters otherwise never gib.\n"
+		"A shell landing beside it (splash) does not count." },
 	{ "game.gore_log", _config_boolean, "false", "HALO_GORE_LOG", _environment_value, _platform_all,
 		"Log each explosion or vehicle hit on a unit to the console: its\n"
 		"distance, the gore force and whether it came apart." },
