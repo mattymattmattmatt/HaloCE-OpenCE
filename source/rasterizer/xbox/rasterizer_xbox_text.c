@@ -67,6 +67,7 @@ symbols in this file:
 #include "rasterizer/rasterizer_console_vars.h"
 #include <xtl.h>
 #include "rasterizer/xbox/rasterizer_xbox_pixel_shader.h"
+#include "stereo.h" /* port: side-by-side stereo 3D menus (port/linux/game/stereo.c) */
 
 /* ---------- constants */
 
@@ -249,6 +250,8 @@ void rasterizer_text_begin(
 
 		window_width = global_window_parameters.camera.viewport_bounds.x1 -
 			global_window_parameters.camera.viewport_bounds.x0;
+		/* port: a stereo eye's menus squeezed into its half (stereo.c) */
+		window_width = (short)stereo_ui_design_width(window_width);
 		window_height = global_window_parameters.camera.viewport_bounds.y1 -
 			global_window_parameters.camera.viewport_bounds.y0;
 		if (parameters->scale)

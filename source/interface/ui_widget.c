@@ -679,6 +679,7 @@ struct widget_instance;
 #include "text/text_group.h"
 #include "text/unicode.h"
 #include "ui_widget.h"
+#include "stereo.h" /* port: side-by-side stereo 3D menus (port/linux/game/stereo.c) */
 
 /* ---------- constants */
 
@@ -7346,6 +7347,10 @@ void render_ui_widgets(
 				bounds.y0 = 0;
 				bounds.x1 = window_bounds->x1 - window_bounds->x0;
 				bounds.y1 = window_bounds->y1 - window_bounds->y0;
+				/* port: a stereo eye's menus are laid out in the whole
+				screen's design space (stereo.c): clip at that width, not
+				the eye's, or a menu's right half is clipped away */
+				bounds.x1 = (short)stereo_ui_design_width(bounds.x1);
 				offset.x = 0;
 				offset.y = 0;
 				/* the mouse drives the first player's menus; a widget shown in

@@ -69,6 +69,7 @@ symbols in this file:
 #include "bitmaps/bitmaps.h"
 #include "math/integer_math.h"
 #include "rasterizer/rasterizer.h"
+#include "stereo.h" /* port: side-by-side stereo 3D menus (port/linux/game/stereo.c) */
 #include "rasterizer/rasterizer_console_vars.h"
 #include "rasterizer/rasterizer_text.h"
 #include "rasterizer/xbox/rasterizer_xbox_hardware_bitmaps.h"
@@ -515,6 +516,10 @@ rasterizer_draw_string(
 					&viewport_bounds,
 					-render.camera.viewport_bounds.x0,
 					-render.camera.viewport_bounds.y0);
+				/* port: a stereo eye's menu text is laid out in the whole
+				screen's design space (stereo.c): do not cull its glyphs
+				at the eye's own width */
+				viewport_bounds.x1 = (short)stereo_ui_design_width(viewport_bounds.x1);
 			}
 			else
 			{
@@ -522,7 +527,7 @@ rasterizer_draw_string(
 					&viewport_bounds,
 					FLOOR(clip->x0, 0),
 					FLOOR(clip->y0, 0),
-					MIN(render.camera.viewport_bounds.x1 - render.camera.viewport_bounds.x0, clip->x1),
+					MIN((short)stereo_ui_design_width(render.camera.viewport_bounds.x1 - render.camera.viewport_bounds.x0), clip->x1),
 					MIN(render.camera.viewport_bounds.y1 - render.camera.viewport_bounds.y0, clip->y1));
 			}
 			/* port: text drawn scaled (rasterizer_text_set_scale) clipped where
@@ -646,6 +651,10 @@ rasterizer_draw_unicode_string(
 					&viewport_bounds,
 					-render.camera.viewport_bounds.x0,
 					-render.camera.viewport_bounds.y0);
+				/* port: a stereo eye's menu text is laid out in the whole
+				screen's design space (stereo.c): do not cull its glyphs
+				at the eye's own width */
+				viewport_bounds.x1 = (short)stereo_ui_design_width(viewport_bounds.x1);
 			}
 			else
 			{
@@ -653,7 +662,7 @@ rasterizer_draw_unicode_string(
 					&viewport_bounds,
 					FLOOR(clip->x0, 0),
 					FLOOR(clip->y0, 0),
-					MIN(render.camera.viewport_bounds.x1 - render.camera.viewport_bounds.x0, clip->x1),
+					MIN((short)stereo_ui_design_width(render.camera.viewport_bounds.x1 - render.camera.viewport_bounds.x0), clip->x1),
 					MIN(render.camera.viewport_bounds.y1 - render.camera.viewport_bounds.y0, clip->y1));
 			}
 			/* port: text drawn scaled (rasterizer_text_set_scale) clipped where
