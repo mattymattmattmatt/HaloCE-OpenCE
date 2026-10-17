@@ -221,6 +221,18 @@ static void screen_mode_choose(long *width, float scale[2])
 			}
 		}
 	}
+	{
+		/* display.render_scale: draw smaller than the display and let
+		the present blit scale it up (weak handheld GPUs); applied
+		whatever the display reported, so it also holds headless */
+		float render_scale = (float)config_real("display.render_scale");
+
+		if (render_scale > 0.24f && render_scale < 1.0f)
+		{
+			scale[0] *= render_scale;
+			scale[1] *= render_scale;
+		}
+	}
 #endif
 }
 
@@ -5864,10 +5876,48 @@ static void visibility_copy_batch(void)
 }
 
 #endif
+/* debug.perf_log's frame split: whole present, the drawing part of it
+(resolve and the display blit), and the window swap, over 60 presents;
+plus the machine's free memory every five seconds (a map load that eats
+the machine shows its approach here before the killer arrives) */
+static unsigned long long perf_now_ns(void)
+{
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (unsigned long long)now.tv_sec * 1000000000ull + (unsigned long long)now.tv_nsec;
+}
+
+static void perf_memory_log(unsigned long long now_ns)
+{
+	static unsigned long long last_ns;
+	FILE *meminfo;
+	char line[128];
+	unsigned long available_kb = 0;
+
+	if (now_ns - last_ns < 5000000000ull)
+		return;
+	last_ns = now_ns;
+	meminfo = fopen("/proc/meminfo", "r");
+	if (!meminfo)
+		return;
+	while (fgets(line, sizeof(line), meminfo))
+	{
+		if (sscanf(line, "MemAvailable: %lu", &available_kb) == 1)
+			break;
+	}
+	fclose(meminfo);
+	platform_log("perf: memory available %lu MB", available_kb / 1024);
+}
+
 void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destination_rectangle,
 	void *unused, void *unused2)
 {
 	static long screenshot_every = -1;
+	static unsigned long long perf_frame_ns, perf_render_ns, perf_swap_ns;
+	static unsigned long perf_count;
+	unsigned long long present_begin = config_boolean("debug.perf_log") ? perf_now_ns() : 0;
+	unsigned long long render_begin = 0, swap_begin = 0;
 
 	(void)source_rectangle;
 	(void)destination_rectangle;
@@ -5889,6 +5939,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		the loader list does not name) */
 		if (device.frame < 3)
 			platform_log("post-device step: present %lu begin (resolve)", device.frame);
+		render_begin = perf_now_ns();
 		render_target_resolve(&back_buffer->target);
 		if (device.frame < 3)
 			platform_log("post-device step: present %lu blit to window", device.frame);
@@ -5922,7 +5973,12 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		/* row 0 of the render target is the top of the picture */
 		glBlitFramebuffer(0, 0, (GLint)back_buffer->target.gl_width, (GLint)back_buffer->target.gl_height,
 			x, y + height, x + width, y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+		if (present_begin)
+			perf_render_ns += perf_now_ns() - render_begin;
+		swap_begin = perf_now_ns();
 		platform_video_swap();
+		if (present_begin)
+			perf_swap_ns += perf_now_ns() - swap_begin;
 		if (device.frame < 3)
 			platform_log("post-device step: present %lu swapped; frame bookkeeping", device.frame);
 		xgpu_gl_state_invalidate();
@@ -5972,6 +6028,26 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		device.stream_offset = STREAM_BUFFER_SIZE; /* orphan next frame */
 		device.index_offset = INDEX_BUFFER_SIZE;
 #endif
+	}
+	if (present_begin)
+	{
+		unsigned long long now_ns = perf_now_ns();
+
+		perf_frame_ns += now_ns - present_begin;
+		perf_count++;
+		perf_memory_log(now_ns);
+		if (perf_count >= 60)
+		{
+			platform_log("perf: %lu presents, frame %.1f ms (drawing %.1f, swap %.1f, rest %.1f) = %.1f fps in the presents",
+				perf_count,
+				(double)perf_frame_ns / perf_count / 1e6,
+				(double)perf_render_ns / perf_count / 1e6,
+				(double)perf_swap_ns / perf_count / 1e6,
+				(double)(perf_frame_ns - perf_render_ns - perf_swap_ns) / perf_count / 1e6,
+				perf_frame_ns ? 1e9 / ((double)perf_frame_ns / perf_count) : 0.0);
+			perf_frame_ns = perf_render_ns = perf_swap_ns = 0;
+			perf_count = 0;
+		}
 	}
 	device.frame++;
 	stats.presents++;

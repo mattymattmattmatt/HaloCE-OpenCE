@@ -104,6 +104,9 @@ static const struct config_setting config_settings[] =
 	{ "display.screen_width", _config_integer, "0", "HALO_SCREEN_WIDTH", _environment_value, _platform_android,
 		"Columns of the 480-line picture: 0 for the display's shape, 640 for the\n"
 		"Xbox's 4:3." },
+	{ "display.render_scale", _config_real, "1.0", "HALO_RENDER_SCALE", _environment_value, _platform_all,
+		"Draw the 3D view at this fraction of the display's size each way and scale it up (0.25 to 1; "
+		"1 is full size). For weak GPUs: 0.75 draws 480x360 on a 640x480 screen." },
 	{ "display.vsync", _config_boolean, "true", "HALO_NO_VSYNC", _environment_set_is_false, _platform_all,
 		"Wait for the display between frames; false draws as fast as possible." },
 	{ "display.max_fps", _config_integer, "0", "HALO_MAX_FPS", _environment_value, _platform_desktop,
@@ -620,6 +623,9 @@ static const struct config_setting config_settings[] =
 	{ "debug.gpu_flush_draws", _config_integer, "-1", "HALO_GPU_FLUSH_DRAWS", _environment_value, _platform_desktop,
 		"Flush the GPU's pipeline every this many draws: -1 for every 3 on Intel\n"
 		"graphics with Mesa's driver (which can hang without), 0 never." },
+	{ "debug.perf_log", _config_boolean, "false", "HALO_PERF_LOG", _environment_set_is_true, _platform_all,
+		"Log the frame time split (whole frame, drawing, the window swap) every 60 presents, and the "
+		"machine's free memory every five seconds while frames are presented: for handheld testing." },
 	{ "debug.gpu_stats", _config_boolean, "false", "HALO_GPU_STATS", _environment_set_is_true, _platform_all,
 		"Log the renderer's draw counts once a second." },
 	{ "debug.gpu_trace_frame", _config_integer, "-1", "HALO_GPU_TRACE", _environment_value, _platform_all,

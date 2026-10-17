@@ -41,14 +41,19 @@ ls -l /usr/lib/arm-linux-gnueabihf/libgbm.so.1 /usr/lib/arm-linux-gnueabihf/libd
 chmod +x ./halo 2>/dev/null
 export LD_LIBRARY_PATH="$PWD/libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
-export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-alsa}"
+export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
+echo "audio driver: $SDL_AUDIODRIVER (dummy = silent on purpose: ALSA retry spam was flooding this log and stalling the SD card)"
 export HALO_DATA_ROOT="$PWD"
 echo "SDL_VIDEODRIVER=$SDL_VIDEODRIVER SDL_AUDIODRIVER=$SDL_AUDIODRIVER"
 echo "binary: $(ls -l ./halo)"
 echo "--- libraries the loader will use (all glibc must come from ./libs) ---"
 ./libs/ld-linux-armhf.so.3 --library-path "$PWD/libs" --list ./halo 2>&1
+# free-memory timeline alongside (a map-load OOM shows its approach)
+( while :; do printf '[memwatch] '; grep -E '^(MemAvailable|MemFree|Cached):' /proc/meminfo 2>/dev/null | awk '{printf "%s %s %s  ", $1, $2, $3}'; echo; sleep 5; done ) &
+MEMWATCH_PID=$!
 ./libs/ld-linux-armhf.so.3 --library-path "$PWD/libs" ./halo
 rc=$?
+kill $MEMWATCH_PID 2>/dev/null
 echo "game exited with code $rc"
 if [ $rc -eq 0 ]; then
   echo "=== HALO R36S TEST: SUCCESS (game ran and exited cleanly) ==="

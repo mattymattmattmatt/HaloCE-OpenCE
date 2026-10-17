@@ -859,7 +859,8 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 	if (!gl_functions_load())
 		return FALSE;
 	version = SDL_GL_SetSwapInterval(config_boolean("display.vsync") ? 1 : 0);
-	(void)version;
+	platform_log("swap interval: vsync %s requested, SDL_GL_SetSwapInterval returned %d",
+		config_boolean("display.vsync") ? "on" : "off", (int)version);
 	platform_event_thread = SDL_GetCurrentThreadID();
 	platform_log("OpenGL %s on %s", (const char *)glGetString(GL_VERSION), (const char *)glGetString(GL_RENDERER));
 #ifndef HALO_ANDROID

@@ -1,4 +1,7 @@
-# R36S TEST BUILD defaults: 640x480 original scaling, interpolation off,
+# R36S TEST BUILD defaults (update6): 640x480 panel, internal render scale
+# 0.75 (drawn at 480x360, upscaled by the present blit), high-res HUD/text
+# OFF (saves memory and one-time generation), perf_log + gpu_stats on,
+# 640x480 original scaling, interpolation off,
 # gore_max_pieces lowered to 64 for the 1 GB handheld (not 48: the config
 # loader treats 48 as a superseded old default and restores 384), gore_log on so the
 # log Matty sends back shows gore decisions. Everything else is stock.
@@ -46,6 +49,7 @@ window_scale = 2
 
 # Wait for the display between frames; false draws as fast as possible.
 # (for one run: HALO_NO_VSYNC=1 makes it false)
+render_scale = 0.75
 vsync = true
 
 # With vsync off, the most frames a second: 0 for twice the display's
@@ -93,7 +97,7 @@ viewmodel_visible = true
 # waypoints, scopes) from the high-res assets (8x the maps' bitmaps);
 # false draws the maps' own bitmaps.
 # (for one run: HALO_HIGH_RES_HUD=<value>)
-high_res_hud = true
+high_res_hud = false
 
 # In play, the gamepad Back (Select) button steps the HUD and reticle
 # through shown, HUD hidden with the reticle shown, and both hidden
@@ -111,7 +115,7 @@ hud_toggle_start = 0
 # (Overpass) at the resolution the game draws at, and the menus' titles
 # from port/assets/titles; false draws the maps' bitmap fonts and titles.
 # (for one run: HALO_HIGH_RES_TEXT=<value>)
-high_res_text = true
+high_res_text = false
 
 # The size the objects' shadows are drawn at, in pixels each way: 128 as
 # on the Xbox, or 256, 512 or 1024 for smoother edges, as soft.
@@ -810,7 +814,8 @@ gpu_flush_draws = -1
 
 # Log the renderer's draw counts once a second.
 # (for one run: HALO_GPU_STATS=1 makes it true)
-gpu_stats = false
+gpu_stats = true
+perf_log = true
 
 # Log every draw of this frame; -1 none.
 # (for one run: HALO_GPU_TRACE=<value>)
@@ -859,3 +864,4 @@ texture_log = false
 # Upload textures again every time they are used.
 # (for one run: HALO_TEXTURE_NO_CACHE=1 makes it true)
 texture_no_cache = false
+

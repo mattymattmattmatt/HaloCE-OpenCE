@@ -47,7 +47,11 @@ static void load_real_gbm(void)
 	};
 	unsigned index;
 
-	if (real_gbm_tried)
+	/* (only latch success: a dlopen during the loader's own
+	initialisation can fail transiently, and the first real call must
+	get another chance - on-device round 6 printed 'NO system libgbm
+	found' from the constructor, yet swaps then worked) */
+	if (real_gbm)
 		return;
 	real_gbm_tried = 1;
 	for (index = 0; index < sizeof(paths) / sizeof(paths[0]); index++)
@@ -56,7 +60,10 @@ static void load_real_gbm(void)
 		void *create;
 
 		if (!handle)
+		{
+			fprintf(stderr, "halo-gbm-shim: dlopen %s failed: %s\n", paths[index], dlerror());
 			continue;
+		}
 		create = dlsym(handle, "gbm_create_device");
 		if (create && create != (void *)gbm_create_device)
 		{
@@ -87,8 +94,15 @@ static void *real_symbol(const char *name)
 struct gbm_device *gbm_create_device(int fd)
 {
 	__typeof__(&gbm_create_device) real = FORWARD_POINTER(gbm_create_device);
+	struct gbm_device *result = real ? real(fd) : NULL;
+	static int logged;
 
-	return real ? real(fd) : NULL;
+	if (!logged)
+	{
+		logged = 1;
+		fprintf(stderr, "halo-gbm-shim: gbm_create_device real %p -> %p\n", (void *)real, (void *)result);
+	}
+	return result;
 }
 
 void gbm_device_destroy(struct gbm_device *device)
@@ -212,8 +226,15 @@ void gbm_surface_destroy(struct gbm_surface *surface)
 struct gbm_bo *gbm_surface_lock_front_buffer(struct gbm_surface *surface)
 {
 	__typeof__(&gbm_surface_lock_front_buffer) real = FORWARD_POINTER(gbm_surface_lock_front_buffer);
+	struct gbm_bo *result = real ? real(surface) : NULL;
+	static int logged;
 
-	return real ? real(surface) : NULL;
+	if (!logged)
+	{
+		logged = 1;
+		fprintf(stderr, "halo-gbm-shim: gbm_surface_lock_front_buffer real %p -> %p\n", (void *)real, (void *)result);
+	}
+	return result;
 }
 
 void gbm_surface_release_buffer(struct gbm_surface *surface, struct gbm_bo *bo)
