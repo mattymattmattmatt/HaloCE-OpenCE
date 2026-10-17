@@ -1668,8 +1668,10 @@ static void gl_initialize(void)
 	glClipControl(GL_UPPER_LEFT, GL_ZERO_TO_ONE);
 	glEnable(GL_PROGRAM_POINT_SIZE);
 #endif
+	platform_log("gl init step: vertex array");
 	glGenVertexArrays(1, &device.vertex_array);
 	glBindVertexArray(device.vertex_array);
+	platform_log("gl init step: vertex array done");
 #ifdef HALO_GLES
 	{
 		int ring;
@@ -1695,8 +1697,10 @@ static void gl_initialize(void)
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, device.index_buffer);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, INDEX_BUFFER_SIZE, NULL, GL_STREAM_DRAW);
 #endif
+	platform_log("gl init step: stream buffers done; samplers and queries");
 	glGenSamplers(D3DTSS_MAXSTAGES, device.samplers);
 	glGenQueries(VISIBILITY_TEST_SLOTS, device.queries);
+	platform_log("gl init step: samplers and queries done");
 	glGenQueries(1, &device.scratch_query);
 #ifndef HALO_GLES
 	glGenBuffers(1, &device.visibility_results_buffer);
@@ -1751,6 +1755,7 @@ static void gl_initialize(void)
 		device.attributes[index][3] = 1.0f;
 		glVertexAttrib4fv(index, device.attributes[index]);
 	}
+	platform_log("gl init step: attribute defaults done; memory watch and limits");
 	memory_watch_initialize();
 	debug_settings.skip_vertex_shaders = config_string("debug.gpu_skip_vertex_shaders");
 	debug_settings.dump_shaders = *config_string("debug.gpu_dump_shaders") ?
@@ -1765,8 +1770,11 @@ static void gl_initialize(void)
 		if (renderbuffer_size < maximum_target_size)
 			maximum_target_size = renderbuffer_size;
 	}
+	platform_log("gl init step: limits done (max samples %d, largest target %d)",
+		(int)anti_aliasing_maximum_samples, (int)maximum_target_size);
 	xgpu_gl_state_invalidate();
 	device.gl_ready = TRUE;
+	platform_log("gl init step: ready (first frames will build shaders and textures)");
 	if (anti_aliasing_value < 0)
 		anti_aliasing_read();
 	else
@@ -1954,7 +1962,10 @@ HRESULT WINAPI Direct3D_CreateDevice(UINT adapter, D3DDEVTYPE device_type, void 
 		viewport_update_constants();
 
 		if (!config_boolean("debug.null_renderer") && platform_video_initialize(width, height))
+		{
 			gl_initialize();
+			platform_log("gl init step: device created");
+		}
 		else
 			platform_log("Direct3D: running without a window (nothing is displayed)");
 		device.created = TRUE;

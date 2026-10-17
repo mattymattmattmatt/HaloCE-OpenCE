@@ -48,5 +48,46 @@ has them (xgpu_capabilities, d3d8_gl.c) */
 	GL_OPTIONAL_FUNCTIONS(GL_LOAD_OPTIONAL_FUNCTION)
 #undef GL_LOAD_OPTIONAL_FUNCTION
 #endif
+#if defined(HALO_GLES) && !defined(HALO_WEB) && !defined(HALO_ARM64_GUEST)
+	/* native GLES (the R36S build): a driver whose SDL_GL_GetProcAddress
+	hands back nothing for an entry point the renderer calls during
+	initialisation would otherwise be met as a call through a null
+	pointer (on-device, 2026-10-17: Mali r13p0, crash at (nil) right
+	after the capabilities print, no 'unavailable' line - so either a
+	later step's pointer or a bogus non-null address; name the critical
+	ones here so the next log says which). Failing cleanly beats
+	crashing at pc=0. */
+	{
+		struct { const char *name; void *pointer; } const critical[] = {
+			{ "glGenVertexArrays", (void *)halo_glGenVertexArrays },
+			{ "glBindVertexArray", (void *)halo_glBindVertexArray },
+			{ "glGenBuffers", (void *)halo_glGenBuffers },
+			{ "glBindBuffer", (void *)halo_glBindBuffer },
+			{ "glBufferData", (void *)halo_glBufferData },
+			{ "glBufferSubData", (void *)halo_glBufferSubData },
+			{ "glCopyBufferSubData", (void *)halo_glCopyBufferSubData },
+			{ "glGenSamplers", (void *)halo_glGenSamplers },
+			{ "glBindSampler", (void *)halo_glBindSampler },
+			{ "glGenQueries", (void *)halo_glGenQueries },
+			{ "glVertexAttrib4fv", (void *)halo_glVertexAttrib4fv },
+			{ "glMemoryBarrier", (void *)halo_glMemoryBarrier },
+			{ "glInvalidateFramebuffer", (void *)halo_glInvalidateFramebuffer },
+			{ "glRenderbufferStorageMultisample", (void *)halo_glRenderbufferStorageMultisample },
+			{ "glBlitFramebuffer", (void *)halo_glBlitFramebuffer },
+			{ "glCopyImageSubData", (void *)halo_glCopyImageSubData },
+		};
+		unsigned index;
+
+		for (index = 0; index < sizeof(critical) / sizeof(critical[0]); index++)
+		{
+			if (!critical[index].pointer)
+			{
+				platform_log("gl init: required function %s resolved to NULL; refusing to start rather than call it",
+					critical[index].name);
+				success = FALSE;
+			}
+		}
+	}
+#endif
 	return success;
 }

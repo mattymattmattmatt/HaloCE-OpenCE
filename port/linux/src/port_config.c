@@ -699,9 +699,12 @@ static pthread_mutex_t config_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static void config_path(char *path, size_t size)
 {
-#if defined(HALO_ANDROID) || defined(HALO_WEB)
+#if defined(HALO_ANDROID) || defined(HALO_WEB) || defined(HALO_GLES)
 	/* the data folder, which the app names (port/android/host/host_main.c;
-	on the web, port/web/src/web_main.c) */
+	on the web, port/web/src/web_main.c). A native GLES build (the R36S
+	test) needs this branch too: it is launched through its bundled
+	loader, so SDL_GetBasePath names the loader's folder (libs/) and the
+	settings would land there instead of beside the game */
 	const char *root = getenv("HALO_DATA_ROOT");
 
 	snprintf(path, size, "%s/config.toml", root && *root ? root : ".");
