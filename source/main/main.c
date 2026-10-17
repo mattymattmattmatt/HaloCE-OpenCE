@@ -3303,16 +3303,23 @@ static void main_game_render(
 			&window->rasterizer_camera.window_bounds);
 		if (stereo)
 		{
-			/* this eye's half of the screen (the window bounds stay the
-			whole screen: the frustum pairing stereo.c describes) */
+			/* this eye's half of the screen, as both bounds: as
+			compute_window_bounds bounds a split-screen window, so the
+			frustum fits the half and the HUD anchors inside it (stereo.c) */
 			short full_x0 = window->rasterizer_camera.viewport_bounds.x0;
 			short full_x1 = window->rasterizer_camera.viewport_bounds.x1;
 			short middle = (short)((full_x0 + full_x1) / 2);
 
 			if (window_index == 0)
+			{
 				window->rasterizer_camera.viewport_bounds.x1 = middle;
+				window->rasterizer_camera.window_bounds.x1 = middle;
+			}
 			else
+			{
 				window->rasterizer_camera.viewport_bounds.x0 = middle;
+				window->rasterizer_camera.window_bounds.x0 = middle;
+			}
 		}
 		if (force_single_screen)
 		{
@@ -3365,6 +3372,38 @@ static void main_game_render(
 					window->rasterizer_camera.viewport_bounds.y1 - window->rasterizer_camera.viewport_bounds.y0);
 		}
 		window->console_window = FALSE;
+	}
+
+	/* port: a cinematic is stereo too (stereo.c): its one window (a
+	player window on the cinematic's camera, or none) is duplicated for
+	the two eyes, so a level's opening plays in 3D and runs straight
+	into stereo play - the Quest VR build's cinema mode likewise; the
+	console window below still draws the letterbox and titles over both */
+	if (!stereo && stereo_sbs_enabled() && cinematic_in_progress() &&
+		global_screenshot_count.count <= 0 && rendered_window_count == 1)
+	{
+		struct render_window *eye_window = &global_screenshot_count.windows[0];
+		short full_x0 = eye_window->rasterizer_camera.viewport_bounds.x0;
+		short full_x1 = eye_window->rasterizer_camera.viewport_bounds.x1;
+		short middle = (short)((full_x0 + full_x1) / 2);
+
+		global_screenshot_count.windows[1] = *eye_window;
+		eye_window->rasterizer_camera.viewport_bounds.x1 = middle;
+		eye_window->rasterizer_camera.window_bounds.x1 = middle;
+		eye_window->render_camera.viewport_bounds.x1 = middle;
+		eye_window->render_camera.window_bounds.x1 = middle;
+		eye_window = &global_screenshot_count.windows[1];
+		eye_window->rasterizer_camera.viewport_bounds.x0 = middle;
+		eye_window->rasterizer_camera.window_bounds.x0 = middle;
+		eye_window->render_camera.viewport_bounds.x0 = middle;
+		eye_window->render_camera.window_bounds.x0 = middle;
+		stereo_eye_apply(&global_screenshot_count.windows[0].render_camera, 0);
+		stereo_eye_apply(&global_screenshot_count.windows[0].rasterizer_camera, 0);
+		stereo_eye_apply(&global_screenshot_count.windows[1].render_camera, 1);
+		stereo_eye_apply(&global_screenshot_count.windows[1].rasterizer_camera, 1);
+		rendered_window_count = 2;
+		stereo_log_state(middle - full_x0,
+			eye_window->rasterizer_camera.viewport_bounds.y1 - eye_window->rasterizer_camera.viewport_bounds.y0);
 	}
 
 	window = &global_screenshot_count.windows[rendered_window_count];

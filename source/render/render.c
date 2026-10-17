@@ -63,6 +63,7 @@ symbols in this file:
 #include "cseries/errors.h"
 #include "render.h"
 #include "render_cameras_internal.h"
+#include "stereo.h" /* port: side-by-side stereo 3D menus (port/linux/game/stereo.c) */
 #include "render_particles.h"
 #include "objects.h"
 #include "render_sprite.h"
@@ -260,7 +261,9 @@ void render_frame_pregame(
 	rasterizer_window_begin(&rasterizer_parameters);
 
 	halo_screen_ui_offset(TRUE);
+	stereo_ui_begin(&window->rasterizer_camera.viewport_bounds); /* port: an eye's menu squeezed into its half (stereo.c) */
 	render_ui_widgets(0, &window->rasterizer_camera.viewport_bounds);
+	stereo_ui_end();
 	halo_screen_ui_offset(FALSE);
 	bink_playback_render();
 
@@ -425,7 +428,9 @@ static void render_window(
 		interface_draw_screen();
 		rasterizer_screen_flash();
 		halo_screen_ui_offset(TRUE);
+		stereo_ui_begin(&rasterizer_camera->viewport_bounds); /* port: an eye's menu squeezed into its half (stereo.c) */
 		render_ui_widgets(local_player_index, &rasterizer_camera->viewport_bounds);
+		stereo_ui_end();
 		halo_screen_ui_offset(FALSE);
 	}
 
@@ -542,7 +547,11 @@ static void render_player_frame(
 		&rasterizer_frustum,
 		TRUE);
 
-	if (main_get_window_count() == 1)
+	/* port: a stereo eye's window is not the whole screen the mirror
+	pass below asserts for (stereo.c): no mirror reflections in an eye */
+	if (main_get_window_count() == 1 &&
+		window->render_camera.viewport_bounds.x0 == 0 &&
+		window->render_camera.viewport_bounds.x1 == RASTERIZER_TARGET_RENDER_PRIMARY_WIDTH)
 	{
 		if (structure_visibility_find_mirror(camera, &frustum, &mirror))
 		{

@@ -35,6 +35,24 @@ Settings: display.stereo_sbs (Settings > Video Setup on Android, and
 config.toml everywhere), display.stereo_separation (world units across
 both eyes). The view's own field of view is unchanged; each half draws
 at the half's aspect, as a split-screen view does.
+
+Each eye's window bounds are its half too (main.c sets both bounds to
+the half, exactly as compute_window_bounds does for split screen), so
+the HUD anchors inside the half as a split-screen HUD does. The menus
+are the one thing split screen never has to squeeze: they are drawn in
+the whole screen's 640-wide design space, so while an eye's menus are
+drawn (render.c's render_ui_widgets calls) stereo_ui_begin makes the
+rasterizer's 2D transform (rasterizer_xbox_dynavobgeom.c) use the full
+design width for that window, and the whole menu lands in the half,
+smaller, instead of its right side being clipped away. The Quest VR
+build (HaloCE-DecompRemix-VR-PC-Android, vr_render.c) solves the same
+problem at the other end - its menus live on a panel in the world -
+which a flat SBS screen cannot do; squeezing is the flat equivalent.
+Its eye work otherwise confirms this one's shape: it duplicates the
+whole player window per eye (windows[eye] = player) and offsets along
+the view's right vector (cinema mode), with the runtime's eye poses
+about 64 mm apart at the same 3.048 m world unit (vr.world_scale
+0.328084 wu per metre, vr.cinema_separation 0.064 m).
 */
 
 #include "cseries.h"
@@ -47,6 +65,7 @@ at the half's aspect, as a split-screen view does.
 
 int config_boolean(const char *name);
 double config_real(const char *name); /* port_config.c: a double, not the game's real */
+long halo_screen_width(void); /* d3d8_gl.c: the design width (640, more when wide) */
 
 boolean stereo_sbs_enabled(void)
 {
@@ -76,6 +95,26 @@ void stereo_eye_apply(struct render_camera *camera, long eye)
 	camera->position.x += right.i * offset;
 	camera->position.y += right.j * offset;
 	camera->position.z += right.k * offset;
+}
+
+static long ui_design_width;
+
+void stereo_ui_begin(union rectangle2d const *viewport_bounds)
+{
+	long width = viewport_bounds ? viewport_bounds->x1 - viewport_bounds->x0 : 0;
+
+	ui_design_width = stereo_sbs_enabled() && width > 0 &&
+		2 * width == halo_screen_width() ? halo_screen_width() : 0;
+}
+
+void stereo_ui_end(void)
+{
+	ui_design_width = 0;
+}
+
+long stereo_ui_design_width(long viewport_width)
+{
+	return ui_design_width ? ui_design_width : viewport_width;
 }
 
 void stereo_log_state(long eye_viewport_width, long eye_viewport_height)

@@ -79,6 +79,7 @@ symbols in this file:
 #include "render/render_cameras.h"
 #include "shaders/shader_definitions.h"
 #include "rasterizer_xbox_pixel_shader.h"
+#include "stereo.h" /* port: side-by-side stereo 3D (port/linux/game/stereo.c) */
 
 /* The January translation unit retains the XDK's out-of-line D3D wrappers.
  * Keep the stock D3DINLINE definition: the real calls below make VC7 emit
@@ -314,6 +315,9 @@ void _rasterizer_psuedo_dynamic_screen_quad_draw(
 		width =
 			global_window_parameters.camera.viewport_bounds.x1 -
 			global_window_parameters.camera.viewport_bounds.x0;
+		/* port: a stereo eye's menus are drawn in the whole screen's
+		design space and squeezed into the eye's half (stereo.c) */
+		width = (short)stereo_ui_design_width(width);
 		height =
 			global_window_parameters.camera.viewport_bounds.y1 -
 			global_window_parameters.camera.viewport_bounds.y0;
