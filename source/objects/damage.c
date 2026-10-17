@@ -1481,11 +1481,15 @@ void object_cause_damage(
 	damage_definition = &damage_effect->damage;
 	/* port: the gore prototype aggregates a shotgun's pellets before any
 	of this pellet's damage lands (port/linux/game/gore.c) */
+	/* (a possible tank shell for the hunter record in gore.c: an explosive
+	or mounted-weapon category is all that is asked here - the shell's
+	killing damage arrives as an effect's area-of-effect damage, which is
+	neither flagged from-a-weapon (effects.c never sets that bit) nor
+	non-area-of-effect (damage.c sets that bit before this call), so
+	asking for either bit would refuse every real shell hit) */
 	gore_unit_damage_begin(object_index, damage, damage_definition->category == _damage_category_shotgun,
-		(damage_definition->category == _damage_category_highexplosive ||
-			damage_definition->category == _damage_category_mountedweapon) &&
-			!TEST_FLAG(damage->flags, _damage_area_of_effect_bit) &&
-			TEST_FLAG(damage->flags, _damage_from_weapon_bit));
+		damage_definition->category == _damage_category_highexplosive ||
+			damage_definition->category == _damage_category_mountedweapon);
 	damage_was_modified = FALSE;
 	parent_takes_body_damage = TRUE;
 
