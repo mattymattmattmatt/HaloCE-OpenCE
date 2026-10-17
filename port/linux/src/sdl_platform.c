@@ -948,10 +948,18 @@ void platform_video_swap(void)
 {
 #ifndef HALO_ANDROID
 	static Uint64 next_frame;
+	static long swap_count;
 	Uint64 interval, now;
 
+	if (swap_count < 3)
+		platform_log("post-device step: swap %ld (SDL_GL_SwapWindow)", swap_count);
 #endif
 	SDL_GL_SwapWindow(platform_window);
+#ifndef HALO_ANDROID
+	if (swap_count < 3)
+		platform_log("post-device step: swap %ld returned", swap_count);
+	swap_count++;
+#endif
 #ifdef HALO_WEB
 	web_frame_shown();
 #endif

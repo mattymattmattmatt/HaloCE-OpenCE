@@ -25,6 +25,7 @@ renderer can protect the pages again before the kernel writes them.
 #include <string.h>
 #include <ucontext.h>
 #include <sys/mman.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 #define WATCH_PAGE_SIZE 0x1000UL
@@ -112,6 +113,28 @@ static void segv_handler(int signal_number, siginfo_t *information, void *contex
 				stack[0], stack[1], stack[2], stack[3], stack[4], stack[5]);
 			write(STDERR_FILENO, line, (size_t)length);
 			crash_debug_line(line);
+		}
+		{
+			/* which module the faulting pc belongs to: the loader's list
+			names only the libraries linked in, not what EGL or SDL
+			dlopened later (on the R36S, the Mali stack), and a crash
+			inside one of those was otherwise unnameable */
+			int maps_fd = open("/proc/self/maps", O_RDONLY);
+			char maps_buffer[4096];
+			ssize_t maps_read;
+			unsigned long maps_total = 0;
+
+			if (maps_fd >= 0)
+			{
+				write(STDERR_FILENO, "halo-linux: crash maps (find pc above in these ranges):\n", 56);
+				while (maps_total < 131072 &&
+					(maps_read = read(maps_fd, maps_buffer, sizeof(maps_buffer))) > 0)
+				{
+					write(STDERR_FILENO, maps_buffer, (size_t)maps_read);
+					maps_total += (unsigned long)maps_read;
+				}
+				close(maps_fd);
+			}
 		}
 		count = backtrace(frames, 48);
 		backtrace_symbols_fd(frames, count, STDERR_FILENO);

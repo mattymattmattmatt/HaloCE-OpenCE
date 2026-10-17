@@ -5884,7 +5884,14 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		if (trace_frame())
 			platform_log("present back buffer %08lx texture %u", (unsigned long)device.back_buffer.Data,
 				back_buffer->target.texture);
+		/* (the first presents, logged step by step: on the R36S the game
+		died in one of these right after device creation, inside a module
+		the loader list does not name) */
+		if (device.frame < 3)
+			platform_log("post-device step: present %lu begin (resolve)", device.frame);
 		render_target_resolve(&back_buffer->target);
+		if (device.frame < 3)
+			platform_log("post-device step: present %lu blit to window", device.frame);
 #ifndef HALO_GLES
 		visibility_copy_batch();
 #endif
@@ -5916,6 +5923,8 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		glBlitFramebuffer(0, 0, (GLint)back_buffer->target.gl_width, (GLint)back_buffer->target.gl_height,
 			x, y + height, x + width, y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 		platform_video_swap();
+		if (device.frame < 3)
+			platform_log("post-device step: present %lu swapped; frame bookkeeping", device.frame);
 		xgpu_gl_state_invalidate();
 		memory_watch_begin_frame();
 		xgpu_texture_cache_begin_frame();
@@ -5975,7 +5984,11 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 			stats.mirrored_bytes / stats.presents / 1024, stats.streamed_bytes / stats.presents / 1024);
 		memset(&stats, 0, sizeof(stats));
 	}
+	if (device.gl_ready && device.frame < 3)
+		platform_log("post-device step: present %lu bookkeeping done; pump events", device.frame);
 	platform_pump_events();
+	if (device.gl_ready && device.frame < 3)
+		platform_log("post-device step: present %lu complete", device.frame);
 
 	pthread_mutex_lock(&vertical_blank_lock);
 	/* the Xbox keeps at most two frames queued behind its 60 Hz display;
