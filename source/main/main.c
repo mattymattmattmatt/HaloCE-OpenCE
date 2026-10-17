@@ -402,6 +402,7 @@ symbols in this file:
 #include "tag_files/files.h"
 #include "custom_edition_cache.h" /* port: custom_edition_level_name */
 #include "view_fov.h" /* port: display.fov, before the projection and culling */
+#include "stereo.h" /* port: side-by-side stereo 3D (port/linux/game/stereo.c) */
 
 #if defined(HALO_WINDOWS) || defined(HALO_ANDROID) || defined(__linux__)
 #define HALO_NATIVE_BUILD_INFO 1
@@ -3260,6 +3261,9 @@ static void main_game_render(
 	long player_window_count;
 	long window_count;
 	short last_local_player_index;
+	boolean stereo;
+	long rendered_window_count;
+	short stereo_player_index;
 
 	lock_global_random_seed();
 	collision_log_continue_period(TRUE);
@@ -3275,16 +3279,41 @@ static void main_game_render(
 		player_window_count = 1;
 	}
 
-	for (window_index = 0; window_index < player_window_count; window_index++)
+	/* port: side-by-side stereo (display.stereo_sbs, stereo.c): the one
+	local player's view drawn at each eye, in the screen's halves - two
+	player windows for the one player, each keeping the whole screen as
+	its window bounds, so its frustum is the half's own off-axis share of
+	the full one. Split screen, cinematics, forced single screens,
+	screenshots and films keep the windows below exactly as they were */
+	stereo = !force_single_screen && !cinematic_in_progress() &&
+		global_screenshot_count.count <= 0 && player_window_count == 1 &&
+		local_player_count() == 1 && stereo_sbs_enabled();
+	rendered_window_count = stereo ? 2 : player_window_count;
+	stereo_player_index = NONE;
+
+	for (window_index = 0; window_index < rendered_window_count; window_index++)
 	{
 		window = &global_screenshot_count.windows[window_index];
 		observer = NULL;
 
 		compute_window_bounds(
-			window_index,
-			player_window_count,
+			stereo ? 0 : window_index,
+			stereo ? 1 : player_window_count,
 			&window->rasterizer_camera.viewport_bounds,
 			&window->rasterizer_camera.window_bounds);
+		if (stereo)
+		{
+			/* this eye's half of the screen (the window bounds stay the
+			whole screen: the frustum pairing stereo.c describes) */
+			short full_x0 = window->rasterizer_camera.viewport_bounds.x0;
+			short full_x1 = window->rasterizer_camera.viewport_bounds.x1;
+			short middle = (short)((full_x0 + full_x1) / 2);
+
+			if (window_index == 0)
+				window->rasterizer_camera.viewport_bounds.x1 = middle;
+			else
+				window->rasterizer_camera.viewport_bounds.x0 = middle;
+		}
 		if (force_single_screen)
 		{
 			window->local_player_index = NONE;
@@ -3313,11 +3342,32 @@ static void main_game_render(
 			window->local_player_index = NONE;
 		}
 
+		if (stereo)
+		{
+			/* both eyes are the same player's view (the assignment above
+			walks to the next local player, who is not there) */
+			if (window_index == 0)
+				stereo_player_index = last_local_player_index;
+			window->local_player_index = stereo_player_index;
+			observer = observer_get_camera(window->local_player_index);
+			observer = render_interpolation_camera(window->local_player_index, observer);
+		}
 		set_window_camera_values(window, observer);
+		if (stereo)
+		{
+			/* to this eye's place (render and rasterizer cameras alike:
+			they are the same view at this point) */
+			stereo_eye_apply(&window->render_camera, window_index);
+			stereo_eye_apply(&window->rasterizer_camera, window_index);
+			if (window_index == 1)
+				stereo_log_state(
+					window->rasterizer_camera.viewport_bounds.x1 - window->rasterizer_camera.viewport_bounds.x0,
+					window->rasterizer_camera.viewport_bounds.y1 - window->rasterizer_camera.viewport_bounds.y0);
+		}
 		window->console_window = FALSE;
 	}
 
-	window = &global_screenshot_count.windows[player_window_count];
+	window = &global_screenshot_count.windows[rendered_window_count];
 	compute_window_bounds(
 		0,
 		1,
@@ -3331,7 +3381,7 @@ static void main_game_render(
 	{
 		render_frame(
 			global_screenshot_count.windows,
-			player_window_count + 1,
+			rendered_window_count + 1,
 			NULL,
 			NULL,
 			main_globals.movie,

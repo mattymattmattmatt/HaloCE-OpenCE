@@ -145,6 +145,14 @@ static const struct config_setting config_settings[] =
 	{ "display.hud_toggle_start", _config_integer, "0", "HALO_HUD_TOGGLE_START", _environment_value, _platform_all,
 		"The state the HUD/reticle cycle starts a map in: 0 both shown,\n"
 		"1 HUD hidden (reticle shown), 2 both hidden (reticle while zoomed)." },
+	{ "display.stereo_sbs", _config_boolean, "false", "HALO_STEREO_SBS", _environment_value, _platform_all,
+		"Side-by-side stereoscopic 3D (cardboard VR viewers, SBS 3D\n"
+		"displays): the single player's view is drawn for each eye into\n"
+		"the screen's halves; split screen and cinematics are unchanged." },
+	{ "display.stereo_separation", _config_real, "0.021", "HALO_STEREO_SEPARATION", _environment_value, _platform_all,
+		"Stereo 3D: the distance between the eyes, in world units across\n"
+		"both (0.021 is 64 mm: a world unit is 3.048 m). 0 draws the same\n"
+		"picture in both halves." },
 	{ "display.high_res_text", _config_boolean, "true", "HALO_HIGH_RES_TEXT", _environment_value, _platform_all,
 		"Draw the menus' and HUD's text with the fonts in port/assets/fonts\n"
 		"(Overpass) at the resolution the game draws at, and the menus' titles\n"
