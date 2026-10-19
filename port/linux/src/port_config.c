@@ -306,9 +306,12 @@ static const struct config_setting config_settings[] =
 		"a command prints shows whatever this is, and debug.txt has every line." },
 
 	{ "game.gore", _config_boolean, "true", "HALO_GORE", _environment_value, _platform_all,
-		"The gore prototype (single player): a unit killed by a close enough\n"
+		"The gore mod: a unit killed by a close enough\n"
 		"explosion or a fast enough vehicle comes apart into flying pieces,\n"
-		"with blood; false: the normal deaths." },
+		"with blood; false: the normal deaths. In network games every\n"
+		"machine gibs the same victim from the host's kill, with its own\n"
+		"pieces (they are local, never sent). Video Setup's GRAPHICS\n"
+		"screen has this as GORE." },
 	{ "game.gore_threshold_scale", _config_real, "1.0", "HALO_GORE_THRESHOLD_SCALE", _environment_value, _platform_all,
 		"Scales the force each unit needs to come apart: 0.5 gibs at half the\n"
 		"force, 2 at twice it." },

@@ -28,6 +28,10 @@ boolean gore_unit_headshot(long unit_index, struct damage_data const *damage, bo
 to draw an object with (a headless corpse's head shrunk to its neck) */
 /* game_tick (game.c), after objects_update */
 void gore_update(void);
+/* netcode (network_objects.c): is this object one of gore's pieces?
+Pieces are local cosmetics on every machine (see gore_enabled in
+gore.c) and are never told to or culled by the network object sync */
+boolean gore_object_is_piece(long object_index);
 /* game_initialize_for_new_map / game_dispose_from_old_map */
 void gore_reset(void);
 

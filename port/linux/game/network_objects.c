@@ -66,6 +66,7 @@ same datum index (identifier and all), so that any message can name one:
 #include "network_coop.h"
 #include "network_distributed.h"
 #include "profile_sections.h"
+#include "gore.h" /* port: gore pieces are local cosmetics, never synced (port/linux/game/gore.c) */
 
 #include <math.h>
 
@@ -1122,6 +1123,11 @@ static void distributed_host_update_objects(
 	while (object_iterator_next(&iterator))
 	{
 		if (!distributed_object_networked(iterator.index))
+			continue;
+		/* port: a gore piece is this machine's own: never told of (its
+		slot was never told of either, so nothing is owed for it; never
+		told, its states are never sent either) */
+		if (gore_object_is_piece(iterator.index))
 			continue;
 		absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.index);
 		seen[absolute_index] = TRUE;
@@ -3101,6 +3107,10 @@ static void distributed_client_remove_own_objects(
 
 			if (!distributed_object_networked(iterator.index) || objects_client_has[absolute_index] == iterator.index)
 				continue;
+			/* port: a gore piece is this machine's own cosmetic: it
+			stays, though the host never told of it */
+			if (gore_object_is_piece(iterator.index))
+				continue;
 			objects_statistics.own_objects_removed++;
 			distributed_client_delete(iterator.index);
 		}
@@ -3111,7 +3121,8 @@ static void distributed_client_remove_own_objects(
 		long object_index = objects_client_new_objects[index];
 
 		if (!distributed_object_networked(object_index) ||
-			objects_client_has[DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index)] == object_index)
+			objects_client_has[DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index)] == object_index ||
+			gore_object_is_piece(object_index))
 		{
 			continue;
 		}
