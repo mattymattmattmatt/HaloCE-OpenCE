@@ -74,8 +74,6 @@ int config_boolean(const char *name);
 long config_integer(const char *name);
 double config_real(const char *name);
 const char *config_string(const char *name);
-boolean network_game_distributed_client(void);
-boolean network_coop_active(void);
 
 /* ---------- constants */
 
@@ -844,11 +842,33 @@ static boolean gore_enabled(void)
 {
 	if (!config_boolean("game.gore"))
 		return FALSE;
-	/* single player only for now: network games keep their pieces in step
-	with no one */
-	if (game_engine_running() || game_is_cooperative() || network_game_distributed_client() || network_coop_active())
-		return FALSE;
+	/* campaign, multiplayer and co-op alike: the gib is decided from
+	the damage itself, which the host deals and every client replays
+	(a killing blow whole: damage_replay_kill calls object_cause_damage
+	on each machine), so every machine gibs the same victim from the
+	same synced kill. What it makes of it is local only: the pieces
+	are this machine's own objects (a client's from the local upper
+	half; network_objects.c never tells of them and never culls them:
+	gore_object_is_piece), they collide with nothing, take no damage
+	and deal none, and the victim's own end stays the network's (a
+	client cannot delete the host's corpse: object_delete refuses;
+	the host's delete is what removes it everywhere). Pieces need
+	not look alike across machines. */
 	return TRUE;
+}
+
+boolean gore_object_is_piece(long object_index)
+{
+	short index;
+
+	if (object_index == NONE)
+		return FALSE;
+	for (index = 0; index < GORE_MAXIMUM_PIECES; index++)
+	{
+		if (gore_pieces[index].object_index == object_index)
+			return TRUE;
+	}
+	return FALSE;
 }
 
 static struct gore_unit_type const *gore_unit_type_get(long definition_index)

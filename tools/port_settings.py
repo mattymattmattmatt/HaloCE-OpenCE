@@ -92,6 +92,11 @@ SCREENS = {
              "Shields light their surroundings as they flare,\nin the shield's own color.", None),
             ("GLOW INTENSITY:", "display.shield_glow_intensity", [("DEFAULT", "default"), ("LIGHT SHOW", "light_show")],
              "Light Show: the shield glow three times as far,\nat full from a third of the flare.", None),
+            # (the gore mod, port/linux/game/gore.c: a visual effect on
+            # deaths, with the other visual effects here; there is no
+            # gameplay settings screen in this port)
+            ("GORE:", "game.gore", ON_OFF,
+             "Units killed by a close explosion, a fast\nvehicle, a point-blank shotgun or a sniper's\nheadshot come apart, with blood.", None),
         ],
     },
     "mouse_settings": {
@@ -196,7 +201,7 @@ SCREENS = {
 _video = SCREENS["video_settings"]
 _graphics = {"display.high_res_hud", "display.high_res_text", "display.anti_aliasing",
              "display.shadow_resolution", "display.per_pixel_lighting",
-             "display.shield_glow", "display.shield_glow_intensity"}
+             "display.shield_glow", "display.shield_glow_intensity", "game.gore"}
 SCREENS["video_settings/graphics"] = {
     "screen": "graphics_settings_screen", "header": _video["header"], "spacing": 30,
     "same_place": ["anti_aliasing_android"],
