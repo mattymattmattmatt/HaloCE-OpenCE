@@ -81,6 +81,17 @@ long decal_quad_new(long decal_definition_index, short cluster_index, real_point
 boolean decal_quad_set(long decal_index, real_point3d const corners[4]);
 void decal_quad_delete(long decal_index);
 void decal_quads_delete_except(long const *keep, long keep_count);
+/* port: the gore mod's corpse bleed (port/linux/game/gore_bleed.c): a quad
+of a sprite sequence, its own texture coordinates (within the sprite, 0 to
+1) and color; its color and alpha later */
+long decal_quad_new_ex(long decal_definition_index, short sequence_index, short cluster_index,
+	real_point3d const corners[4], real_point2d const uv[4], real_rgb_color const *color, real alpha);
+void decal_quad_set_color(long decal_index, real_rgb_color const *color, real alpha);
+short decal_definition_sequence_count(long decal_definition_index);
+short decal_definition_blend_function(long decal_definition_index);
+void decal_quads_delete_unmarked(byte const *marked); /* (marked: by absolute index, HALO_PORT_MAXIMUM_DECALS) */
+boolean decal_quad_exists(long decal_index);
+void decal_definitions_report(void);
 
 /* ---------- public code */
 

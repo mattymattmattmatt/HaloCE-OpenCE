@@ -310,6 +310,13 @@ static const struct config_setting config_settings[] =
 		"Video Setup's GRAPHICS screen has this as GORE. (An older\n"
 		"game.gore = false reads as \"off\", true as \"heavy\"; so does\n"
 		"HALO_GORE.)" },
+	{ "game.gore_corpse_bleed", _config_boolean, "true", "HALO_GORE_CORPSE_BLEED", _environment_value, _platform_all,
+		"Gore: a body that died whole bleeds once it comes to rest: a pool\n"
+		"grows under it and, on a slope, runs off downhill in rivulets that\n"
+		"follow the ground (faster and farther the steeper), in the\n"
+		"species' blood colour, drying darker over game.gore_blood_seconds.\n"
+		"As much as game.gore_level's blood (none when it is \"off\"). Video\n"
+		"Setup's GRAPHICS screen has this as CORPSE BLEED." },
 	{ "game.gore_threshold_scale", _config_real, "1.0", "HALO_GORE_THRESHOLD_SCALE", _environment_value, _platform_all,
 		"Scales the force each unit needs to come apart: 0.5 gibs at half the\n"
 		"force, 2 at twice it." },
@@ -568,6 +575,14 @@ static const struct config_setting config_settings[] =
 		"With gore_test: instead, a frag grenade goes off this many metres from\n"
 		"the biped's centre; -1: 1, 1.5, 2, 2.5 and 3 m, four seconds apart, a\n"
 		"biped each; 0: the biped is gibbed outright." },
+	{ "debug.gore_bleed_test", _config_real, "0.0", "HALO_GORE_BLEED_TEST", _environment_value, _platform_all,
+		"After this many seconds: find ground of debug.gore_bleed_test_slope degrees near the player, put the player above it looking down, make debug.gore_bleed_test_count of debug.gore_bleed_test_unit there and kill them whole (the corpse bleed's test)." },
+	{ "debug.gore_bleed_test_slope", _config_real, "30.0", "HALO_GORE_BLEED_TEST_SLOPE", _environment_value, _platform_all,
+		"With debug.gore_bleed_test: the slope to find, in degrees (0: flat)." },
+	{ "debug.gore_bleed_test_unit", _config_string, "\"marine\"", "HALO_GORE_BLEED_TEST_UNIT", _environment_value, _platform_all,
+		"With debug.gore_bleed_test: the biped (a part of its tag path)." },
+	{ "debug.gore_bleed_test_count", _config_integer, "1", "HALO_GORE_BLEED_TEST_COUNT", _environment_value, _platform_all,
+		"With debug.gore_bleed_test: how many of it, side by side (1 to 8)." },
 	{ "debug.gore_test_vehicle", _config_real, "0", "HALO_GORE_TEST_VEHICLE", _environment_value, _platform_all,
 		"With debug.gore_test: a warthog at this speed (m/s) at the unit, then 4 s later parked side on in view (to see its blood)." },
 	{ "debug.gore_test_sniper", _config_boolean, "false", "HALO_GORE_TEST_SNIPER", _environment_value, _platform_all,

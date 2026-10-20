@@ -2543,6 +2543,46 @@ static void gore_headless_update(void)
 	}
 }
 
+/* ---------- for the corpse bleed (gore_bleed.c) */
+
+/* how much blood the level makes (off none, mild half, heavy all, extreme
+a quarter more) */
+real gore_bleed_level_scale(void)
+{
+	return gore_level() == _gore_level_off ? 0.f : gore_blood_scale();
+}
+
+/* the species' blood colour (the chunks': human red, hunter orange, grunt
+cyan, jackal and elite blue-purple) */
+void gore_species_blood_color(long unit_definition_index, real_rgb_color *color)
+{
+	gore_chunk_color(unit_definition_index, color);
+}
+
+/* a headless corpse (a sniper's headshot): its neck (the head node) */
+boolean gore_unit_headless_neck(long unit_index, short *node_index)
+{
+	struct gore_headless *headless = gore_headless_find(unit_index);
+
+	if (!headless)
+		return FALSE;
+	*node_index = headless->head_node;
+	return TRUE;
+}
+
+/* a unit about to come apart (its gib is a tick after its death) */
+boolean gore_unit_gib_pending(long unit_index)
+{
+	short index;
+
+	for (index = 0; index < GORE_MAXIMUM_PENDING; index++)
+	{
+		if (gore_pending[index].unit_index == unit_index && unit_index != NONE)
+			return TRUE;
+	}
+	return FALSE;
+}
+
 real_matrix4x3 const *gore_render_node_matrices(long object_index, real_matrix4x3 const *nodes)
 {
 	static real_matrix4x3 drawn[GORE_MAXIMUM_NODES];
@@ -2598,6 +2638,7 @@ void gore_reset(void)
 	for (index = 0; index < GORE_MAXIMUM_COVERED_VEHICLES; index++)
 		gore_coverages[index].vehicle_index = NONE;
 	render_model_part_blood_proc = gore_render_part_blood;
+	gore_bleed_reset();
 	gore_test_done = 0;
 	gore_test_gib_time = NONE;
 	gore_test_made = NONE;
@@ -3169,6 +3210,8 @@ void gore_update(void)
 		}
 	}
 	gore_headless_update();
+	/* corpses that died whole bleed (gore_bleed.c) */
+	gore_bleed_update();
 	gore_vehicles_update();
 	gore_vehicle_marks_update();
 	gore_coverage_update();
