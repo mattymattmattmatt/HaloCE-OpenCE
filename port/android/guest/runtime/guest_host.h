@@ -133,5 +133,8 @@ void host_touch_scene(int scene);
 /* the game control on each of the 16 controller buttons (touch_game.c),
 for the overlay's labels */
 void host_touch_bindings(const int *controls);
+/* the overlay's gyroscope switch, when it changed there: 1 on, 0 off, -1
+not since the last call (input.gyroscope: touch_input.c) */
+int host_touch_gyroscope_request(void);
 
 #endif

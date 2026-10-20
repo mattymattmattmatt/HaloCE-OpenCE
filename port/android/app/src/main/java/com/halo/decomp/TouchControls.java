@@ -88,6 +88,10 @@ public final class TouchControls extends View implements SensorEventListener, In
     private static final int SCENE_MENUS = 2;
     private static final int SCENE_ON = 4;
     private static final int SCENE_OFF = 8;
+    /** input.gyroscope: the game's controller menu has GYRO AIMING on */
+    private static final int SCENE_GYROSCOPE = 16;
+    /** how long a switch sent to the game may take to come back before the game's value counts again */
+    private static final long GYROSCOPE_PENDING_MS = 2000;
 
     private static final String PREFERENCES = "touch-layout-v1";
     private static final String KEY_CONFIGURATION = "configuration";
@@ -153,6 +157,7 @@ public final class TouchControls extends View implements SensorEventListener, In
     private static native int nativeRumble();
     private static native int nativeScene();
     private static native int nativeBindings(int[] controls);
+    private static native void nativeGyroscopeSetting(boolean enabled);
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final SharedPreferences preferences;
@@ -215,6 +220,10 @@ public final class TouchControls extends View implements SensorEventListener, In
     private final int[] bindings = DEFAULT_BINDINGS.clone();
     private final int[] bindingsRead = new int[bindings.length];
     private int bindingsSerial;
+    /** the game's input.gyroscope as last seen (-1: not yet), and a value sent to it, still on its way (-1: none) */
+    private int gameGyroscope = -1;
+    private int pendingGyroscope = -1;
+    private long pendingGyroscopeSince;
 
     /** reads what the game says every frame: when to show, the buttons' names, and the rumble */
     private final Runnable poll = new Runnable() {
@@ -223,6 +232,7 @@ public final class TouchControls extends View implements SensorEventListener, In
             if (!deviceInputActive)
                 return;
             scene = nativeScene();
+            syncGyroscope();
             updateShowing();
             readBindings();
             updateRumble();
@@ -375,6 +385,48 @@ public final class TouchControls extends View implements SensorEventListener, In
             showing = show;
             reset();
             updateSensors();
+        }
+    }
+
+    /**
+     * keeps the gyroscope switch and the game's input.gyroscope one setting:
+     * the game's controller menu has GYRO AIMING (reachable with a controller,
+     * which hides these controls and their options) and the options have
+     * their switch. At the start the options' saved choice is sent to the
+     * game; then a change in the game's menu is taken here, and a change
+     * here (the switch, an imported layout) is sent there.
+     */
+    private void syncGyroscope() {
+        if ((scene & SCENE_KNOWN) == 0)
+            return;
+        int game = (scene & SCENE_GYROSCOPE) != 0 ? 1 : 0;
+        int mine = layout.gyroscopeEnabled ? 1 : 0;
+        if (pendingGyroscope >= 0) {
+            if (game == pendingGyroscope
+                    || SystemClock.uptimeMillis() - pendingGyroscopeSince > GYROSCOPE_PENDING_MS) {
+                pendingGyroscope = -1;
+                gameGyroscope = game;
+            }
+            if (game != mine && pendingGyroscope >= 0)
+                return;
+        }
+        if (gameGyroscope >= 0 && game != gameGyroscope) {
+            // switched in the game's menu
+            gameGyroscope = game;
+            if (game != mine) {
+                layout.gyroscopeEnabled = game != 0;
+                gyroAim.reset();
+                saveLayout();
+                updateSensors();
+            }
+            return;
+        }
+        gameGyroscope = game;
+        if (game != mine) {
+            // switched here, or the game's start: the options' choice
+            pendingGyroscope = mine;
+            pendingGyroscopeSince = SystemClock.uptimeMillis();
+            nativeGyroscopeSetting(mine != 0);
         }
     }
 

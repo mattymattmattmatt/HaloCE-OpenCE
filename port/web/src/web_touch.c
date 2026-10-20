@@ -90,6 +90,13 @@ void host_touch_scene(int scene)
 	__atomic_store_n(&web_shared[_web_touch_scene], scene, __ATOMIC_RELAXED);
 }
 
+/* the page's overlay has no gyroscope switch (input.gyroscope is
+Android's) */
+int host_touch_gyroscope_request(void)
+{
+	return -1;
+}
+
 /* the game control on each controller button (port/linux/game/touch_game.c),
 which name the overlay's buttons */
 void host_touch_bindings(const int32_t *controls)

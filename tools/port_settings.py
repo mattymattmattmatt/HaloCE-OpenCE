@@ -200,6 +200,10 @@ SCREENS = {
              "Which stick moves and which looks.", None),
             ("VIBRATION:", "profile.vibration", ON_OFF, "Rumble the controller.", None),
             ("IN-GAME HELP:", "profile.ingame_help", ON_OFF, "Show the game's hints about its controls.", None),
+            # (last, so no other platform has a gap; the touch controls' options switch it too, but a controller
+            # hides them: the one setting, port/linux/src/touch_input.c)
+            ("GYRO AIMING:", "input.gyroscope", ON_OFF,
+             "Aim by turning the phone, with the controller\nor the touch controls.", "android"),
         ],
     },
 }

@@ -26,6 +26,7 @@ void host_touch_look_read(float *delta);
 void host_touch_rumble(unsigned int low, unsigned int high);
 void host_touch_scene(int scene);
 void host_touch_bindings(const int *controls);
+int host_touch_gyroscope_request(void);
 #endif
 
 /* the game's (port/linux/game/touch_game.c) */
@@ -210,6 +211,9 @@ enum
 	device has a touchscreen and no controller) */
 	_touch_scene_on = 1 << 2,
 	_touch_scene_off = 1 << 3,
+	/* input.gyroscope: the overlay aims with the gyroscope (its own switch
+	and the controller menu's GYRO AIMING are this one setting) */
+	_touch_scene_gyroscope = 1 << 4,
 };
 
 /* the touch controls' stick at port 0's last read, -1..1, y down */
@@ -231,6 +235,30 @@ static int touch_controls_setting(void)
 			setting = _touch_scene_on;
 		else if (value && !strcmp(value, "off"))
 			setting = _touch_scene_off;
+	}
+	return setting;
+}
+
+/* input.gyroscope as _touch_scene_gyroscope or 0, after the overlay's
+switch: the setting has two switches, the overlay's (in the touch
+controls' options, which a controller hides) and the controller menu's
+GYRO AIMING (tools/port_settings.py), and the overlay follows the
+setting through this bit, the setting the overlay through its requests */
+static int gyroscope_setting(void)
+{
+	static int setting;
+	static unsigned long read_at = (unsigned long)-1;
+	int request = host_touch_gyroscope_request();
+
+	if (request >= 0 && (config_boolean("input.gyroscope") != 0) != (request != 0))
+	{
+		config_write_boolean("input.gyroscope", request);
+		platform_log("touch: gyroscope aiming %s (the touch controls' switch)", request ? "on" : "off");
+	}
+	if (read_at != config_changes())
+	{
+		read_at = config_changes();
+		setting = config_boolean("input.gyroscope") ? _touch_scene_gyroscope : 0;
 	}
 	return setting;
 }
@@ -258,7 +286,7 @@ void touch_input_controls(XINPUT_GAMEPAD *pad, int menus)
 
 	/* (the controls show only in a game: not while it starts, at the main
 	menu, in a menu or during a cinematic) */
-	host_touch_scene(_touch_scene_known | touch_controls_setting() |
+	host_touch_scene(_touch_scene_known | touch_controls_setting() | gyroscope_setting() |
 		(menus || !touch_game_playing() || touch_game_cinematic_playing() ? _touch_scene_menus : 0));
 	/* (the profile's mapping, for the buttons' names; only when it changes) */
 	touch_game_button_controls(bindings);

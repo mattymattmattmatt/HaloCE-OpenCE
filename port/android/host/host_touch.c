@@ -47,6 +47,10 @@ its changes, which the overlay polls */
 #define TOUCH_BUTTONS 16
 static int32_t touch_bindings[TOUCH_BUTTONS];
 static int touch_bindings_serial;
+/* the overlay's gyroscope switch, waiting for the game (-1: nothing):
+input.gyroscope is the one setting the overlay and the game's controller
+menu both switch (touch_input.c) */
+static int gyroscope_request = -1;
 
 static int64_t now_ns(void)
 {
@@ -183,6 +187,31 @@ JNIEXPORT jint JNICALL Java_com_halo_decomp_TouchControls_nativeRumble(JNIEnv *e
 	amplitude = now_ns() - rumble_ns > TOUCH_STALE_NS ? 0 : rumble_amplitude;
 	pthread_mutex_unlock(&touch_lock);
 	return amplitude;
+}
+
+/* the overlay's: its gyroscope switch changed (or, at the start, differs
+from the game's input.gyroscope) */
+JNIEXPORT void JNICALL Java_com_halo_decomp_TouchControls_nativeGyroscopeSetting(JNIEnv *env, jclass cls,
+	jboolean enabled)
+{
+	(void)env;
+	(void)cls;
+	pthread_mutex_lock(&touch_lock);
+	gyroscope_request = enabled ? 1 : 0;
+	pthread_mutex_unlock(&touch_lock);
+}
+
+/* the guest's, at every read of port 0: the overlay's switch since the
+last call, -1 if none */
+int host_touch_gyroscope_request(void)
+{
+	int request;
+
+	pthread_mutex_lock(&touch_lock);
+	request = gyroscope_request;
+	gyroscope_request = -1;
+	pthread_mutex_unlock(&touch_lock);
+	return request;
 }
 
 /* the guest's, at every read of port 0: port/linux/src/touch_input.c's
