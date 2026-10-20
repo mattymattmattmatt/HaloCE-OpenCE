@@ -157,7 +157,8 @@ struct nv2a_pixel_shader_key
 
 char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key);
 /* the blood the next draws are covered with: its color and how much of the
-surface (0 to 1; 0 none), until set again (port/linux/game/gore.c) */
+surface (0 to 1; 0 none; over 1, to 2: flesh, the whole surface in the
+color: gore.c's Extreme chunks), until set again (port/linux/game/gore.c) */
 void xgpu_set_blood(float red, float green, float blue, float amount);
 
 #ifdef HALO_GLES

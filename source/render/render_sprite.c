@@ -354,6 +354,21 @@ void build_sprite(
 {
 	struct bitmap_group *bitmap_group = bitmap_group_get(data->bitmap_group_index);
 
+	/* port: a sprite at a node with no axes (a gore piece's collapsed
+	nodes, port/linux/game/gore.c) has no direction: any will do. This
+	must run BEFORE the 419 assert below, which halts on exactly this
+	direction (Quest test74: an oriented particle sprite rendered at
+	a piece's collapsed node and halted). */
+	real_vector3d axisless_direction;
+
+	if (mode!=_build_sprite_normal &&
+		(!untransformed_direction || !(magnitude_squared3d(untransformed_direction)>0.f)))
+	{
+		axisless_direction.i = 1.f;
+		axisless_direction.j = 0.f;
+		axisless_direction.k = 0.f;
+		untransformed_direction = &axisless_direction;
+	}
 	match_assert("c:\\halo\\SOURCE\\render\\render_sprite.c", 418, untransformed_origin);
 	match_assert(
 		"c:\\halo\\SOURCE\\render\\render_sprite.c",
