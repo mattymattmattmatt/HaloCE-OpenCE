@@ -413,6 +413,10 @@ static boolean bleed_fit_plane(real_point3d const *center, real radius, real *sl
 	return TRUE;
 }
 
+/* (a rivulet is drawn this much wider than the blood it spends: the
+streams of the species' width read as hairlines from a few meters) */
+#define GORE_BLEED_DRAWN_WIDTH 1.7f
+
 /* the cluster a point on the ground is in: a point right on the surface
 is often in none, so a little above it, else the one the ray found */
 static short bleed_cluster(struct collision_result const *collision)
@@ -671,7 +675,7 @@ static void bleed_rivulet_edges(struct gore_rivulet const *rivulet, real width, 
 /* the ribbon from its last end to here */
 static void bleed_rivulet_emit(struct gore_rivulet *rivulet, struct gore_bleed *bleed)
 {
-	real width = bleed_rivulet_width(rivulet);
+	real width = bleed_rivulet_width(rivulet) * GORE_BLEED_DRAWN_WIDTH;
 	real_point3d left, right;
 	real v0 = rivulet->texture_v;
 	real v1;
@@ -925,7 +929,7 @@ static void bleed_rivulet_update(struct gore_rivulet *rivulet)
 	{
 		/* (its start: the ribbon's first end, wide) */
 		real_point3d left_edge, right_edge;
-		real width = bleed_rivulet_width(rivulet) * 1.3f;
+		real width = bleed_rivulet_width(rivulet) * 1.3f * GORE_BLEED_DRAWN_WIDTH;
 
 		bleed_rivulet_edges(rivulet, width, &left_edge, &right_edge);
 		rivulet->edge_left = left_edge;
