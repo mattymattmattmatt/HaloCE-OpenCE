@@ -689,7 +689,7 @@ static void bleed_rivulet_emit(struct gore_rivulet *rivulet, struct gore_bleed *
 	{
 		real_point3d corners[4];
 		real_point2d uv[4];
-		real band_low = 0.36f, band_high = 0.64f;
+		real band_low = 0.4f, band_high = 0.6f;
 		real span = band_high - band_low;
 		/* (a triangle wave through the band) */
 		real t0 = fmodf(v0, 2.f * span), t1 = fmodf(v1, 2.f * span);
@@ -700,10 +700,12 @@ static void bleed_rivulet_emit(struct gore_rivulet *rivulet, struct gore_bleed *
 		corners[1] = rivulet->edge_right;
 		corners[2] = right;
 		corners[3] = left;
-		uv[0].x = 0.f; uv[0].y = band_low + t0;
-		uv[1].x = 1.f; uv[1].y = band_low + t0;
-		uv[2].x = 1.f; uv[2].y = band_low + t1;
-		uv[3].x = 0.f; uv[3].y = band_low + t1;
+		/* (across, the splat's dense middle: its whole width is mostly
+		its fringe, which leaves a hairline) */
+		uv[0].x = 0.3f; uv[0].y = band_low + t0;
+		uv[1].x = 0.7f; uv[1].y = band_low + t0;
+		uv[2].x = 0.7f; uv[2].y = band_low + t1;
+		uv[3].x = 0.3f; uv[3].y = band_low + t1;
 		if (bleed_quad_new(bleed->decal_definition_index, 0, rivulet->cluster_index, corners, uv, &bleed->color,
 				&rivulet->normal) != NONE)
 			bleed->quads++;
@@ -1550,15 +1552,16 @@ static void bleed_test_aim(struct gore_bleed const *bleed)
 	cross_product3d(global_up3d, &bleed->downhill, &side);
 	bleed_normalize(&side, global_left3d);
 	place = bleed->wound;
-	point_from_line3d(&place, &bleed->downhill, -1.5f, &place);
-	point_from_line3d(&place, &side, 0.7f, &place);
+	/* (beside the way down, a little above: the body hides none of it) */
+	point_from_line3d(&place, &bleed->downhill, -0.5f, &place);
+	point_from_line3d(&place, &side, 1.9f, &place);
 	place.z = bleed->wound.z + 1.5f;
 	if (bleed_ground(&place, 4.f, 6.f, &collision))
 		place.z = collision.point.z;
 	place.z += 0.35f;
 	gore_bleed_test_place = place;
 	look = bleed->wound;
-	point_from_line3d(&look, &bleed->downhill, 0.9f, &look);
+	point_from_line3d(&look, &bleed->downhill, 1.1f, &look);
 	gore_bleed_test_facing.i = look.x - place.x;
 	gore_bleed_test_facing.j = look.y - place.y;
 	gore_bleed_test_facing.k = look.z - (place.z + 0.6f);

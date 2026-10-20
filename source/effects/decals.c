@@ -2861,8 +2861,18 @@ void decal_quad_set_color(
 	case 4:
 	case 6:
 	case 7:
+	{
+		/* (the hue only, at the texture's own brightness: a darker tint
+		would sink under what it is drawn over, with max) */
+		real brightest = MAX(c.red, MAX(c.green, c.blue));
+
+		if (brightest > 0.0f)
+		{
+			c.red /= brightest; c.green /= brightest; c.blue /= brightest;
+		}
 		c.red *= alpha; c.green *= alpha; c.blue *= alpha;
 		break;
+	}
 	default:
 		break;
 	}
