@@ -113,6 +113,11 @@ jobs:
     # The runner image has the Android SDK and NDK, a JDK and CMake.
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    env:
+      # the APK's version code (port/android/app/build.gradle): it grows
+      # every run, so each release signed with the permanent key installs
+      # over the one before
+      HALO_ANDROID_VERSION_CODE: ${{ github.run_number }}
     steps:
       - name: Install the toolchain
         run: |
