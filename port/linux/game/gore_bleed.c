@@ -48,6 +48,7 @@ kills them whole; each bleed logs its numbers when it is done.
 #include "effects/decals.h"
 #include "game/game.h"
 #include "game/players.h"
+#include "main/main.h"
 #include "math/real_math.h"
 #include "models/model_definitions.h"
 #include "objects/object_definitions.h"
@@ -82,8 +83,10 @@ boolean gore_unit_gib_pending(long unit_index);
 #define GORE_BLEED_MAXIMUM_WATCHED 32
 #define GORE_BLEED_MAXIMUM_ACTIVE 8
 #define GORE_BLEED_MAXIMUM_RIVULETS 64
-#define GORE_BLEED_MAXIMUM_QUADS 1536
-#define GORE_BLEED_MAXIMUM_STAINS 160 /* round, growing: pools, puddles, beads, drips */
+#define GORE_BLEED_MAXIMUM_QUADS 3072
+#define GORE_BLEED_MAXIMUM_STAINS 192 /* round, growing: pools, puddles, beads, drips */
+#define GORE_BLEED_MAXIMUM_LAYERS 3 /* a stain drawn this many times over at most */
+#define GORE_BLEED_MAXIMUM_BLED 512 /* corpses that have bled (never again) */
 #define GORE_BLEED_STAIN_GRID 3 /* a big stain's quads a side */
 #define GORE_BLEED_MAXIMUM_NODES 10
 
@@ -229,9 +232,10 @@ struct gore_bleed_quad
 struct gore_bleed_stain
 {
 	short quad_count; /* 0: free */
-	short quads[GORE_BLEED_STAIN_GRID * GORE_BLEED_STAIN_GRID];
-	long serials[GORE_BLEED_STAIN_GRID * GORE_BLEED_STAIN_GRID];
+	short quads[GORE_BLEED_STAIN_GRID * GORE_BLEED_STAIN_GRID * GORE_BLEED_MAXIMUM_LAYERS];
+	long serials[GORE_BLEED_STAIN_GRID * GORE_BLEED_STAIN_GRID * GORE_BLEED_MAXIMUM_LAYERS];
 	short grid;
+	short layers;
 	real_point3d center;
 	real_vector3d normal;
 	real_vector3d axis; /* its long way */
@@ -249,6 +253,15 @@ static struct gore_rivulet gore_rivulets[GORE_BLEED_MAXIMUM_RIVULETS];
 static struct gore_bleed_quad gore_bleed_quads[GORE_BLEED_MAXIMUM_QUADS];
 static struct gore_bleed_stain gore_bleed_stains[GORE_BLEED_MAXIMUM_STAINS];
 static short gore_bleed_quad_next;
+/* corpses that have bled (or never will): a ring, so a slot is free again
+the moment its bleed is done, however long its corpse lies there */
+static long gore_bleed_bled[GORE_BLEED_MAXIMUM_BLED];
+static short gore_bleed_bled_next;
+static long gore_bleed_last_time = NONE;
+static long gore_bleed_started; /* bleeds begun since the map (the numbers) */
+static long gore_bleed_finished;
+static long gore_bleed_resets;
+static boolean gore_bleed_loaded; /* (game_state.c's after-load procs) */
 static long gore_bleed_serial;
 static short gore_bleed_check_next;
 static unsigned long gore_bleed_seed = 0x626c6564;
@@ -267,7 +280,13 @@ static real_vector3d gore_bleed_test_downhill;
 static real gore_bleed_test_found_slope;
 static long gore_bleed_test_units[GORE_BLEED_MAXIMUM_ACTIVE];
 static short gore_bleed_test_unit_count;
+static short gore_bleed_test_round; /* debug.gore_bleed_test_rounds: this one (from 1) */
+static long gore_bleed_test_round_started; /* gore_bleed_started at its kill */
+static short gore_bleed_test_rounds_passed;
 static char const *bleed_test_tag(long unit_index);
+static short bleed_watched_count(void);
+static void bleed_retire(struct gore_bleed *bleed);
+static boolean bleed_has_bled(long unit_index);
 /* the cost: cycles in gore_bleed_update, and the frames */
 static unsigned long long gore_bleed_cycles;
 static unsigned long long gore_bleed_cycles_max;
@@ -286,6 +305,33 @@ static real bleed_random(real low, real high)
 static boolean bleed_log(void)
 {
 	return config_boolean("game.gore_log") || config_real("debug.gore_bleed_test") > 0.;
+}
+
+/* how much more blood than the species' heavy area the level bleeds
+(game.gore_level: mild a little less than 1.0's heavy, heavy 1.8x it,
+extreme a quarter more again) */
+static real bleed_volume_scale(void)
+{
+	real scale = gore_bleed_level_scale();
+
+	if (scale <= 0.f)
+		return 0.f;
+	if (scale < 0.75f)
+		return 0.9f;
+	if (scale < 1.1f)
+		return 1.8f;
+	return 2.25f;
+}
+
+/* times over each quad is drawn: the species' (a pale splat's more),
+one more from heavy up (multiply: darker, more opaque) */
+static short bleed_layers(struct gore_bleed const *bleed)
+{
+	short layers = gore_bleed_species[bleed->species].layers;
+
+	if (gore_bleed_level_scale() >= 0.75f)
+		layers++;
+	return (short)PIN(layers, 1, GORE_BLEED_MAXIMUM_LAYERS);
 }
 
 static unsigned long long bleed_cycles(void)
@@ -527,8 +573,8 @@ static void bleed_stain_corners(struct gore_bleed_stain const *stain, real size,
 	static real const cu[4] = { 0.f, 1.f, 1.f, 0.f };
 	static real const cv[4] = { 0.f, 0.f, 1.f, 1.f };
 	real_vector3d side;
-	short x = (short)(cell % stain->grid);
-	short y = (short)(cell / stain->grid);
+	short x = (short)((cell % (stain->grid * stain->grid)) % stain->grid);
+	short y = (short)((cell % (stain->grid * stain->grid)) / stain->grid);
 	short corner;
 
 	cross_product3d(&stain->normal, &stain->axis, &side);
@@ -618,7 +664,8 @@ static short bleed_stain_new(struct gore_bleed *bleed, real_point3d const *cente
 	stain->grid = radius * stretch > 0.3f ? 3 : radius * stretch > 0.12f ? 2 : 1;
 	/* (a round sprite: the definition's first) */
 	sequence = 0;
-	stain->quad_count = (short)(stain->grid * stain->grid);
+	stain->layers = bleed_layers(bleed);
+	stain->quad_count = (short)(stain->grid * stain->grid * stain->layers);
 	for (cell = 0; cell < stain->quad_count; cell++)
 	{
 		real_point3d corners[4];
@@ -712,7 +759,7 @@ static void bleed_rivulet_emit(struct gore_rivulet *rivulet, struct gore_bleed *
 		{
 			short layer;
 
-			for (layer = 0; layer < gore_bleed_species[bleed->species].layers; layer++)
+			for (layer = 0; layer < bleed_layers(bleed); layer++)
 			{
 				if (bleed_quad_new(bleed->decal_definition_index, 0, rivulet->cluster_index, corners, uv, &bleed->color,
 						&rivulet->normal) != NONE)
@@ -782,7 +829,7 @@ static void bleed_rivulet_start(struct gore_bleed *bleed, short bleed_index, rea
 	bleed_normalize(&rivulet->direction, &bleed->downhill);
 	rivulet->volume = rivulet->volume0 = volume;
 	rivulet->width0 = gore_bleed_species[bleed->species].width / WU * (depth ? 0.75f : 1.f) *
-		sqrtf(PIN(gore_bleed_level_scale(), 0.5f, 1.25f));
+		powf(bleed_volume_scale(), 0.4f);
 	rivulet->sine = sinf(RADIANS(bleed->slope));
 	rivulet->texture_v = bleed_random(0.f, 1.f);
 	rivulet->texture_rate = bleed_random(0.8f, 1.6f);
@@ -1078,12 +1125,12 @@ static void bleed_settle(struct gore_bleed *bleed)
 		bleed->wound = object_get_node_matrices(bleed->unit_index)[neck].position;
 	if (!bleed_fit_plane(&bleed->wound, 0.4f, &bleed->slope, &bleed->downhill, &bleed->normal, &ground))
 	{
-		bleed->state = _bleed_done;
-		bleed->reported = TRUE;
+		bleed_retire(bleed);
 		return;
 	}
+	gore_bleed_started++;
 	bleed->wound = ground;
-	bleed->volume = species->area / (WU * WU) * gore_bleed_level_scale() * (bleed->headless ? 1.25f : 1.f);
+	bleed->volume = species->area / (WU * WU) * bleed_volume_scale() * (bleed->headless ? 1.25f : 1.f);
 	gore_species_blood_color(bleed->definition_index, &bleed->color);
 	bleed->decal_definition_index = tag_loaded(DECAL_TAG, species->decal_name);
 	if (bleed->decal_definition_index == NONE)
@@ -1092,9 +1139,14 @@ static void bleed_settle(struct gore_bleed *bleed)
 	if (bleed->slope < GORE_BLEED_FLAT_DEGREES)
 		bleed->pool_share = 1.f;
 	else
-		bleed->pool_share = PIN(1.f - (bleed->slope - GORE_BLEED_FLAT_DEGREES) / 32.f, 0.2f, 0.85f);
-	bleed->pool_stretch = 1.f + 1.4f * sinf(RADIANS(bleed->slope));
-	bleed->pool_radius = MIN(sqrtf(bleed->volume * bleed->pool_share / (3.14159f * bleed->pool_stretch)), 1.4f / WU);
+		/* (a solid pool under the torso first, even on a slope: half of it
+		on a cliff) */
+		bleed->pool_share = PIN(1.f - (bleed->slope - GORE_BLEED_FLAT_DEGREES) / 55.f, 0.5f, 0.9f);
+	bleed->pool_stretch = 1.f + 1.1f * sinf(RADIANS(bleed->slope));
+	bleed->pool_radius = MIN(sqrtf(bleed->volume * bleed->pool_share / (3.14159f * bleed->pool_stretch)), 2.f / WU);
+	/* (extreme: a pool a fifth wider again) */
+	if (gore_bleed_level_scale() > 1.1f)
+		bleed->pool_radius = MIN(bleed->pool_radius * 1.2f, 2.4f / WU);
 	bleed->rivulets_planned = 0;
 	if (bleed->slope >= GORE_BLEED_FLAT_DEGREES)
 	{
@@ -1104,6 +1156,8 @@ static void bleed_settle(struct gore_bleed *bleed)
 		/* (fewer with less blood) */
 		if (gore_bleed_level_scale() < 0.75f)
 			planned = (short)MAX(1, planned - 1);
+		else if (gore_bleed_level_scale() > 1.1f)
+			planned++;
 		bleed->rivulets_planned = (short)PIN(planned, 1, species->rivulets_maximum + 1);
 	}
 	bleed->wait_ticks = (long)bleed_random(12.f, 26.f);
@@ -1228,6 +1282,27 @@ static void bleed_report(struct gore_bleed *bleed)
 		(real)(game_time_get() - bleed->state_time) / 30.f);
 }
 
+static boolean bleed_has_bled(long unit_index)
+{
+	short index;
+
+	for (index = 0; index < GORE_BLEED_MAXIMUM_BLED; index++)
+	{
+		if (gore_bleed_bled[index] == unit_index)
+			return TRUE;
+	}
+	return FALSE;
+}
+
+/* its bleed is over (done, or never to be): its slot is free again, its
+corpse remembered so it does not bleed twice */
+static void bleed_retire(struct gore_bleed *bleed)
+{
+	gore_bleed_bled[gore_bleed_bled_next] = bleed->unit_index;
+	gore_bleed_bled_next = (short)((gore_bleed_bled_next + 1) % GORE_BLEED_MAXIMUM_BLED);
+	bleed->state = _bleed_free;
+}
+
 static short bleed_active_count(void)
 {
 	short index;
@@ -1269,6 +1344,14 @@ static void bleed_update(struct gore_bleed *bleed, short bleed_index)
 		else
 			bleed->still_ticks = 0;
 		bleed->probe = torso;
+		/* (never still: a body on a lift, or jittering: given up after 30 s) */
+		if (bleed->state == _bleed_watching && game_time_get() - bleed->seen_time > 900)
+		{
+			if (bleed_log())
+				error(_error_silent, "gore bleed: %s never came to rest", tag_get_name(bleed->definition_index));
+			bleed_retire(bleed);
+			return;
+		}
 		if (bleed->state == _bleed_watching && bleed->still_ticks >= 12 && game_time_get() - bleed->seen_time >= 20)
 		{
 			bleed->state = _bleed_queued;
@@ -1283,8 +1366,7 @@ static void bleed_update(struct gore_bleed *bleed, short bleed_index)
 				if (bleed_log())
 					error(_error_silent, "gore bleed: %s waited 10 s for one of the %d bleeds: none",
 						tag_get_name(bleed->definition_index), GORE_BLEED_MAXIMUM_ACTIVE);
-				bleed->state = _bleed_done;
-				bleed->reported = TRUE;
+				bleed_retire(bleed);
 			}
 		}
 		return;
@@ -1320,12 +1402,15 @@ static void bleed_update(struct gore_bleed *bleed, short bleed_index)
 			bleed->done_time = game_time_get();
 			if (bleed_log())
 				bleed_report(bleed);
+			/* (its slot free again at once: before, a done bleed kept it
+			till its corpse was deleted, and campaign corpses lie there for
+			the level, so after 32 of them no corpse bled again) */
+			gore_bleed_finished++;
+			bleed_retire(bleed);
 		}
 		return;
 	case _bleed_done:
-		/* (forgotten once its corpse is gone; till then, it has bled) */
-		if (!object || !TEST_FLAG(object->object.damage_flags, _object_dead_bit))
-			bleed->state = _bleed_free;
+		bleed_retire(bleed);
 		return;
 	}
 }
@@ -1356,7 +1441,7 @@ static void bleed_watch(void)
 			else if (gore_bleeds[index].unit_index == iterator.index)
 				known = TRUE;
 		}
-		if (known || free_index == NONE)
+		if (known || free_index == NONE || bleed_has_bled(iterator.index))
 			continue;
 		if (bleed_species_get(biped->definition_index) == NONE || gore_object_is_piece(iterator.index) ||
 			gore_unit_gib_pending(iterator.index))
@@ -1713,6 +1798,12 @@ static void bleed_test_update(void)
 			}
 		}
 		gore_bleed_test_state = 2;
+		gore_bleed_test_round++;
+		if (config_boolean("debug.gore_bleed_test_churn") && gore_bleed_test_round == 3)
+		{
+			error(_error_silent, "gore bleed test: round 3: a checkpoint saved");
+			main_save_map_nonsafe();
+		}
 		if (found == NONE)
 		{
 			error(_error_silent, "gore bleed test: no biped \"%s\" on this map", unit_name);
@@ -1758,7 +1849,68 @@ static void bleed_test_update(void)
 			}
 		}
 		error(_error_silent, "gore bleed test: killed them whole (level %s)", config_string("game.gore_level"));
+		gore_bleed_test_round_started = gore_bleed_started;
 	}
+	/* debug.gore_bleed_test_rounds: round after round of them on the same
+	spot, the old corpses left lying (each must still bleed: before, a
+	bleed kept its slot till its corpse went, so after 32 corpses none
+	did); with debug.gore_bleed_test_churn, round 2 has one corpse deleted
+	mid-bleed, round 3 a checkpoint saved, round 4 reverted to it mid-bleed */
+	if (gore_bleed_test_state == 2 && config_integer("debug.gore_bleed_test_rounds") > 1)
+	{
+		long rounds = config_integer("debug.gore_bleed_test_rounds");
+		boolean churn = config_boolean("debug.gore_bleed_test_churn");
+		long since = game_time_get() - gore_bleed_test_time;
+
+		if (churn && gore_bleed_test_round == 2 && since == 2 + 150 && gore_bleed_test_unit_count > 0 &&
+			object_try_and_get_and_verify_type(gore_bleed_test_units[0], _object_mask_biped))
+		{
+			error(_error_silent, "gore bleed test: round 2: a corpse deleted mid-bleed");
+			object_delete(gore_bleed_test_units[0]);
+		}
+		if (churn && gore_bleed_test_round == 4 && since == 2 + 240)
+		{
+			error(_error_silent, "gore bleed test: round 4: reverting to the checkpoint mid-bleed");
+			main_revert_map();
+		}
+		if (since >= 2 + 40 * 30)
+		{
+			short index;
+			short bled = 0;
+
+			for (index = 0; index < gore_bleed_test_unit_count; index++)
+				bled += bleed_has_bled(gore_bleed_test_units[index]);
+			if (bled >= gore_bleed_test_unit_count - (churn && gore_bleed_test_round == 2 ? 1 : 0))
+				gore_bleed_test_rounds_passed++;
+			error(_error_silent, "gore bleed test: round %d of %ld: %d of %d corpses bled (begun this round %ld, in all %ld, "
+				"done %ld; watched %d of %d; clock resets %ld) - %s",
+				gore_bleed_test_round, rounds, bled, gore_bleed_test_unit_count,
+				gore_bleed_started - gore_bleed_test_round_started, gore_bleed_started, gore_bleed_finished,
+				bleed_watched_count(), GORE_BLEED_MAXIMUM_WATCHED, gore_bleed_resets,
+				bled >= gore_bleed_test_unit_count - (churn && gore_bleed_test_round == 2 ? 1 : 0) ? "ok" : "FAILED");
+			if (gore_bleed_test_round >= rounds)
+			{
+				error(_error_silent, "gore bleed test: rounds done: %d of %ld passed", gore_bleed_test_rounds_passed, rounds);
+				gore_bleed_test_state = 3;
+			}
+			else
+			{
+				/* the next round */
+				gore_bleed_test_state = 1;
+				gore_bleed_test_time = game_time_get() - 15;
+			}
+		}
+	}
+}
+
+static short bleed_watched_count(void)
+{
+	short index;
+	short watched = 0;
+
+	for (index = 0; index < GORE_BLEED_MAXIMUM_WATCHED; index++)
+		watched += gore_bleeds[index].state != _bleed_free;
+	return watched;
 }
 
 /* the cost, every 5 s while anything bleeds (and in the test) */
@@ -1786,7 +1938,11 @@ static void bleed_cost_report(void)
 		short active = bleed_active_count();
 		short live = 0;
 		short quads = 0;
+		short watched = 0;
 		short index;
+
+		for (index = 0; index < GORE_BLEED_MAXIMUM_WATCHED; index++)
+			watched += gore_bleeds[index].state != _bleed_free;
 
 		for (index = 0; index < GORE_BLEED_MAXIMUM_RIVULETS; index++)
 			live += gore_rivulets[index].bleed != NONE;
@@ -1794,11 +1950,13 @@ static void bleed_cost_report(void)
 			quads += gore_bleed_quads[index].decal_index != NONE;
 		if (active > 0 || live > 0 || config_real("debug.gore_bleed_test") > 0.)
 			error(_error_silent, "gore bleed: cost: %d bleeding, %d rivulets, %d quads (made %ld, refused %ld, made again %ld); "
-				"update %.1f us a tick (most %.1f); %ld frames in %lu ms (%.2f ms a frame)",
+				"update %.1f us a tick (most %.1f); %ld frames in %lu ms (%.2f ms a frame); bleeds begun %ld, done %ld, "
+				"watched %d of %d, clock resets %ld",
 				active, live, quads, gore_bleed_quads_made, gore_bleed_quads_failed, gore_bleed_quads_remade,
 				cycles_per_us > 0.f && gore_bleed_cycle_ticks ? (real)gore_bleed_cycles / gore_bleed_cycle_ticks / cycles_per_us : 0.f,
 				cycles_per_us > 0.f ? (real)gore_bleed_cycles_max / cycles_per_us : 0.f,
-				frames, elapsed, frames > 0 ? (real)elapsed / (real)frames : 0.f);
+				frames, elapsed, frames > 0 ? (real)elapsed / (real)frames : 0.f,
+				gore_bleed_started, gore_bleed_finished, watched, GORE_BLEED_MAXIMUM_WATCHED, gore_bleed_resets);
 	}
 	gore_bleed_window_ms = now;
 	gore_bleed_window_frame = frame;
@@ -1809,6 +1967,13 @@ static void bleed_cost_report(void)
 }
 
 /* ---------- public code */
+
+/* a checkpoint revert or a loaded game (game_state.c, after it loads):
+the next update starts over */
+void gore_bleed_game_state_loaded(void)
+{
+	gore_bleed_loaded = TRUE;
+}
 
 void gore_bleed_reset(void)
 {
@@ -1823,10 +1988,18 @@ void gore_bleed_reset(void)
 		gore_bleed_quads[index].decal_index = NONE;
 	for (index = 0; index < GORE_BLEED_MAXIMUM_STAINS; index++)
 		gore_bleed_stains[index].quad_count = 0;
+	for (index = 0; index < GORE_BLEED_MAXIMUM_BLED; index++)
+		gore_bleed_bled[index] = NONE;
+	gore_bleed_bled_next = 0;
+	gore_bleed_last_time = NONE;
+	gore_bleed_loaded = FALSE;
+	gore_bleed_started = gore_bleed_finished = 0;
 	gore_bleed_quad_next = 0;
 	gore_bleed_check_next = 0;
 	gore_bleed_test_state = 0;
 	gore_bleed_test_unit_count = 0;
+	gore_bleed_test_round = 0;
+	gore_bleed_test_rounds_passed = 0;
 	gore_bleed_quads_made = gore_bleed_quads_failed = gore_bleed_quads_remade = 0;
 	gore_bleed_window_ms = 0;
 }
@@ -1837,6 +2010,42 @@ void gore_bleed_update(void)
 	unsigned long long spent;
 	short index;
 
+	/* a checkpoint revert or a loaded game: the clock went back and the
+	objects and decals are the saved game's; what this knew is stale
+	(its corpses, its rivulets' bleeds), so it starts over (the saved
+	game's own bleed quads are deleted as unknown, bleed_check_quads) */
+	if (gore_bleed_loaded || (gore_bleed_last_time != NONE && game_time_get() < gore_bleed_last_time))
+	{
+		long resets = gore_bleed_resets + 1;
+
+		if (bleed_log())
+			error(_error_silent, "gore bleed: a revert or a loaded game (clock %ld -> %ld): starting over",
+				gore_bleed_last_time, game_time_get());
+		{
+			/* (the test goes on: its next round) */
+			short test_state = gore_bleed_test_state;
+			short round = gore_bleed_test_round;
+			short passed = gore_bleed_test_rounds_passed;
+
+			gore_bleed_reset();
+			gore_bleed_resets = resets;
+			gore_bleed_test_round = round;
+			gore_bleed_test_rounds_passed = passed;
+			if (test_state == 1 || test_state == 2)
+			{
+				if (round == 4)
+				{
+					/* (round 4, cut short by its own revert: passed if this
+					fresh start bleeds the next rounds) */
+					error(_error_silent, "gore bleed test: round 4 reverted (its corpses are gone with it): ok");
+					gore_bleed_test_rounds_passed++;
+				}
+				gore_bleed_test_state = 1;
+				gore_bleed_test_time = game_time_get() - 15;
+			}
+		}
+	}
+	gore_bleed_last_time = game_time_get();
 	bleed_test_update();
 	if (bleed_enabled())
 	{

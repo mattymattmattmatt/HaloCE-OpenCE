@@ -37,5 +37,6 @@ void gore_reset(void);
 /* the corpse bleed (gore_bleed.c): gore_update and gore_reset call these */
 void gore_bleed_update(void);
 void gore_bleed_reset(void);
+void gore_bleed_game_state_loaded(void);
 
 #endif

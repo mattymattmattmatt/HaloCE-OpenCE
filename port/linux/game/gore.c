@@ -1399,8 +1399,19 @@ static struct gore_piece *gore_spawn_copy(long unit_index, unsigned long region_
 	return piece;
 }
 
+static struct gore_piece *gore_spawn_garbage_ex(char const *name, real_point3d const *position,
+	real_vector3d const *direction, real force, long blood_effect_index, long decal_index, boolean chunk);
+
 static void gore_spawn_garbage(char const *name, real_point3d const *position,
 	real_vector3d const *direction, real force, long blood_effect_index, long decal_index)
+{
+	gore_spawn_garbage_ex(name, position, direction, force, blood_effect_index, decal_index, FALSE);
+}
+
+/* a stock bit (garbage) on its own physics; a chunk (Extreme's: launched
+as one, tinted, a minute at most) or a piece */
+static struct gore_piece *gore_spawn_garbage_ex(char const *name, real_point3d const *position,
+	real_vector3d const *direction, real force, long blood_effect_index, long decal_index, boolean chunk)
 {
 	long definition_index = tag_loaded(GARBAGE_TAG, name);
 	struct object_placement_data placement;
@@ -1408,22 +1419,25 @@ static void gore_spawn_garbage(char const *name, real_point3d const *position,
 	long object_index;
 
 	if (definition_index == NONE)
-		return;
-	piece = gore_piece_new(FALSE);
+		return NULL;
+	piece = gore_piece_new(chunk);
 	if (!piece)
-		return;
-	gore_piece_launch(piece, direction, force);
+		return NULL;
+	if (chunk)
+		gore_chunk_launch(piece, direction, force);
+	else
+		gore_piece_launch(piece, direction, force);
 	object_placement_data_new(&placement, definition_index, NONE);
 	placement.position = *position;
 	placement.translational_velocity = piece->velocity;
 	placement.angular_velocity = piece->spin;
 	object_index = object_new(&placement);
 	if (object_index == NONE)
-		return;
+		return NULL;
 	piece->object_index = object_index;
 	piece->garbage = TRUE;
 	piece->hunter = FALSE;
-	piece->chunk = FALSE;
+	piece->chunk = chunk;
 	piece->age = 0;
 	piece->life = (long)(PIN(config_real("game.gore_piece_seconds"), 1.0, 3600.0) * 30.0);
 	piece->resting = FALSE;
@@ -1433,6 +1447,9 @@ static void gore_spawn_garbage(char const *name, real_point3d const *position,
 	piece->unit_definition_index = gore_piece_unit_definition;
 	piece->node_count = 0;
 	piece->position = *position;
+	if (chunk)
+		piece->life = MIN(piece->life, 60 * 30);
+	return piece;
 }
 
 /* true left and right limbs for any model with the stock bip01 skeleton:
@@ -1556,7 +1573,39 @@ static short gore_spawn_chunks(long unit_index, struct model *model, struct gore
 	short made = 0;
 	short geometry_index;
 	short chunk;
+	/* the map's stock Flood flesh (garbage: innards, limbs, skin; never its
+	head bit), where it has it (c10, c20, c40, d20, d40) */
+	static char const *const flood_flesh[] =
+	{
+		"characters\\floodcombat_human\\flood_bit_innards\\flood_bit_innards",
+		"characters\\floodcombat_human\\flood_bit_skin\\flood_bit_skin",
+		"characters\\floodcombat_human\\flood_bit_limbs\\flood_bit_limbs",
+	};
 
+	if (tag_loaded(GARBAGE_TAG, flood_flesh[0]) != NONE)
+	{
+		real_point3d center = unit->object.bounding_sphere_center;
+		short first = (short)real_seed_random_range(&gore_chunk_seed, 0.f, 2.999f);
+
+		for (chunk = 0; chunk < wanted; chunk++)
+		{
+			real_vector3d offset;
+			real_point3d at;
+			char const *name = flood_flesh[(first + chunk) % NUMBEROF(flood_flesh)];
+
+			seed_random_direction3d(&gore_chunk_seed, &offset);
+			point_from_line3d(&center, &offset, real_seed_random_range(&gore_chunk_seed, 0.02f, 0.12f), &at);
+			if (tag_loaded(GARBAGE_TAG, name) == NONE)
+				name = flood_flesh[0];
+			if (gore_spawn_garbage_ex(name, &at, &pending->direction, pending->force, NONE, NONE, TRUE))
+				made++;
+		}
+		if (config_boolean("game.gore_log"))
+			error(_error_silent, "gore: extreme chunks: %d of the map's Flood flesh (innards, skin, limbs)", made);
+		return made;
+	}
+	/* else lumps of the victim's own body: never its head (or neck, jaw,
+	eyes: a chunk that is a tiny head is no gore) */
 	for (geometry_index = 0; geometry_index < (short)model->geometries.count; geometry_index++)
 	{
 		struct gore_model_geometry *geometry = TAG_BLOCK_GET_ELEMENT(&model->geometries, geometry_index,
@@ -1571,6 +1620,14 @@ static short gore_spawn_chunks(long unit_index, struct model *model, struct gore
 			/* (not the root: the whole body's middle) */
 			if (node <= 0 || node >= node_count)
 				continue;
+			{
+				char const *node_name = TAG_BLOCK_GET_ELEMENT(&model->nodes, node, struct model_node)->name;
+
+				if (strstr(node_name, "head") || strstr(node_name, "neck") || strstr(node_name, "jaw") ||
+					strstr(node_name, "mandible") || strstr(node_name, "eye") || strstr(node_name, "helmet") ||
+					strstr(node_name, "face") || strstr(node_name, "mouth") || strstr(node_name, "tongue"))
+					continue;
+			}
 			for (known = 0; known < candidate_count && candidates[known] != node; known++)
 				;
 			if (known == candidate_count)
@@ -1597,6 +1654,9 @@ static short gore_spawn_chunks(long unit_index, struct model *model, struct gore
 		piece->life = MIN(piece->life, 60 * 30);
 		made++;
 	}
+	if (config_boolean("game.gore_log"))
+		error(_error_silent, "gore: extreme chunks: %d lumps of the body (of %d nodes, no head; the map has no Flood flesh)",
+			made, candidate_count);
 	return made;
 }
 

@@ -174,6 +174,8 @@ static struct
 	struct game_state_header *header; // 0x18
 } game_state_globals = { 0 };
 
+void gore_bleed_game_state_loaded(void);
+
 typedef void (*game_state_before_load_proc)(void);
 typedef void (*game_state_after_load_proc)(void);
 typedef void (*game_state_before_save_proc)(void);
@@ -207,7 +209,10 @@ static game_state_after_load_proc after_load_procs[] =
 	game_state_set_revert_time,
 	player_control_fix_for_loaded_game_state,
 	director_initialize_for_saved_game,
-	scripted_hud_messages_clear
+	scripted_hud_messages_clear,
+	/* port: the gore mod's corpse bleed forgets what it knew
+	(port/linux/game/gore_bleed.c) */
+	gore_bleed_game_state_loaded
 };
 
 /* ---------- public code */
