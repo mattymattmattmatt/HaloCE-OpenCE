@@ -109,16 +109,18 @@ struct gore_bleed_species
 	short rivulets_maximum;
 	real width; /* metres, a rivulet's start */
 	char const *decal_name;
+	short layers; /* a rivulet drawn this many times over: a pale splat's
+		multiply, darker (the elite's light blue is lost on grass once) */
 };
 
 /* (the first that matches; the last is anyone else with blood) */
 static struct gore_bleed_species const gore_bleed_species[] =
 {
-	{ "grunt", 0.6f, 1, 2, 0.065f, "effects\\decals\\blood splats\\blood grunt splat" },
-	{ "jackal", 1.0f, 2, 3, 0.075f, "effects\\decals\\blood splats\\blood grunt splat" },
-	{ "elite", 2.4f, 3, 4, 0.095f, "effects\\decals\\blood splats\\blood elite splat" },
-	{ "hunter", 5.0f, 4, 6, 0.125f, "effects\\decals\\blood splats\\blood hunter splat" },
-	{ "", 1.6f, 2, 3, 0.08f, "effects\\decals\\blood splats\\blood splat" },
+	{ "grunt", 0.6f, 1, 2, 0.065f, "effects\\decals\\blood splats\\blood grunt splat", 1 },
+	{ "jackal", 1.0f, 2, 3, 0.075f, "effects\\decals\\blood splats\\blood grunt splat", 1 },
+	{ "elite", 2.4f, 3, 4, 0.095f, "effects\\decals\\blood splats\\blood elite splat", 2 },
+	{ "hunter", 5.0f, 4, 6, 0.125f, "effects\\decals\\blood splats\\blood hunter splat", 1 },
+	{ "", 1.6f, 2, 3, 0.08f, "effects\\decals\\blood splats\\blood splat", 1 },
 };
 
 static char const *const gore_bleed_never[] = { "flood", "sentinel", "monitor", "engineer" };
@@ -265,6 +267,7 @@ static real_vector3d gore_bleed_test_downhill;
 static real gore_bleed_test_found_slope;
 static long gore_bleed_test_units[GORE_BLEED_MAXIMUM_ACTIVE];
 static short gore_bleed_test_unit_count;
+static char const *bleed_test_tag(long unit_index);
 /* the cost: cycles in gore_bleed_update, and the frames */
 static unsigned long long gore_bleed_cycles;
 static unsigned long long gore_bleed_cycles_max;
@@ -706,9 +709,16 @@ static void bleed_rivulet_emit(struct gore_rivulet *rivulet, struct gore_bleed *
 		uv[1].x = 0.7f; uv[1].y = band_low + t0;
 		uv[2].x = 0.7f; uv[2].y = band_low + t1;
 		uv[3].x = 0.3f; uv[3].y = band_low + t1;
-		if (bleed_quad_new(bleed->decal_definition_index, 0, rivulet->cluster_index, corners, uv, &bleed->color,
-				&rivulet->normal) != NONE)
-			bleed->quads++;
+		{
+			short layer;
+
+			for (layer = 0; layer < gore_bleed_species[bleed->species].layers; layer++)
+			{
+				if (bleed_quad_new(bleed->decal_definition_index, 0, rivulet->cluster_index, corners, uv, &bleed->color,
+						&rivulet->normal) != NONE)
+					bleed->quads++;
+			}
+		}
 	}
 	rivulet->edge_left = left;
 	rivulet->edge_right = right;
@@ -1101,9 +1111,10 @@ static void bleed_settle(struct gore_bleed *bleed)
 	bleed->state = _bleed_waiting;
 	bleed->state_time = game_time_get();
 	if (bleed_log())
-		error(_error_silent, "gore bleed: %s is still on %.1f degrees%s: %.2f m^2 of blood (level x%.2f), a pool of %.2f m "
+		error(_error_silent, "gore bleed: %s%s is still on %.1f degrees%s: %.2f m^2 of blood (level x%.2f), a pool of %.2f m "
 			"(x%.2f downhill, %.0f%%), %d rivulets",
-			tag_get_name(bleed->definition_index), bleed->slope, bleed->headless ? " (headless: from the neck)" : "",
+			tag_get_name(bleed->definition_index), bleed_test_tag(bleed->unit_index), bleed->slope,
+			bleed->headless ? " (headless: from the neck)" : "",
 			bleed->volume * WU * WU, gore_bleed_level_scale(), bleed->pool_radius * WU, bleed->pool_stretch,
 			bleed->pool_share * 100.f, bleed->rivulets_planned);
 }
@@ -1189,16 +1200,29 @@ static void bleed_overflow(struct gore_bleed *bleed, short bleed_index)
 			tag_get_name(bleed->definition_index), chosen_count, rivulet_volume * WU * WU);
 }
 
+/* " (test)" for one of debug.gore_bleed_test's own, in the log */
+static char const *bleed_test_tag(long unit_index)
+{
+	short index;
+
+	for (index = 0; index < gore_bleed_test_unit_count; index++)
+	{
+		if (gore_bleed_test_units[index] == unit_index)
+			return " (test)";
+	}
+	return "";
+}
+
 static void bleed_report(struct gore_bleed *bleed)
 {
 	if (bleed->reported)
 		return;
 	bleed->reported = TRUE;
-	error(_error_silent, "gore bleed: done: %s on %.1f degrees, level x%.2f: %.3f m^2 of blood, pool %.2f m (x%.2f, %.0f%%), "
+	error(_error_silent, "gore bleed: done: %s%s on %.1f degrees, level x%.2f: %.3f m^2 of blood, pool %.2f m (x%.2f, %.0f%%), "
 		"%d rivulets (%d branches), longest run %.2f m in %.1f s, all runs %.2f m, %d puddles, %d beads, %d drips, "
 		"%d quads, %.1f s from rest to the last drop",
-		tag_get_name(bleed->definition_index), bleed->slope, gore_bleed_level_scale(), bleed->volume * WU * WU,
-		bleed->pool_radius * WU, bleed->pool_stretch, bleed->pool_share * 100.f,
+		tag_get_name(bleed->definition_index), bleed_test_tag(bleed->unit_index), bleed->slope, gore_bleed_level_scale(),
+		bleed->volume * WU * WU, bleed->pool_radius * WU, bleed->pool_stretch, bleed->pool_share * 100.f,
 		bleed->rivulets_started, bleed->branches, bleed->run_longest * WU, (real)bleed->run_ticks_longest / 30.f,
 		bleed->run_total * WU, bleed->puddles, bleed->beads, bleed->drips, bleed->quads,
 		(real)(game_time_get() - bleed->state_time) / 30.f);
