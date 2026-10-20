@@ -64,6 +64,7 @@ phone pushed every eye's menu a fifth of the eye to the right.
 
 #include "cseries.h"
 #include "stereo.h"
+#include "stereo_pointer.h"
 #include "cseries/errors.h"
 #include "math/real_math.h"
 #include "render/render_cameras.h"
@@ -106,6 +107,10 @@ void stereo_eye_apply(struct render_camera *camera, long eye)
 }
 
 static long ui_design_width;
+/* the eye's width while the latest menus drawn were an eye's (the right
+eye's are the last a frame draws), 0 while they were drawn whole: the
+menus' pointer maps by what the screen last showed (stereo_ui_pointer_x) */
+static long ui_pointer_eye_width;
 
 void stereo_ui_begin(union rectangle2d const *viewport_bounds)
 {
@@ -121,6 +126,9 @@ void stereo_ui_begin(union rectangle2d const *viewport_bounds)
 		2 * width == halo_screen_width() ? 640 : 0;
 	if (ui_design_width)
 		halo_screen_ui_offset(FALSE);
+	/* (the menus' taps follow: an eye's menus take a tap on either half;
+	menus drawn whole, the main menu's or split screen's, as before) */
+	ui_pointer_eye_width = ui_design_width ? width : 0;
 }
 
 void stereo_ui_end(void)
@@ -131,6 +139,18 @@ void stereo_ui_end(void)
 long stereo_ui_design_width(long viewport_width)
 {
 	return ui_design_width ? ui_design_width : viewport_width;
+}
+
+boolean stereo_ui_pointer_x(float screen_x, float *menu_x)
+{
+	long eye_width = ui_pointer_eye_width;
+
+	/* (the setting turned off since: the menus are drawn whole again at
+	the next frame, and a tap until then is the screen's) */
+	if (!eye_width || !stereo_sbs_enabled())
+		return FALSE;
+	*menu_x = stereo_pointer_menu_x(screen_x, eye_width, 640);
+	return TRUE;
 }
 
 void stereo_log_state(long eye_viewport_width, long eye_viewport_height)

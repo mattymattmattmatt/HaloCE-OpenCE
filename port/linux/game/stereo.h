@@ -27,5 +27,12 @@ window that is not a stereo eye */
 void stereo_ui_begin(union rectangle2d const *viewport_bounds);
 void stereo_ui_end(void);
 long stereo_ui_design_width(long viewport_width);
+/* the menus' pointer (d3d8_gl.c, ui_point_from_window_on): while the
+latest menus drawn were an eye's (squeezed into a half), a point of the
+screen's drawing (0..its design width) as the menus' own 640-wide x in
+whichever eye it falls in, into *menu_x, and TRUE; FALSE while the menus
+are drawn whole (mono, the main menu, split screen): the caller maps as
+before */
+boolean stereo_ui_pointer_x(float screen_x, float *menu_x);
 
 #endif

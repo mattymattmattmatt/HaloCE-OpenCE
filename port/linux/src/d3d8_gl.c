@@ -1965,6 +1965,9 @@ HRESULT WINAPI Direct3D_CreateDevice(UINT adapter, D3DDEVTYPE device_type, void 
 
 /* ---------- the menus' pointer */
 
+/* stereo.c: the side-by-side eyes' menus (a game boolean, a byte) */
+unsigned char stereo_ui_pointer_x(float screen_x, float *menu_x);
+
 /* a point in the window, as SDL reports it, in the menus' coordinates: the
 inverse of the letterboxed display blit at presentation, the screen's
 width and the menus' centering (halo_screen_ui_offset); or, not centered,
@@ -1974,7 +1977,7 @@ static void ui_point_from_window_on(float window_x, float window_y, int centered
 {
 	struct render_target_entry *back_buffer = render_target_get(&device.back_buffer);
 	int window_width, window_height, pixel_width, pixel_height, width, height, left, top;
-	float screen_x, screen_y;
+	float screen_x, screen_y, menu_x;
 
 	*x = *y = -1;
 	if (!back_buffer)
@@ -1994,7 +1997,13 @@ static void ui_point_from_window_on(float window_x, float window_y, int centered
 	top = (pixel_height - height) / 2;
 	screen_x = (window_x * pixel_width / window_width - left) * (float)back_buffer->target.width / (float)width;
 	screen_y = (window_y * pixel_height / window_height - top) * (float)back_buffer->target.height / (float)height;
-	*x = (short)floorf(screen_x - (centered ? (float)(halo_screen_width() - 640) / 2.0f : 0.0f));
+	/* side-by-side 3D: the menus drawn in each eye's half (stereo.c)
+	take a point in either half as the same menu point, not the one the
+	single screen had there */
+	if (centered && stereo_ui_pointer_x(screen_x, &menu_x))
+		*x = (short)floorf(menu_x);
+	else
+		*x = (short)floorf(screen_x - (centered ? (float)(halo_screen_width() - 640) / 2.0f : 0.0f));
 	*y = (short)floorf(screen_y);
 }
 
