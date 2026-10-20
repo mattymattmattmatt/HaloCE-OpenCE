@@ -32,6 +32,10 @@ void gore_update(void);
 Pieces are local cosmetics on every machine (see gore_enabled in
 gore.c) and are never told to or culled by the network object sync */
 boolean gore_object_is_piece(long object_index);
+/* unit_add_initial_weapons (units.c): whether gore is making a copy of a
+unit (a piece or a chunk), which is given no weapons: gore never makes an
+item, a weapon or a vehicle */
+boolean gore_creating_copy(void);
 /* game_initialize_for_new_map / game_dispose_from_old_map */
 void gore_reset(void);
 /* the corpse bleed (gore_bleed.c): gore_update and gore_reset call these */
