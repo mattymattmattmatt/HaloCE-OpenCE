@@ -145,6 +145,8 @@ makes the host's objects at the host's datum indices, and deletes them only
 on the host's word */
 long network_objects_new_object_index(void);
 boolean network_objects_creating_host_object(void);
+/* port/linux/game/gore.c's (debug.gore_object_log) */
+void gore_object_created(long object_index);
 boolean network_objects_may_delete(long object_index);
 /* port/linux/game/network_coop.c's: the scripts' attaching, on co-op's clients */
 void network_coop_note_attach(long parent_index, char const *parent_marker_name, long child_index,
@@ -3691,6 +3693,11 @@ long object_new(
 			tag_name_strip_path(tag_get_name(definition_index)));
 		console_printf(FALSE, "%s", string);
 		error(_error_log, "%s", string);
+	}
+	/* port: debug.gore_object_log (port/linux/game/gore.c) */
+	if (object_index!=NONE)
+	{
+		gore_object_created(object_index);
 	}
 	
 	return object_index;
