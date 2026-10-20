@@ -349,6 +349,12 @@ static long gore_test_gib_time = NONE;
 static long gore_test_made = NONE; /* the unit the test made, if it did */
 static long gore_test_target = NONE; /* the test's unit, for its summary */
 static short gore_test_infection_before; /* Flood infection forms at the test's hit */
+/* the items (weapons, equipment) there were at the test's hit: any made
+after it is logged (a chunk must never be one) */
+#define GORE_TEST_MAXIMUM_ITEMS 512
+static long gore_test_items[GORE_TEST_MAXIMUM_ITEMS];
+static short gore_test_item_count;
+static real_point3d gore_test_hit_point;
 
 static struct gore_unit_type const *gore_unit_type_get(long definition_index);
 static boolean gore_is_flood(long definition_index);
@@ -357,6 +363,8 @@ static void gore_blood_decal(long decal_index, struct collision_result const *co
 	real_vector3d const *velocity, real radius);
 static boolean gore_vehicle_node_is_wheel(long vehicle_index, short node_index);
 static struct model *gore_model_get(long definition_index);
+/* cache_files.c's */
+boolean tag_index_is_group(long tag_index, long group_tag);
 
 /* ---------- blood on vehicles
 
@@ -1022,6 +1030,14 @@ static boolean gore_enabled(void)
 	return TRUE;
 }
 
+/* (gore_spawn_copy's object_new: unit_add_initial_weapons asks) */
+static boolean gore_making_copy = FALSE;
+
+boolean gore_creating_copy(void)
+{
+	return gore_making_copy;
+}
+
 boolean gore_object_is_piece(long object_index)
 {
 	short index;
@@ -1209,6 +1225,74 @@ static void gore_blood_decal(long decal_index, struct collision_result const *co
 	}
 }
 
+/* a garbage tag of the loaded map's, whose objects are garbage: what a
+stock bit or a Flood flesh chunk must be (tag_loaded matches group and
+name; this checks the tag's own object type as well) */
+static boolean gore_chunk_tag_is_garbage(long definition_index)
+{
+	return definition_index != NONE && tag_index_is_group(definition_index, GARBAGE_TAG) &&
+		object_definition_get(definition_index)->object.type == _object_type_garbage;
+}
+
+/* the object just made is what it was meant to be: that definition, and of
+that type (a garbage bit, a biped's copy); anything else (an item, a
+vehicle) is deleted at once and FALSE. Every gore piece and chunk goes
+through this: gore never leaves an item, a weapon or a vehicle behind */
+static boolean gore_object_is_expected(long object_index, long definition_index, unsigned long type_mask)
+{
+	struct object_datum *object = object_try_and_get_and_verify_type(object_index, 0xFFFFFFFF);
+
+	if (object && object->definition_index == definition_index && TEST_FLAG(type_mask, object->object.type) &&
+		!TEST_FLAG(_object_mask_item & ~FLAG(_object_type_garbage), object->object.type) &&
+		!TEST_FLAG(_object_mask_vehicle, object->object.type))
+	{
+		return TRUE;
+	}
+	error(_error_silent, "gore: refused a piece: made %s (type %d), wanted %s",
+		object ? tag_get_name(object->definition_index) : "nothing", object ? object->object.type : -1,
+		definition_index != NONE ? tag_get_name(definition_index) : "none");
+	if (object)
+		object_delete(object_index);
+	return FALSE;
+}
+
+/* a copy carries nothing: no weapon, no equipment, no grenades, nothing
+attached (unit_add_initial_weapons gives it none while gore makes it;
+whatever else came with it goes) */
+static void gore_copy_strip(long object_index)
+{
+	struct unit_datum *unit = (struct unit_datum *)object_try_and_get_and_verify_type(object_index, _object_mask_unit);
+	long child_index;
+	short removed = 0;
+
+	if (!unit)
+		return;
+	csmemset(unit->unit.grenade_counts, 0, sizeof(unit->unit.grenade_counts));
+	child_index = unit->object.first_child_object_index;
+	while (child_index != NONE)
+	{
+		struct object_datum *child = object_try_and_get_and_verify_type(child_index, 0xFFFFFFFF);
+		long next_index;
+
+		if (!child)
+			break;
+		next_index = child->object.next_object_index;
+		if (TEST_FLAG(_object_mask_item | _object_mask_unit, child->object.type))
+		{
+			object_delete(child_index);
+			removed++;
+		}
+		child_index = next_index;
+	}
+	unit = (struct unit_datum *)object_get(object_index);
+	csmemset(unit->unit.weapon_object_indices, 0xFF, sizeof(unit->unit.weapon_object_indices));
+	unit->unit.current_weapon_index = NONE;
+	unit->unit.desired_weapon_index = NONE;
+	unit->unit.equipment_object_index = NONE;
+	if (removed)
+		error(_error_silent, "gore: a piece's copy came with %d objects attached: deleted", removed);
+}
+
 static struct gore_piece *gore_piece_new(boolean chunk)
 {
 	long maximum = PIN(config_integer("game.gore_max_pieces"), 6, GORE_MAXIMUM_PIECES);
@@ -1312,15 +1396,27 @@ static struct gore_piece *gore_spawn_copy(long unit_index, unsigned long region_
 	short node_index;
 	long object_index;
 
+	/* (a copy of a biped only, as itself: never anything else) */
+	if (!TEST_FLAG(_object_mask_biped, unit->object.type) ||
+		!tag_index_is_group(unit->definition_index, 'bipd') ||
+		object_definition_get(unit->definition_index)->object.type != _object_type_biped)
+	{
+		return NULL;
+	}
 	object_placement_data_new(&placement, unit->definition_index, NONE);
 	placement.position = unit->object.position;
 	placement.forward = unit->object.forward;
 	placement.up = unit->object.up;
 	placement.variant_number = unit->object.variant_number;
 	csmemcpy(placement.change_colors, unit->object.base_change_colors, sizeof(placement.change_colors));
+	gore_making_copy = TRUE;
 	object_index = object_new(&placement);
+	gore_making_copy = FALSE;
 	if (object_index == NONE)
 		return NULL;
+	if (!gore_object_is_expected(object_index, unit->definition_index, _object_mask_biped))
+		return NULL;
+	gore_copy_strip(object_index);
 	piece = gore_piece_new(chunk);
 	if (!piece)
 	{
@@ -1423,7 +1519,8 @@ static struct gore_piece *gore_spawn_garbage_ex(char const *name, real_point3d c
 	struct gore_piece *piece;
 	long object_index;
 
-	if (definition_index == NONE)
+	/* only ever a garbage object of this map's (gore_chunk_tag_is_garbage) */
+	if (!gore_chunk_tag_is_garbage(definition_index))
 		return NULL;
 	piece = gore_piece_new(chunk);
 	if (!piece)
@@ -1438,6 +1535,8 @@ static struct gore_piece *gore_spawn_garbage_ex(char const *name, real_point3d c
 	placement.angular_velocity = piece->spin;
 	object_index = object_new(&placement);
 	if (object_index == NONE)
+		return NULL;
+	if (!gore_object_is_expected(object_index, definition_index, FLAG(_object_type_garbage)))
 		return NULL;
 	piece->object_index = object_index;
 	piece->garbage = TRUE;
@@ -1567,6 +1666,47 @@ typedef char verify_gore_model_geometry_part_size[sizeof(struct gore_model_geome
 #define GORE_CHUNKS_PER_GIB 6
 #define GORE_CHUNKS_PER_HUNTER_GIB 8
 
+/* a node a lump may be: none of the head's (or neck, jaw, eyes: a chunk
+that is a tiny head is no gore), nor the root (the whole body's middle) */
+static boolean gore_chunk_node_allowed(struct model *model, short node, short node_count)
+{
+	char const *node_name;
+
+	if (node <= 0 || node >= node_count)
+		return FALSE;
+	node_name = TAG_BLOCK_GET_ELEMENT(&model->nodes, node, struct model_node)->name;
+	return !(strstr(node_name, "head") || strstr(node_name, "neck") || strstr(node_name, "jaw") ||
+		strstr(node_name, "mandible") || strstr(node_name, "eye") || strstr(node_name, "helmet") ||
+		strstr(node_name, "face") || strstr(node_name, "mouth") || strstr(node_name, "tongue"));
+}
+
+static void gore_chunk_candidate_add(short *candidates, short *candidate_count, short node)
+{
+	short known;
+
+	for (known = 0; known < *candidate_count && candidates[known] != node; known++)
+		;
+	if (known == *candidate_count && *candidate_count < GORE_MAXIMUM_NODES)
+		candidates[(*candidate_count)++] = node;
+}
+
+/* (the log's: what the chunk path made, by its object type and tag) */
+static void gore_chunk_log_object(long object_index, char const *source)
+{
+	struct object_datum *object;
+
+	if (!config_boolean("game.gore_log") || object_index == NONE ||
+		!(object = object_try_and_get_and_verify_type(object_index, 0xFFFFFFFF)))
+	{
+		return;
+	}
+	error(_error_silent, "gore: chunk object %s type %d (%s) tag %s",
+		source, object->object.type,
+		object->object.type == _object_type_biped ? "biped copy" :
+		object->object.type == _object_type_garbage ? "garbage" : "OTHER",
+		tag_get_name(object->definition_index));
+}
+
 static short gore_spawn_chunks(long unit_index, struct model *model, struct gore_pending const *pending)
 {
 	struct object_datum *unit = object_get(unit_index);
@@ -1586,8 +1726,27 @@ static short gore_spawn_chunks(long unit_index, struct model *model, struct gore
 		"characters\\floodcombat_human\\flood_bit_skin\\flood_bit_skin",
 		"characters\\floodcombat_human\\flood_bit_limbs\\flood_bit_limbs",
 	};
+	long flood_flesh_indices[NUMBEROF(flood_flesh)];
+	short flood_flesh_count = 0;
+	short first_candidate;
 
-	if (tag_loaded(GARBAGE_TAG, flood_flesh[0]) != NONE)
+	/* the campaign's only: a multiplayer game's chunks are the body's own
+	lumps, always (its maps have no Flood flesh, and what a game type or
+	a custom map has under those names is none of gore's business); and
+	only tags that are garbage, whose objects are garbage */
+	if (!game_engine_running())
+	{
+		short index;
+
+		for (index = 0; index < (short)NUMBEROF(flood_flesh); index++)
+		{
+			long definition_index = tag_loaded(GARBAGE_TAG, flood_flesh[index]);
+
+			if (gore_chunk_tag_is_garbage(definition_index))
+				flood_flesh_indices[flood_flesh_count++] = definition_index;
+		}
+	}
+	if (flood_flesh_count)
 	{
 		real_point3d center = unit->object.bounding_sphere_center;
 		short first = (short)real_seed_random_range(&gore_chunk_seed, 0.f, 2.999f);
@@ -1596,21 +1755,28 @@ static short gore_spawn_chunks(long unit_index, struct model *model, struct gore
 		{
 			real_vector3d offset;
 			real_point3d at;
-			char const *name = flood_flesh[(first + chunk) % NUMBEROF(flood_flesh)];
+			struct gore_piece *piece;
+			long definition_index = flood_flesh_indices[(first + chunk) % flood_flesh_count];
 
 			seed_random_direction3d(&gore_chunk_seed, &offset);
 			point_from_line3d(&center, &offset, real_seed_random_range(&gore_chunk_seed, 0.02f, 0.12f), &at);
-			if (tag_loaded(GARBAGE_TAG, name) == NONE)
-				name = flood_flesh[0];
-			if (gore_spawn_garbage_ex(name, &at, &pending->direction, pending->force, NONE, NONE, TRUE))
+			piece = gore_spawn_garbage_ex(tag_get_name(definition_index), &at, &pending->direction, pending->force,
+				NONE, NONE, TRUE);
+			if (piece)
+			{
+				gore_chunk_log_object(piece->object_index, "flood flesh");
 				made++;
+			}
 		}
 		if (config_boolean("game.gore_log"))
 			error(_error_silent, "gore: extreme chunks: %d of the map's Flood flesh (innards, skin, limbs)", made);
-		return made;
+		if (made)
+			return made;
 	}
-	/* else lumps of the victim's own body: never its head (or neck, jaw,
-	eyes: a chunk that is a tiny head is no gore) */
+	/* else lumps of the victim's own body (gore_chunk_node_allowed): the
+	nodes its geometry's parts centre on, and the limbs and trunk of a
+	bip01 skeleton (a multiplayer cyborg's parts centre on two nodes only,
+	whose lumps are most of its armour: lumps that read as powerups) */
 	for (geometry_index = 0; geometry_index < (short)model->geometries.count; geometry_index++)
 	{
 		struct gore_model_geometry *geometry = TAG_BLOCK_GET_ELEMENT(&model->geometries, geometry_index,
@@ -1620,32 +1786,40 @@ static short gore_spawn_chunks(long unit_index, struct model *model, struct gore
 		for (part_index = 0; part_index < (short)geometry->parts.count; part_index++)
 		{
 			short node = TAG_BLOCK_GET_ELEMENT(&geometry->parts, part_index, struct gore_model_geometry_part)->centroid_primary_node_index;
-			short known;
 
-			/* (not the root: the whole body's middle) */
-			if (node <= 0 || node >= node_count)
-				continue;
-			{
-				char const *node_name = TAG_BLOCK_GET_ELEMENT(&model->nodes, node, struct model_node)->name;
+			if (gore_chunk_node_allowed(model, node, node_count))
+				gore_chunk_candidate_add(candidates, &candidate_count, node);
+		}
+	}
+	{
+		static char const *const limbs[] =
+		{
+			"bip01 l upperarm", "bip01 r upperarm", "bip01 l forearm", "bip01 r forearm",
+			"bip01 l thigh", "bip01 r thigh", "bip01 l calf", "bip01 r calf",
+			"bip01 spine", "bip01 spine1", "bip01 pelvis",
+		};
+		short index;
 
-				if (strstr(node_name, "head") || strstr(node_name, "neck") || strstr(node_name, "jaw") ||
-					strstr(node_name, "mandible") || strstr(node_name, "eye") || strstr(node_name, "helmet") ||
-					strstr(node_name, "face") || strstr(node_name, "mouth") || strstr(node_name, "tongue"))
-					continue;
-			}
-			for (known = 0; known < candidate_count && candidates[known] != node; known++)
-				;
-			if (known == candidate_count)
-				candidates[candidate_count++] = node;
+		for (index = 0; index < (short)NUMBEROF(limbs); index++)
+		{
+			short node = gore_model_node_find(model, limbs[index]);
+
+			if (node != NONE && gore_chunk_node_allowed(model, node, node_count))
+				gore_chunk_candidate_add(candidates, &candidate_count, node);
 		}
 	}
 	if (!candidate_count)
+	{
+		if (config_boolean("game.gore_log"))
+			error(_error_silent, "gore: extreme chunks: none (no Flood flesh, no body node to make a lump of)");
 		return 0;
+	}
+	first_candidate = (short)real_seed_random_range(&gore_chunk_seed, 0.f, (real)candidate_count - 0.001f);
 	for (chunk = 0; chunk < wanted; chunk++)
 	{
 		signed char collapse[GORE_MAXIMUM_NODES];
-		short pick = (short)(real_seed_random_range(&gore_chunk_seed, 0.f, (real)candidate_count - 0.001f));
-		short node = candidates[PIN(pick, 0, candidate_count - 1)];
+		/* (each node once before any twice) */
+		short node = candidates[(PIN(first_candidate, 0, candidate_count - 1) + chunk) % candidate_count];
 		struct gore_piece *piece;
 		short index;
 
@@ -1657,11 +1831,15 @@ static short gore_spawn_chunks(long unit_index, struct model *model, struct gore
 			continue;
 		piece->base_matrices[node].scale *= real_seed_random_range(&gore_chunk_seed, 0.5f, 0.7f);
 		piece->life = MIN(piece->life, 60 * 30);
+		if (config_boolean("game.gore_log"))
+			error(_error_silent, "gore: chunk lump of node '%s'",
+				TAG_BLOCK_GET_ELEMENT(&model->nodes, node, struct model_node)->name);
+		gore_chunk_log_object(piece->object_index, "body lump");
 		made++;
 	}
 	if (config_boolean("game.gore_log"))
-		error(_error_silent, "gore: extreme chunks: %d lumps of the body (of %d nodes, no head; the map has no Flood flesh)",
-			made, candidate_count);
+		error(_error_silent, "gore: extreme chunks: %d lumps of the body (of %d nodes, no head; %s)",
+			made, candidate_count, game_engine_running() ? "multiplayer: the body's own only" : "the map has no Flood flesh");
 	return made;
 }
 
@@ -2086,6 +2264,43 @@ static short gore_test_count_infection(void)
 	return count;
 }
 
+/* the test's check that gore makes no item: those made since its hit, by
+tag, near the hit or not */
+static void gore_test_items_scan(boolean snapshot, char const *when)
+{
+	struct object_iterator iterator;
+	struct object_datum *object;
+	short new_items = 0;
+
+	if (snapshot)
+		gore_test_item_count = 0;
+	object_iterator_new(&iterator, _object_mask_item & ~FLAG(_object_type_garbage), 0);
+	while ((object = (struct object_datum *)object_iterator_next(&iterator)) != NULL)
+	{
+		short index;
+
+		if (snapshot)
+		{
+			if (gore_test_item_count < GORE_TEST_MAXIMUM_ITEMS)
+				gore_test_items[gore_test_item_count++] = iterator.index;
+			continue;
+		}
+		for (index = 0; index < gore_test_item_count && gore_test_items[index] != iterator.index; index++)
+			;
+		if (index < gore_test_item_count)
+			continue;
+		new_items++;
+		error(_error_silent, "gore: test items: NEW since the hit (%s): %s type %d, %.2f m from the hit%s",
+			when, tag_get_name(object->definition_index), object->object.type,
+			distance3d(&object->object.position, &gore_test_hit_point) * GORE_METRES_PER_WORLD_UNIT,
+			gore_object_is_piece(iterator.index) ? " (A GORE PIECE)" : "");
+	}
+	if (snapshot)
+		error(_error_silent, "gore: test items: %d items (weapons, equipment) on the map at the hit", gore_test_item_count);
+	else
+		error(_error_silent, "gore: test items (%s): %d new items since the hit", when, new_items);
+}
+
 static void gore_test_update(void)
 {
 	real seconds = (real)config_real("debug.gore_test");
@@ -2105,9 +2320,12 @@ static void gore_test_update(void)
 
 	if (vehicle_speed > 0.f)
 		sweep_count = 2;
+	if (gore_test_gib_time != NONE && game_time_get() == gore_test_gib_time + 15)
+		gore_test_items_scan(FALSE, "0.5 s on");
 	/* six seconds after the test's hit: what came of it */
 	if (gore_test_gib_time != NONE && game_time_get() == gore_test_gib_time + 180)
 	{
+		gore_test_items_scan(FALSE, "6 s on");
 		short index;
 		short pieces = 0;
 		short chunks = 0;
@@ -2272,6 +2490,8 @@ static void gore_test_update(void)
 
 		gore_test_gib_time = game_time_get();
 		gore_test_target = best;
+		gore_test_hit_point = object_get(best)->object.position;
+		gore_test_items_scan(TRUE, "at the hit");
 		/* (a unit the test made: nearly dead, so the test's frag or
 		warthog kills it through the stock damage path, as in play) */
 		if (best == gore_test_made)

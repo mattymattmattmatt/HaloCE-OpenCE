@@ -981,6 +981,8 @@ static long unit_get_weapon(struct unit_datum *unit, short index);
 static void unit_drop_item(long unit_index, long item_index);
 /* port/linux/game/network_objects.c's */
 boolean network_objects_creating_host_object(void);
+/* port: whether gore is making a copy of a unit, a piece of it (port/linux/game/gore.c) */
+boolean gore_creating_copy(void);
 /* port/linux/game/network_damage.c's */
 void network_damage_note_grenade(long unit_index, short grenade_type);
 /* network_game_globals.c's */
@@ -2465,6 +2467,11 @@ static void unit_add_initial_weapons(
 	/* (a client of the distributed netcode making the host's unit: its
 	weapons are the host's objects, port/linux/game/network_objects.c) */
 	if (network_objects_creating_host_object())
+		return;
+	/* (port: nor a gore piece's: a copy of a dead unit carries nothing; a
+	multiplayer cyborg's copies had its game's starting weapons, networked
+	items, a dozen of them a gib) */
+	if (gore_creating_copy())
 		return;
 	for (initial_weapon_index = 0;
 		initial_weapon_index < unit_definition->unit.initial_weapons.count;
