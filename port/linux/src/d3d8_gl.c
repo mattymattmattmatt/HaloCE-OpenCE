@@ -2717,7 +2717,8 @@ void xgpu_set_blood(float red, float green, float blue, float amount)
 	xgpu_blood[0] = red;
 	xgpu_blood[1] = green;
 	xgpu_blood[2] = blue;
-	xgpu_blood[3] = amount > 0.f ? (amount < 1.f ? amount : 1.f) : 0.f;
+	/* (over 1, to 2: flesh, the Extreme chunks' whole tint: nv2a_psh.c) */
+	xgpu_blood[3] = amount > 0.f ? (amount < 2.f ? amount : 2.f) : 0.f;
 }
 
 /* ---------- program cache */

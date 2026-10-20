@@ -297,13 +297,19 @@ static const struct config_setting config_settings[] =
 		"chatter too), or \"none\" (the asserts that stop the game only). What\n"
 		"a command prints shows whatever this is, and debug.txt has every line." },
 
-	{ "game.gore", _config_boolean, "true", "HALO_GORE", _environment_value, _platform_all,
-		"The gore mod: a unit killed by a close enough\n"
-		"explosion or a fast enough vehicle comes apart into flying pieces,\n"
-		"with blood; false: the normal deaths. In network games every\n"
-		"machine gibs the same victim from the host's kill, with its own\n"
-		"pieces (they are local, never sent). Video Setup's GRAPHICS\n"
-		"screen has this as GORE." },
+	{ "game.gore_level", _config_string, "\"heavy\"", "HALO_GORE_LEVEL", _environment_value, _platform_all,
+		"The gore mod: a unit killed by a close enough explosion, a fast\n"
+		"enough vehicle, a point-blank shotgun or a sniper's headshot comes\n"
+		"apart into flying pieces, with blood. \"off\": the normal deaths;\n"
+		"\"mild\": half the blood and half the force the pieces fly with;\n"
+		"\"heavy\": the full mod; \"extreme\": a quarter more blood than\n"
+		"heavy, and small chunks of flesh in the victim's blood colour with\n"
+		"each gib. The Flood (and machines) always die their normal deaths.\n"
+		"In network games every machine gibs the same victim from the\n"
+		"host's kill, with its own pieces (they are local, never sent).\n"
+		"Video Setup's GRAPHICS screen has this as GORE. (An older\n"
+		"game.gore = false reads as \"off\", true as \"heavy\"; so does\n"
+		"HALO_GORE.)" },
 	{ "game.gore_threshold_scale", _config_real, "1.0", "HALO_GORE_THRESHOLD_SCALE", _environment_value, _platform_all,
 		"Scales the force each unit needs to come apart: 0.5 gibs at half the\n"
 		"force, 2 at twice it." },
@@ -1198,11 +1204,15 @@ static void config_report_unknown_keys(toml_datum_t table)
 			char name[128];
 
 			snprintf(name, sizeof(name), "%s.%s", table.u.tab.key[section_index], section.u.tab.key[key_index]);
-			if (config_setting_index(name) < 0)
+			/* (game.gore: the older switch, read as game.gore_level) */
+			if (config_setting_index(name) < 0 && strcmp(name, "game.gore"))
 				platform_log("config.toml line %d: unknown setting %s", section.u.tab.value[key_index].lineno, name);
 		}
 	}
 }
+
+/* game.gore's value as a level, when config_load took it from an older file */
+static const char *gore_level_migrated;
 
 static void config_load(void)
 {
@@ -1284,9 +1294,50 @@ static void config_load(void)
 					}
 				}
 			}
+			/* game.gore (a boolean, before game.gore_level): false is "off",
+			true "heavy", when the file has no gore_level yet; the level is
+			added below (config_add_missing) at the old value */
+			{
+				toml_datum_t old_gore = toml_seek(result.toptab, "game.gore");
+
+				gore_level_migrated = NULL;
+				if (old_gore.type == TOML_BOOLEAN && toml_seek(result.toptab, "game.gore_level").type == TOML_UNKNOWN)
+				{
+					long level_index = config_setting_index("game.gore_level");
+
+					gore_level_migrated = old_gore.u.boolean ? "heavy" : "off";
+					if (level_index >= 0)
+					{
+						config_values[level_index].string = strdup(gore_level_migrated);
+					}
+					platform_log("settings: game.gore = %s (an older setting) is game.gore_level = \"%s\"",
+						old_gore.u.boolean ? "true" : "false", gore_level_migrated);
+				}
+			}
 			config_report_unknown_keys(result.toptab);
 			platform_log("settings: %s", path);
 			completed = config_add_missing(text, result.toptab);
+			/* (the migrated level written as it was, not at the default) */
+			if (completed && gore_level_migrated && strcmp(gore_level_migrated, "heavy"))
+			{
+				char *line = strstr(completed, "gore_level = \"heavy\"");
+
+				if (line)
+				{
+					/* "heavy" and "off" differ in length: rebuilt around it */
+					size_t before = (size_t)(line - completed);
+					const char *after = line + strlen("gore_level = \"heavy\"");
+					size_t length = before + strlen("gore_level = \"\"") + strlen(gore_level_migrated) + strlen(after) + 1;
+					char *rebuilt = malloc(length);
+
+					if (rebuilt)
+					{
+						snprintf(rebuilt, length, "%.*sgore_level = \"%s\"%s", (int)before, completed, gore_level_migrated, after);
+						free(completed);
+						completed = rebuilt;
+					}
+				}
+			}
 			if (completed && !config_write_file(path, completed))
 				platform_log("settings: cannot write %s", path);
 			free(completed);
@@ -1327,6 +1378,20 @@ static void config_load(void)
 		case _environment_set_is_false:
 			config_values[index].boolean = 0;
 			break;
+		}
+	}
+	/* HALO_GORE, the older switch: 0 or false is "off", anything else
+	"heavy" (HALO_GORE_LEVEL, when set too, wins) */
+	{
+		const char *old_gore = getenv("HALO_GORE");
+		long level_index = config_setting_index("game.gore_level");
+
+		if (old_gore && !getenv("HALO_GORE_LEVEL") && level_index >= 0)
+		{
+			int off = !strcmp(old_gore, "0") || !SDL_strcasecmp(old_gore, "false") || !SDL_strcasecmp(old_gore, "off") ||
+				!SDL_strcasecmp(old_gore, "no");
+
+			config_values[level_index].string = strdup(off ? "off" : "heavy");
 		}
 	}
 }
