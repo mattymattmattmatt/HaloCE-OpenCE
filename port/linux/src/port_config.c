@@ -583,6 +583,8 @@ static const struct config_setting config_settings[] =
 		"With debug.gore_bleed_test: the biped (a part of its tag path)." },
 	{ "debug.gore_bleed_test_count", _config_integer, "1", "HALO_GORE_BLEED_TEST_COUNT", _environment_value, _platform_all,
 		"With debug.gore_bleed_test: how many of it, side by side (1 to 8)." },
+	{ "debug.gore_bleed_test_near", _config_string, "\"\"", "HALO_GORE_BLEED_TEST_NEAR", _environment_value, _platform_all,
+		"With debug.gore_bleed_test: \"x y\" (world units) to look for the ground around instead of the player." },
 	{ "debug.gore_test_vehicle", _config_real, "0", "HALO_GORE_TEST_VEHICLE", _environment_value, _platform_all,
 		"With debug.gore_test: a warthog at this speed (m/s) at the unit, then 4 s later parked side on in view (to see its blood)." },
 	{ "debug.gore_test_sniper", _config_boolean, "false", "HALO_GORE_TEST_SNIPER", _environment_value, _platform_all,

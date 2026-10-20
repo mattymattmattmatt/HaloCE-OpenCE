@@ -1432,13 +1432,16 @@ static long bleed_test_player(void)
 /* ground of the slope asked for near the player, with room to run: an
 even slope (the plane fits it well) over 3.5 world units downhill, and
 ground to stand on uphill */
+static boolean gore_bleed_test_scan = FALSE;
+static short gore_bleed_test_rings = 60; /* (14 around debug.gore_bleed_test_near) */
+
 static boolean bleed_test_find(real_point3d const *around, real want, real_point3d *spot, real_vector3d *downhill, real *found)
 {
 	real best_score = 1e9f;
 	boolean any = FALSE;
 	short ring;
 
-	for (ring = 0; ring < 60; ring++)
+	for (ring = 0; ring < gore_bleed_test_rings; ring++)
 	{
 		short step;
 		short steps = (short)MAX(1, ring * 6);
@@ -1497,6 +1500,21 @@ static boolean bleed_test_find(real_point3d const *around, real want, real_point
 			}
 			if (!room)
 				continue;
+			if (gore_bleed_test_scan)
+			{
+				/* (debug.gore_bleed_test_near "scan": every site, 5 wu apart) */
+				static real_point3d logged[64];
+				static short logged_count;
+				short index;
+
+				for (index = 0; index < logged_count && distance_squared3d(&logged[index], &ground) > 25.f; index++);
+				if (index == logged_count && logged_count < 64)
+				{
+					logged[logged_count++] = ground;
+					error(_error_silent, "gore bleed test: a site of %.1f degrees at %.2f %.2f %.2f (unevenness %.3f)",
+						slope, ground.x, ground.y, ground.z, worst);
+				}
+			}
 			/* (the evenest near the slope asked, then the nearest) */
 			if (error_degrees + worst * 20.f + (real)ring * 0.02f >= best_score)
 				continue;
@@ -1506,7 +1524,7 @@ static boolean bleed_test_find(real_point3d const *around, real want, real_point
 			*found = slope;
 			any = TRUE;
 		}
-		if (any && ring > 12)
+		if (any && ring > 12 && !gore_bleed_test_scan)
 			break;
 	}
 	return any;
@@ -1588,7 +1606,26 @@ static void bleed_test_update(void)
 		real_point3d place;
 		real_vector3d facing;
 
-		if (!bleed_test_find(&player->object.position, want, &gore_bleed_test_spot, &gore_bleed_test_downhill,
+		real_point3d around = player->object.position;
+		{
+			char const *near = config_string("debug.gore_bleed_test_near");
+			float near_x, near_y;
+
+			gore_bleed_test_scan = near && strcmp(near, "scan") == 0;
+			if (near && sscanf(near, "%f %f", &near_x, &near_y) == 2)
+			{
+				struct collision_result collision;
+
+				around.x = near_x;
+				around.y = near_y;
+				around.z += 40.f;
+				if (bleed_ground(&around, 0.f, 120.f, &collision))
+					around.z = collision.point.z;
+				gore_bleed_test_rings = 14;
+				error(_error_silent, "gore bleed test: looking around %.2f %.2f %.2f (debug.gore_bleed_test_near)", around.x, around.y, around.z);
+			}
+		}
+		if (!bleed_test_find(&around, want, &gore_bleed_test_spot, &gore_bleed_test_downhill,
 				&gore_bleed_test_found_slope))
 		{
 			error(_error_silent, "gore bleed test: no ground of %.0f degrees near the player", want);
