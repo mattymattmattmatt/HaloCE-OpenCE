@@ -131,7 +131,7 @@ static struct gore_bleed_species const gore_bleed_species[] =
 	plain splat multiplies, and orange multiplied over green grass reads
 	green: what was seen) */
 	{ "hunter", 5.0f, 4, 6, 0.125f, "effects\\decals\\blood splats\\blood hunter glow splat", 1, 1.15f,
-		"effects\\decals\\blood splats\\blood hunter splat", 0.7f },
+		"effects\\decals\\blood splats\\blood hunter splat", 0.f },
 	{ "", 1.6f, 2, 3, 0.08f, "effects\\decals\\blood splats\\blood splat", 1, 0.7f, NULL, 0.5f },
 };
 
@@ -186,6 +186,7 @@ struct gore_bleed
 	long wait_ticks;
 	real_rgb_color color;
 	long decal_definition_index;
+	long dark_definition_index; /* the dark layer's splat (a max one's shape; NONE: none) */
 	long tint_definition_index; /* a max-blend splat (the species', else the grunt's or hunter's glow): the shape of the dark and colour layers */
 	real tint_strength; /* the colour layer's brightness (0: none, the species' splat is already its colour) */
 	real_rgb_color dark_color; /* the dark layer's: what it takes away (reverse subtract) */
@@ -586,11 +587,12 @@ static short bleed_blend_quad_new(struct gore_bleed const *bleed, short blend, s
 {
 	real_rgb_color const *color = blend == 4 ? &bleed->dark_color : &bleed->color;
 	real strength = blend == 4 ? bleed_dark_strength() : bleed->tint_strength;
+	long definition_index = blend == 4 ? bleed->dark_definition_index : bleed->tint_definition_index;
 	short quad;
 
-	if (bleed->tint_definition_index == NONE || strength <= 0.f)
+	if (definition_index == NONE || strength <= 0.f)
 		return NONE;
-	quad = bleed_quad_new(bleed->tint_definition_index, 0, cluster_index, corners, uv, color, normal);
+	quad = bleed_quad_new(definition_index, 0, cluster_index, corners, uv, color, normal);
 	if (quad != NONE)
 	{
 		gore_bleed_quads[quad].strength = strength;
@@ -604,9 +606,9 @@ static short bleed_blend_quad_new(struct gore_bleed const *bleed, short blend, s
 /* the extra layers' count: the dark one, and the colour one */
 static short bleed_extra_layers(struct gore_bleed const *bleed)
 {
-	if (bleed->tint_definition_index == NONE || bleed_dark_strength() <= 0.f)
+	if (bleed->dark_definition_index == NONE || bleed_dark_strength() <= 0.f)
 		return 0;
-	return (short)(bleed->tint_strength > 0.f ? 2 : 1);
+	return (short)(bleed->tint_definition_index != NONE && bleed->tint_strength > 0.f ? 2 : 1);
 }
 
 static void bleed_on_surface(real_point3d const *point, real_vector3d const *normal, real_point3d *result)
@@ -1220,18 +1222,21 @@ static void bleed_settle(struct gore_bleed *bleed)
 		bleed->decal_definition_index = tag_loaded(DECAL_TAG, species->decal_fallback);
 	if (bleed->decal_definition_index == NONE)
 		bleed->decal_definition_index = tag_loaded(DECAL_TAG, "effects\\decals\\blood splats\\blood splat");
-	/* the dark and colour layers' shape: a max splat (the species' own if
-	it is one, else the grunt's, else the hunter's glow); a colour layer
-	only over a multiply splat */
+	/* the dark layer's shape: the grunt's max splat (its cyan texture's
+	green and blue take the most away, which leaves red and orange blood
+	its colour), else the hunter's glow, else the species' own. The colour
+	layer's: the grunt's splat, over a multiply splat (human, elite) only;
+	a max splat (grunt, jackal, hunter) is its colour itself */
+	bleed->dark_definition_index = tag_loaded(DECAL_TAG, "effects\\decals\\blood splats\\blood grunt splat");
+	if (bleed->dark_definition_index == NONE)
+		bleed->dark_definition_index = tag_loaded(DECAL_TAG, "effects\\decals\\blood splats\\blood hunter glow splat");
+	if (bleed->dark_definition_index == NONE && decal_definition_blend_function(bleed->decal_definition_index) == 6)
+		bleed->dark_definition_index = bleed->decal_definition_index;
 	bleed->tint_definition_index = NONE;
 	bleed->tint_strength = 0.f;
-	if (decal_definition_blend_function(bleed->decal_definition_index) == 6)
-		bleed->tint_definition_index = bleed->decal_definition_index;
-	else
+	if (decal_definition_blend_function(bleed->decal_definition_index) != 6 && species->tint > 0.f)
 	{
 		bleed->tint_definition_index = tag_loaded(DECAL_TAG, "effects\\decals\\blood splats\\blood grunt splat");
-		if (bleed->tint_definition_index == NONE)
-			bleed->tint_definition_index = tag_loaded(DECAL_TAG, "effects\\decals\\blood splats\\blood hunter glow splat");
 		bleed->tint_strength = species->tint;
 		if (getenv("HALO_GORE_BLEED_TINT")) /* (tuning) */
 			bleed->tint_strength *= (real)atof(getenv("HALO_GORE_BLEED_TINT"));
@@ -1245,6 +1250,13 @@ static void bleed_settle(struct gore_bleed *bleed)
 		bleed->dark_color.red = 1.f - 0.6f * bleed->color.red / brightest;
 		bleed->dark_color.green = 1.f - 0.6f * bleed->color.green / brightest;
 		bleed->dark_color.blue = 1.f - 0.6f * bleed->color.blue / brightest;
+	}
+	/* the hunter's glow splat is orange-red itself: its colour, yellow,
+	times it gives the orange (the species' orange gave red) */
+	if (decal_definition_blend_function(bleed->decal_definition_index) == 6 &&
+		strstr(species->name, "hunter"))
+	{
+		bleed->color.red = 1.f; bleed->color.green = 0.95f; bleed->color.blue = 0.25f;
 	}
 	/* the pool's share: all of it on flat ground, less the steeper */
 	if (bleed->slope < GORE_BLEED_FLAT_DEGREES)
