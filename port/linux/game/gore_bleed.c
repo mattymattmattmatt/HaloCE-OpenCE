@@ -261,6 +261,7 @@ static long gore_bleed_last_time = NONE;
 static long gore_bleed_started; /* bleeds begun since the map (the numbers) */
 static long gore_bleed_finished;
 static long gore_bleed_resets;
+static boolean gore_bleed_loaded; /* (game_state.c's after-load procs) */
 static long gore_bleed_serial;
 static short gore_bleed_check_next;
 static unsigned long gore_bleed_seed = 0x626c6564;
@@ -1967,6 +1968,13 @@ static void bleed_cost_report(void)
 
 /* ---------- public code */
 
+/* a checkpoint revert or a loaded game (game_state.c, after it loads):
+the next update starts over */
+void gore_bleed_game_state_loaded(void)
+{
+	gore_bleed_loaded = TRUE;
+}
+
 void gore_bleed_reset(void)
 {
 	short index;
@@ -1984,6 +1992,7 @@ void gore_bleed_reset(void)
 		gore_bleed_bled[index] = NONE;
 	gore_bleed_bled_next = 0;
 	gore_bleed_last_time = NONE;
+	gore_bleed_loaded = FALSE;
 	gore_bleed_started = gore_bleed_finished = 0;
 	gore_bleed_quad_next = 0;
 	gore_bleed_check_next = 0;
@@ -2005,12 +2014,12 @@ void gore_bleed_update(void)
 	objects and decals are the saved game's; what this knew is stale
 	(its corpses, its rivulets' bleeds), so it starts over (the saved
 	game's own bleed quads are deleted as unknown, bleed_check_quads) */
-	if (gore_bleed_last_time != NONE && game_time_get() < gore_bleed_last_time)
+	if (gore_bleed_loaded || (gore_bleed_last_time != NONE && game_time_get() < gore_bleed_last_time))
 	{
 		long resets = gore_bleed_resets + 1;
 
 		if (bleed_log())
-			error(_error_silent, "gore bleed: the clock went back (%ld -> %ld: a revert or a loaded game): starting over",
+			error(_error_silent, "gore bleed: a revert or a loaded game (clock %ld -> %ld): starting over",
 				gore_bleed_last_time, game_time_get());
 		{
 			/* (the test goes on: its next round) */
