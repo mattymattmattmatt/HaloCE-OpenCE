@@ -34,5 +34,8 @@ gore.c) and are never told to or culled by the network object sync */
 boolean gore_object_is_piece(long object_index);
 /* game_initialize_for_new_map / game_dispose_from_old_map */
 void gore_reset(void);
+/* the corpse bleed (gore_bleed.c): gore_update and gore_reset call these */
+void gore_bleed_update(void);
+void gore_bleed_reset(void);
 
 #endif

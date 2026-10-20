@@ -103,6 +103,8 @@ SCREENS = {
             ("GORE:", "game.gore_level",
              [("OFF", "off"), ("MILD", "mild"), ("HEAVY", "heavy"), ("EXTREME", "extreme")],
              "Kills by a close blast, a fast vehicle, a point-\nblank shotgun or a headshot come apart. Mild: half\nthe blood and force. Extreme: more, and chunks.", None),
+            ("CORPSE BLEED:", "game.gore_corpse_bleed", ON_OFF,
+             "With gore on, a body at rest pools blood that\nruns down a slope. Off: no pools or runs.", None),
         ],
     },
     "mouse_settings": {
@@ -207,7 +209,8 @@ SCREENS = {
 _video = SCREENS["video_settings"]
 _graphics = {"display.high_res_hud", "display.high_res_text", "display.anti_aliasing",
              "display.shadow_resolution", "display.per_pixel_lighting",
-             "display.shield_glow", "display.shield_glow_intensity", "game.gore_level"}
+             "display.shield_glow", "display.shield_glow_intensity", "game.gore_level",
+             "game.gore_corpse_bleed"}
 SCREENS["video_settings/graphics"] = {
     "screen": "graphics_settings_screen", "header": _video["header"], "spacing": 30,
     "same_place": ["anti_aliasing_android"],

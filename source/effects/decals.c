@@ -2648,6 +2648,36 @@ long decal_quad_new(
 	real_point3d const corners[4],
 	real alpha)
 {
+	long decal_index = decal_quad_new_ex(decal_definition_index, 0, cluster_index, corners, NULL, NULL, alpha);
+
+	/* (a moving quad: decal_quads_delete_except sweeps those) */
+	if (decal_index != NONE)
+	{
+		DECAL_GET(decal_index)->decay_time = -1.0f;
+	}
+	return decal_index;
+}
+
+/* a quad its maker tracks itself (decay time -2), or a moving quad (-1) */
+static boolean decal_is_quad(
+	struct decal_datum const *decal)
+{
+	return decal && decal->quad_count == 1 && decal->lifetime == 0.0f &&
+		(decal->decay_time == -1.0f || decal->decay_time == -2.0f);
+}
+
+/* the same, of the definition's sequence (its first sprite), the corners'
+texture coordinates given within the sprite (0 to 1: NULL, its corners) and
+the color (NULL: the definition's) */
+long decal_quad_new_ex(
+	long decal_definition_index,
+	short sequence_index,
+	short cluster_index,
+	real_point3d const corners[4],
+	real_point2d const uv[4],
+	real_rgb_color const *quad_color,
+	real alpha)
+{
 	struct decal_definition *definition;
 	struct bitmap_group *bitmap_group;
 	real_rectangle2d sprite_bounds = { 0.0f, 1.0f, 0.0f, 1.0f };
@@ -2670,13 +2700,17 @@ long decal_quad_new(
 	}
 	if (bitmap_group->type == _bitmap_group_type_sprites && bitmap_group->sequences.count > 0)
 	{
-		struct bitmap_group_sequence *sequence = TAG_BLOCK_GET_ELEMENT(
-			&bitmap_group->sequences, 0, struct bitmap_group_sequence);
+		struct bitmap_group_sequence *sequence;
 
+		if (sequence_index < 0 || sequence_index >= (short)bitmap_group->sequences.count)
+		{
+			sequence_index = 0;
+		}
+		sequence = TAG_BLOCK_GET_ELEMENT(&bitmap_group->sequences, sequence_index, struct bitmap_group_sequence);
 		if (sequence->sprites.count > 0)
 		{
 			bitmap_index = TAG_BLOCK_GET_ELEMENT(&sequence->sprites, 0, struct bitmap_group_sprite)->bitmap_index;
-			decal_sprite_get_bounds(definition, 0, 0, 1.0f, &sprite_bounds, &extent);
+			decal_sprite_get_bounds(definition, sequence_index, 0, 1.0f, &sprite_bounds, &extent);
 		}
 	}
 	if (!_texture_cache_bitmap_get_hardware_format(
@@ -2703,13 +2737,19 @@ long decal_quad_new(
 		rgb_colors_interpolate(&color,
 			(definition->flags >> _decal_definition_color_interpolate_in_hsv_bit) & 3,
 			&definition->color_lower_bound, &definition->color_upper_bound, 0.5f);
+		if (quad_color)
+		{
+			color.red = PIN(quad_color->red, 0.0f, 1.0f);
+			color.green = PIN(quad_color->green, 0.0f, 1.0f);
+			color.blue = PIN(quad_color->blue, 0.0f, 1.0f);
+		}
 		decal->position = corners[0];
 		decal->creation_time = game_time_get();
 		decal->sequence_index = 0;
 		decal->sprite_index = 0;
 		decal->bitmap_index = (byte)bitmap_index;
 		decal->lifetime = 0.0f;
-		decal->decay_time = -1.0f; /* (a moving quad: decal_quads_delete_except) */
+		decal->decay_time = -2.0f; /* (its maker's: decal_quads_delete_unmarked) */
 		decal->definition_index = decal_definition_index;
 		decal->quad_count = 1;
 		decal->color = real_a_rgb_color_to_pixel32(PIN(alpha, 0.0f, 1.0f) *
@@ -2722,6 +2762,11 @@ long decal_quad_new(
 		decal_quad_texcoords[3][0] = sprite_bounds.x0; decal_quad_texcoords[3][1] = sprite_bounds.y1;
 		for (corner = 0; corner < 4; corner++)
 		{
+			if (uv)
+			{
+				decal_quad_texcoords[corner][0] = sprite_bounds.x0 + (sprite_bounds.x1 - sprite_bounds.x0) * PIN(uv[corner].x, 0.0f, 1.0f);
+				decal_quad_texcoords[corner][1] = sprite_bounds.y0 + (sprite_bounds.y1 - sprite_bounds.y0) * PIN(uv[corner].y, 0.0f, 1.0f);
+			}
 			decal_quad_uv[DATUM_INDEX_TO_ABSOLUTE_INDEX(decal_index) % MAXIMUM_DECALS_PER_MAP][corner][0] =
 				(short)PIN(decal_quad_texcoords[corner][0] * 32768.0f, 0.0f, 32767.0f);
 			decal_quad_uv[DATUM_INDEX_TO_ABSOLUTE_INDEX(decal_index) % MAXIMUM_DECALS_PER_MAP][corner][1] =
@@ -2731,6 +2776,10 @@ long decal_quad_new(
 	if (!decal_quad_set(decal_index, corners))
 	{
 		return NONE;
+	}
+	if (quad_color)
+	{
+		decal_quad_set_color(decal_index, quad_color, alpha);
 	}
 	return decal_index;
 }
@@ -2749,7 +2798,7 @@ boolean decal_quad_set(
 		return FALSE;
 	}
 	decal = datum_try_and_get(global_decal_data, decal_index);
-	if (!decal || decal->quad_count != 1 || decal->lifetime != 0.0f || decal->decay_time != -1.0f)
+	if (!decal_is_quad(decal))
 	{
 		return FALSE;
 	}
@@ -2770,6 +2819,93 @@ boolean decal_quad_set(
 	return TRUE;
 }
 
+/* a moving quad's color and alpha (blends that only add or brighten fade
+by their color, which is the quad's whole effect) */
+void decal_quad_set_color(
+	long decal_index,
+	real_rgb_color const *color,
+	real alpha)
+{
+	struct decal_datum *decal;
+	struct decal_definition *definition;
+	real_rgb_color c;
+
+	if (decal_index == NONE)
+	{
+		return;
+	}
+	decal = datum_try_and_get(global_decal_data, decal_index);
+	if (!decal_is_quad(decal))
+	{
+		return;
+	}
+	definition = decal_definition_get(decal->definition_index);
+	alpha = PIN(alpha, 0.0f, 1.0f);
+	c.red = PIN(color->red, 0.0f, 1.0f);
+	c.green = PIN(color->green, 0.0f, 1.0f);
+	c.blue = PIN(color->blue, 0.0f, 1.0f);
+	/* (the shader's blend functions, rasterizer_xbox_decals.c: with 1
+	multiply, 2 double multiply and 5 min the vertex color is each channel's
+	strength (the texture's toward white), not a tint, so it stays white and
+	the alpha fades it (toward white too); with 3 add, 4 reverse subtract,
+	6 max and 7 alpha multiply add it tints the texture, and the alpha
+	scales it) */
+	switch (definition->shader.framebuffer_blend_function)
+	{
+	case 1:
+	case 2:
+	case 5:
+		c.red = c.green = c.blue = 1.0f;
+		break;
+	case 3:
+	case 4:
+	case 6:
+	case 7:
+	{
+		/* (the hue only, at the texture's own brightness: a darker tint
+		would sink under what it is drawn over, with max) */
+		real brightest = MAX(c.red, MAX(c.green, c.blue));
+
+		if (brightest > 0.0f)
+		{
+			c.red /= brightest; c.green /= brightest; c.blue /= brightest;
+		}
+		c.red *= alpha; c.green *= alpha; c.blue *= alpha;
+		break;
+	}
+	default:
+		break;
+	}
+	decal->color = real_a_rgb_color_to_pixel32(alpha *
+		0.5f * (definition->intensity_lower_bound + definition->intensity_upper_bound), &c);
+}
+
+short decal_definition_sequence_count(
+	long decal_definition_index)
+{
+	struct decal_definition *definition;
+	struct bitmap_group *bitmap_group;
+
+	if (decal_definition_index == NONE)
+	{
+		return 0;
+	}
+	definition = decal_definition_get(decal_definition_index);
+	bitmap_group = definition->shader.map.index != NONE ? bitmap_group_get(definition->shader.map.index) : NULL;
+	if (!bitmap_group || bitmap_group->type != _bitmap_group_type_sprites)
+	{
+		return 1;
+	}
+	return (short)MAX(bitmap_group->sequences.count, 1);
+}
+
+short decal_definition_blend_function(
+	long decal_definition_index)
+{
+	return decal_definition_index != NONE ?
+		decal_definition_get(decal_definition_index)->shader.framebuffer_blend_function : NONE;
+}
+
 void decal_quad_delete(
 	long decal_index)
 {
@@ -2780,7 +2916,7 @@ void decal_quad_delete(
 		return;
 	}
 	decal = datum_try_and_get(global_decal_data, decal_index);
-	if (!decal || decal->quad_count != 1 || decal->lifetime != 0.0f || decal->decay_time != -1.0f)
+	if (!decal_is_quad(decal))
 	{
 		return;
 	}
@@ -2822,6 +2958,32 @@ void decal_quads_delete_except(
 	}
 }
 
+/* every quad of a tracking maker's (decay time -2) but those marked (by
+absolute index: a loaded or reverted game's, which the maker no longer
+knows of) */
+void decal_quads_delete_unmarked(
+	byte const *marked)
+{
+	struct data_iterator iterator;
+	struct decal_datum *decal;
+
+	data_iterator_new(&iterator, global_decal_data);
+	while ((decal = data_iterator_next(&iterator)) != NULL)
+	{
+		if (decal->quad_count == 1 && decal->lifetime == 0.0f && decal->decay_time == -2.0f &&
+			!marked[DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index) % MAXIMUM_DECALS_PER_MAP])
+		{
+			decal_quad_delete(iterator.datum_index);
+		}
+	}
+}
+
+boolean decal_quad_exists(
+	long decal_index)
+{
+	return decal_index != NONE && decal_is_quad(datum_try_and_get(global_decal_data, decal_index));
+}
+
 long decal_count_get(
 	void)
 {
@@ -2834,4 +2996,37 @@ long decal_count_get(
 		count++;
 	}
 	return count;
+}
+
+/* port: every decal definition of the map, logged (the gore mod picks its
+corpse bleed's texture from what the map has: port/linux/game/gore_bleed.c) */
+#include "cache/cache_files.h"
+void decal_definitions_report(
+	void)
+{
+	struct tag_iterator iterator;
+	long definition_index;
+
+	tag_iterator_new(&iterator, 'deca');
+	while ((definition_index = tag_iterator_next(&iterator)) != NONE)
+	{
+		struct decal_definition *definition = decal_definition_get(definition_index);
+		struct bitmap_group *bitmap_group = definition->shader.map.index != NONE ?
+			bitmap_group_get(definition->shader.map.index) : NULL;
+		struct bitmap_data *bitmap = bitmap_group && bitmap_group->bitmaps.count > 0 ?
+			TAG_BLOCK_GET_ELEMENT(&bitmap_group->bitmaps, 0, struct bitmap_data) : NULL;
+
+		error(_error_silent, "decal: %s type %d layer %d blend %d flags %04x radius %.3f-%.3f intensity %.2f-%.2f "
+			"color %.2f %.2f %.2f - %.2f %.2f %.2f life %.1f-%.1f bitmaps %ld (group type %d, sequences %ld) %dx%d format %d",
+			tag_get_name(definition_index), definition->type, definition->layer,
+			definition->shader.framebuffer_blend_function, definition->flags,
+			definition->radius_lower_bound, definition->radius_upper_bound,
+			definition->intensity_lower_bound, definition->intensity_upper_bound,
+			definition->color_lower_bound.red, definition->color_lower_bound.green, definition->color_lower_bound.blue,
+			definition->color_upper_bound.red, definition->color_upper_bound.green, definition->color_upper_bound.blue,
+			definition->lifetime_lower_bound, definition->lifetime_upper_bound,
+			bitmap_group ? bitmap_group->bitmaps.count : 0, bitmap_group ? bitmap_group->type : -1,
+			bitmap_group ? bitmap_group->sequences.count : 0,
+			bitmap ? bitmap->width : 0, bitmap ? bitmap->height : 0, bitmap ? bitmap->format : -1);
+	}
 }
