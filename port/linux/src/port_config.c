@@ -1396,8 +1396,15 @@ static void config_load(void)
 
 		if (old_gore && !getenv("HALO_GORE_LEVEL") && level_index >= 0)
 		{
-			int off = !strcmp(old_gore, "0") || !SDL_strcasecmp(old_gore, "false") || !SDL_strcasecmp(old_gore, "off") ||
-				!SDL_strcasecmp(old_gore, "no");
+			char lower[8] = {0};
+			int off;
+
+			for (int index = 0; old_gore[index] && index < (int)sizeof(lower) - 1; index++)
+			{
+				lower[index] = (char)tolower((unsigned char)old_gore[index]);
+			}
+			off = strlen(old_gore) < sizeof(lower) && (!strcmp(lower, "0") || !strcmp(lower, "false") ||
+				!strcmp(lower, "off") || !strcmp(lower, "no"));
 
 			config_values[level_index].string = strdup(off ? "off" : "heavy");
 		}
