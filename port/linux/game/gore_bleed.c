@@ -126,13 +126,13 @@ static struct gore_bleed_species const gore_bleed_species[] =
 {
 	{ "grunt", 0.6f, 1, 2, 0.065f, "effects\\decals\\blood splats\\blood grunt splat", 1, 0.55f, NULL, 0.f },
 	{ "jackal", 1.0f, 2, 3, 0.075f, "effects\\decals\\blood splats\\blood grunt splat", 1, 0.65f, NULL, 0.f },
-	{ "elite", 2.4f, 3, 4, 0.095f, "effects\\decals\\blood splats\\blood elite splat", 1, 0.85f, NULL, 0.6f },
+	{ "elite", 2.4f, 3, 4, 0.095f, "effects\\decals\\blood splats\\blood elite splat", 1, 0.85f, NULL, 0.85f },
 	/* (the hunter's: its max-blend glow splat, which takes the orange. Its
 	plain splat multiplies, and orange multiplied over green grass reads
 	green: what was seen) */
 	{ "hunter", 5.0f, 4, 6, 0.125f, "effects\\decals\\blood splats\\blood hunter glow splat", 1, 1.15f,
 		"effects\\decals\\blood splats\\blood hunter splat", 0.7f },
-	{ "", 1.6f, 2, 3, 0.08f, "effects\\decals\\blood splats\\blood splat", 1, 0.7f, NULL, 0.35f },
+	{ "", 1.6f, 2, 3, 0.08f, "effects\\decals\\blood splats\\blood splat", 1, 0.7f, NULL, 0.5f },
 };
 
 static char const *const gore_bleed_never[] = { "flood", "sentinel", "monitor", "engineer" };
@@ -341,14 +341,17 @@ static real bleed_volume_scale(void)
 static real bleed_dark_strength(void)
 {
 	real scale = gore_bleed_level_scale();
+	char const *test = getenv("HALO_GORE_BLEED_DARK"); /* (tuning) */
 
 	if (scale <= 0.f)
 		return 0.f;
+	if (test)
+		return (real)atof(test);
 	if (scale < 0.75f)
-		return 0.3f;
+		return 0.55f;
 	if (scale < 1.1f)
-		return 0.45f;
-	return 0.55f;
+		return 0.8f;
+	return 0.9f;
 }
 
 /* times over each quad is drawn: the species' (a pale splat's more),
@@ -1230,6 +1233,8 @@ static void bleed_settle(struct gore_bleed *bleed)
 		if (bleed->tint_definition_index == NONE)
 			bleed->tint_definition_index = tag_loaded(DECAL_TAG, "effects\\decals\\blood splats\\blood hunter glow splat");
 		bleed->tint_strength = species->tint;
+		if (getenv("HALO_GORE_BLEED_TINT")) /* (tuning) */
+			bleed->tint_strength *= (real)atof(getenv("HALO_GORE_BLEED_TINT"));
 	}
 	{
 		/* (more of what the blood lacks: grass under red blood loses its
