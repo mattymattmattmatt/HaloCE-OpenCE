@@ -226,6 +226,7 @@ struct gore_rivulet
 	real texture_rate;
 	real phase;
 	real phase_rate;
+	real bias; /* radians: its own lean off the downhill (they fan out) */
 	short stuck;
 };
 
@@ -259,6 +260,7 @@ struct gore_bleed_stain
 	long time;
 	long grow_ticks;
 	boolean grown;
+	real inset; /* of its sprite: this much cut off each side (0: all of it) */
 };
 
 /* ---------- globals */
@@ -661,8 +663,8 @@ static void bleed_stain_corners(struct gore_bleed_stain const *stain, real size,
 		point_from_line3d(&point, &stain->axis, along, &point);
 		point_from_line3d(&point, &side, across, &point);
 		bleed_on_surface(&point, &stain->normal, &corners[corner]);
-		uv[corner].x = u;
-		uv[corner].y = v;
+		uv[corner].x = stain->inset + u * (1.f - 2.f * stain->inset);
+		uv[corner].y = stain->inset + v * (1.f - 2.f * stain->inset);
 	}
 }
 
@@ -699,6 +701,8 @@ static void bleed_stain_update(struct gore_bleed_stain *stain)
 		stain->quad_count = 0; /* (its quads live on as quads) */
 }
 
+static real gore_bleed_stain_inset; /* the next stain's (bleed_stain_new) */
+
 /* a round stain growing to this radius (wu; stretched along the axis) */
 static short bleed_stain_new(struct gore_bleed *bleed, real_point3d const *center, real_vector3d const *normal,
 	real_vector3d const *axis, real radius, real stretch, long grow_ticks)
@@ -733,6 +737,8 @@ static short bleed_stain_new(struct gore_bleed *bleed, real_point3d const *cente
 	stain->time = game_time_get();
 	stain->grow_ticks = grow_ticks;
 	stain->grown = FALSE;
+	stain->inset = gore_bleed_stain_inset;
+	gore_bleed_stain_inset = 0.f;
 	stain->grid = radius * stretch > 0.3f ? 3 : radius * stretch > 0.12f ? 2 : 1;
 	/* (a round sprite: the definition's first) */
 	sequence = 0;
@@ -786,7 +792,23 @@ static real bleed_rivulet_width(struct gore_rivulet const *rivulet)
 	/* wide at the start, narrowing as it runs out, and on steep ground,
 	with a little swell and pinch */
 	return rivulet->width0 * (0.32f + 0.68f * sqrtf(left)) * (1.15f - 0.4f * rivulet->sine) *
-		(1.f + 0.12f * sinf(rivulet->phase * 1.7f + 1.3f));
+		(1.f + 0.22f * sinf(rivulet->phase * 1.7f + 1.3f) + 0.1f * sinf(rivulet->phase * 4.3f + 0.4f));
+}
+
+/* drawn: its start (a body rivulet's) flared, so the pool funnels into it
+with no seam (a straight-edged ribbon meeting a round pool read as a gap) */
+static real bleed_rivulet_drawn_width(struct gore_rivulet const *rivulet)
+{
+	real flare = 0.f;
+
+	if (rivulet->depth == 0)
+	{
+		real reach = rivulet->width0 * 4.f;
+
+		flare = 1.1f * PIN(1.f - rivulet->distance / reach, 0.f, 1.f);
+		flare *= flare;
+	}
+	return bleed_rivulet_width(rivulet) * GORE_BLEED_DRAWN_WIDTH * (1.f + flare);
 }
 
 /* the ribbon's edge at the rivulet now (on the surface) */
@@ -806,7 +828,7 @@ static void bleed_rivulet_edges(struct gore_rivulet const *rivulet, real width, 
 /* the ribbon from its last end to here */
 static void bleed_rivulet_emit(struct gore_rivulet *rivulet, struct gore_bleed *bleed)
 {
-	real width = bleed_rivulet_width(rivulet) * GORE_BLEED_DRAWN_WIDTH;
+	real width = bleed_rivulet_drawn_width(rivulet);
 	real_point3d left, right;
 	real v0 = rivulet->texture_v;
 	real v1;
@@ -916,12 +938,15 @@ static void bleed_rivulet_start(struct gore_bleed *bleed, short bleed_index, rea
 	bleed_normalize(&rivulet->direction, &bleed->downhill);
 	rivulet->volume = rivulet->volume0 = volume;
 	rivulet->width0 = gore_bleed_species[bleed->species].width / WU * (depth ? 0.75f : 1.f) *
-		powf(bleed_volume_scale(), 0.4f);
+		powf(bleed_volume_scale(), 0.4f) * bleed_random(0.7f, 1.15f);
 	rivulet->sine = sinf(RADIANS(bleed->slope));
 	rivulet->texture_v = bleed_random(0.f, 1.f);
 	rivulet->texture_rate = bleed_random(0.8f, 1.6f);
 	rivulet->phase = bleed_random(0.f, 6.283f);
-	rivulet->phase_rate = bleed_random(1.6f, 3.2f); /* radians a world unit */
+	/* (radians a world unit: a bend every metre or two; it was every 6-12 m,
+	and runs of 1-3 m read as straight planks) */
+	rivulet->phase_rate = bleed_random(8.f, 14.f);
+	rivulet->bias = RADIANS(bleed_random(-6.f, 6.f));
 	rivulet->edge = FALSE;
 	rivulet->since_direction = rivulet->direction;
 	bleed->rivulets_live++;
@@ -1022,8 +1047,8 @@ static void bleed_rivulet_update(struct gore_rivulet *rivulet)
 	target.k = local.k * 0.7f + macro.k * 0.3f;
 	bleed_normalize(&target, &macro);
 	rivulet->phase += rivulet->phase_rate * step;
-	bleed_rotate_about(&target, &rivulet->normal, RADIANS(14.f) * sinf(rivulet->phase) +
-		RADIANS(6.f) * sinf(rivulet->phase * 2.3f + 0.7f));
+	bleed_rotate_about(&target, &rivulet->normal, rivulet->bias + RADIANS(20.f) * sinf(rivulet->phase) +
+		RADIANS(9.f) * sinf(rivulet->phase * 2.3f + 0.7f));
 	rivulet->direction.i = rivulet->direction.i * 0.6f + target.i * 0.4f;
 	rivulet->direction.j = rivulet->direction.j * 0.6f + target.j * 0.4f;
 	rivulet->direction.k = rivulet->direction.k * 0.6f + target.k * 0.4f;
@@ -1075,7 +1100,7 @@ static void bleed_rivulet_update(struct gore_rivulet *rivulet)
 	{
 		/* (its start: the ribbon's first end, wide) */
 		real_point3d left_edge, right_edge;
-		real width = bleed_rivulet_width(rivulet) * 1.3f * GORE_BLEED_DRAWN_WIDTH;
+		real width = bleed_rivulet_drawn_width(rivulet) * 1.1f;
 
 		bleed_rivulet_edges(rivulet, width, &left_edge, &right_edge);
 		rivulet->edge_left = left_edge;
@@ -1371,17 +1396,44 @@ static void bleed_overflow(struct gore_bleed *bleed, short bleed_index)
 	}
 	for (index = 0; index < chosen_count; index++)
 	{
-		real_point3d origin = origins[chosen[index]];
 		/* (the pool's centre is (stretch - 1) / 2 radii downhill; its blood
-		shows to about half its sprite's reach: start well inside that, so the
-		rivulet flows out of the pool, never from beyond a gap) */
-		real rim = bleed->pool_radius * ((bleed->pool_stretch - 1.f) * 0.5f + bleed->pool_stretch * 0.3f);
+		shows to about half its sprite's reach. Every rivulet starts well
+		inside that, in its lower part: before, a node already past the rim
+		(a hunter's limbs reach beyond its pool) kept its own place, and its
+		rivulet began out on the bare ground, past a gap) */
+		real r = bleed->pool_radius;
+		real centre = r * (bleed->pool_stretch - 1.f) * 0.5f;
+		real rim = centre + r * bleed->pool_stretch * bleed_random(0.18f, 0.28f);
+		real_vector3d offset;
+		real across;
+		real fan;
+		real_point3d origin = bleed->wound;
 		real_vector3d way = bleed->downhill;
 
-		/* (under the body: out to inside the pool's lower part) */
-		if (along[chosen[index]] < rim)
-			point_from_line3d(&origin, &bleed->downhill, rim - along[chosen[index]], &origin);
-		bleed_rotate_about(&way, &bleed->normal, RADIANS(bleed_random(-12.f, 12.f)));
+		/* (spread across the pool's lower part, the nodes' side to side
+		order kept: the most downhill node's side gets the first) */
+		vector_from_points3d(&bleed->wound, &origins[chosen[index]], &offset);
+		{
+			short rank = 0;
+			short other;
+			real mine = dot_product3d(&offset, &side);
+
+			for (other = 0; other < chosen_count; other++)
+			{
+				real_vector3d theirs;
+
+				vector_from_points3d(&bleed->wound, &origins[chosen[other]], &theirs);
+				if (other != index && (dot_product3d(&theirs, &side) < mine ||
+					(dot_product3d(&theirs, &side) == mine && other < index)))
+					rank++;
+			}
+			fan = chosen_count > 1 ? (real)rank / (real)(chosen_count - 1) * 2.f - 1.f : bleed_random(-0.3f, 0.3f);
+		}
+		across = r * 0.32f * fan + r * bleed_random(-0.04f, 0.04f);
+		point_from_line3d(&origin, &bleed->downhill, rim, &origin);
+		point_from_line3d(&origin, &side, across, &origin);
+		/* (fanning out from the pool, not side by side like planks) */
+		bleed_rotate_about(&way, &bleed->normal, RADIANS(fan * 26.f + bleed_random(-8.f, 8.f)));
 		bleed_rivulet_start(bleed, bleed_index, &origin, &way, rivulet_volume * weights[index] / weight_sum, 0,
 			(long)bleed_random(0.f, 18.f) + index * 4);
 	}
@@ -1518,6 +1570,19 @@ static void bleed_update(struct gore_bleed *bleed, short bleed_index)
 			bleed->pool_ticks = (long)(30.f * (1.6f + 1.4f * sqrtf(bleed->volume * WU * WU / 1.6f)));
 			bleed->stain = bleed_stain_new(bleed, &center, &bleed->normal, &bleed->downhill, bleed->pool_radius,
 				bleed->pool_stretch, bleed->pool_ticks);
+			/* (and its wet core, in its lower part where the rivulets
+			leave: the splat's dense middle only, so the pool reads solid
+			there and runs on into them, not a speckle that stops short) */
+			if (bleed->slope >= GORE_BLEED_FLAT_DEGREES)
+			{
+				real_point3d core = center;
+
+				point_from_line3d(&core, &bleed->downhill, bleed->pool_radius * bleed->pool_stretch * 0.12f, &core);
+				gore_bleed_stain_inset = 0.08f;
+				bleed_stain_new(bleed, &core, &bleed->normal, &bleed->downhill, bleed->pool_radius * 0.5f,
+					bleed->pool_stretch, (long)(bleed->pool_ticks * 0.8f));
+				gore_bleed_stain_inset = 0.f; /* (also when there was no ground) */
+			}
 			/* (and smaller ones under the limbs, so blood shows all round
 			the body's edge, joined to the pool) */
 			{
