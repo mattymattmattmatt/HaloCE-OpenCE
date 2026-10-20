@@ -361,7 +361,9 @@ static short bleed_layers(struct gore_bleed const *bleed)
 {
 	short layers = gore_bleed_species[bleed->species].layers;
 
-	if (gore_bleed_level_scale() >= 0.75f)
+	/* (with no dark layer: the darkness its own way; with one, the quads
+	are better spent on more blood) */
+	if (gore_bleed_level_scale() >= 0.75f && bleed->dark_definition_index == NONE)
 		layers++;
 	return (short)PIN(layers, 1, GORE_BLEED_MAXIMUM_LAYERS);
 }
