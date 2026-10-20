@@ -420,7 +420,12 @@ static void gore_blood_color(long unit_definition_index, real_rgb_color *color)
 	color->red = 0.24f; color->green = 0.03f; color->blue = 0.03f;
 	if (!name)
 		return;
-	if (strstr(name, "grunt") || strstr(name, "jackal"))
+	if (strstr(name, "hunter"))
+	{
+		/* (orange, dried: never the human red) */
+		color->red = 0.3f; color->green = 0.12f; color->blue = 0.02f;
+	}
+	else if (strstr(name, "grunt") || strstr(name, "jackal"))
 	{
 		color->red = 0.05f; color->green = 0.08f; color->blue = 0.2f;
 	}
@@ -1705,7 +1710,11 @@ static void gore_unit_gib(struct gore_pending const *pending)
 		tried, as stock maps differ); never the red human splat, and never
 		a NULL name (tag_loaded on one crashed here before): with neither,
 		the hunter's own blood effects still give the colour, decal-less */
-		decal_index = tag_loaded(DECAL_TAG, "effects\\decals\\blood splats\\blood hunter splat");
+		/* (its max-blend glow splat first: that one shows orange; the
+		plain one multiplies, and orange times green grass reads green) */
+		decal_index = tag_loaded(DECAL_TAG, "effects\\decals\\blood splats\\blood hunter glow splat");
+		if (decal_index == NONE)
+			decal_index = tag_loaded(DECAL_TAG, "effects\\decals\\blood splats\\blood hunter splat");
 		if (decal_index == NONE)
 			decal_index = tag_loaded(DECAL_TAG, "effects\\decals\\blood splats\\hunter blood splat");
 		if (config_boolean("game.gore_log"))

@@ -239,6 +239,12 @@ struct decal_datum
 	long next_decal_index;
 };
 
+/* port: (as decals.c: decal_quad_set_blend_function) */
+#define DECAL_BLEND_OVERRIDE_MARK 0xB0
+#define DECAL_BLEND_FUNCTION(decal, definition) \
+	((((decal)->unused & 0xF8) == DECAL_BLEND_OVERRIDE_MARK) ? (short)((decal)->unused & 7) : \
+		(definition)->shader.framebuffer_blend_function)
+
 typedef char verify_decal_datum_size[
 	sizeof(struct decal_datum) == 0x38 ? 1 : -1];
 
@@ -377,7 +383,7 @@ static long rasterizer_decals_draw_order(
 	{
 		struct decal_datum *decal = DECAL_GET(decal_index);
 		struct decal_definition *definition = decal_definition_get(decal->definition_index);
-		short framebuffer_blend_function = definition->shader.framebuffer_blend_function;
+		short framebuffer_blend_function = DECAL_BLEND_FUNCTION(decal, definition);
 
 		decal_draw_order[count] = decal_index;
 		decal_draw_keys[count] = rasterizer_decal_blend_function_commutes(framebuffer_blend_function) &&
@@ -765,7 +771,7 @@ void _rasterizer_decals_draw(
 		struct decal_datum *decal = DECAL_GET(decal_index = decal_draw_order[decal_order_index]);
 		struct decal_definition *definition = decal_definition_get(decal->definition_index);
 		struct decal_shader_definition *shader = &definition->shader;
-		short framebuffer_blend_function = shader->framebuffer_blend_function;
+		short framebuffer_blend_function = DECAL_BLEND_FUNCTION(decal, definition);
 		unsigned long vertex_data_offset;
 		pixel32 color;
 		unsigned long intensity;

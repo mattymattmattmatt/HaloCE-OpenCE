@@ -89,6 +89,7 @@ long decal_quad_new_ex(long decal_definition_index, short sequence_index, short 
 void decal_quad_set_color(long decal_index, real_rgb_color const *color, real alpha);
 short decal_definition_sequence_count(long decal_definition_index);
 short decal_definition_blend_function(long decal_definition_index);
+void decal_quad_set_blend_function(long decal_index, short framebuffer_blend_function);
 void decal_quads_delete_unmarked(byte const *marked); /* (marked: by absolute index, HALO_PORT_MAXIMUM_DECALS) */
 boolean decal_quad_exists(long decal_index);
 void decal_definitions_report(void);

@@ -407,6 +407,12 @@ struct decal_datum
 typedef char decal_size_check[
 	sizeof(struct decal_datum) == 0x38 ? 1 : -1];
 
+/* port: the blend a quad is drawn with (its own: decal_quad_set_blend_function) */
+#define DECAL_BLEND_OVERRIDE_MARK 0xB0
+#define DECAL_BLEND_FUNCTION(decal, definition) \
+	((((decal)->unused & 0xF8) == DECAL_BLEND_OVERRIDE_MARK) ? (short)((decal)->unused & 7) : \
+		(definition)->shader.framebuffer_blend_function)
+
 struct decal_globals
 {
 	long first_decal_indices[NUMBER_OF_DECAL_LAYERS][MAXIMUM_CLUSTERS_PER_STRUCTURE];
@@ -2502,6 +2508,7 @@ static long decal_insert(
 	{
 		struct decal_datum *new_decal = DECAL_GET(decal_index);
 
+		new_decal->unused = 0; /* port: no blend override (decal_quad_set_blend_function) */
 		if (permanent)
 		{
 			new_decal->flags = FLAG(_decal_permanent_bit);
@@ -2850,7 +2857,7 @@ void decal_quad_set_color(
 	the alpha fades it (toward white too); with 3 add, 4 reverse subtract,
 	6 max and 7 alpha multiply add it tints the texture, and the alpha
 	scales it) */
-	switch (definition->shader.framebuffer_blend_function)
+	switch (DECAL_BLEND_FUNCTION(decal, definition))
 	{
 	case 1:
 	case 2:
@@ -2897,6 +2904,23 @@ short decal_definition_sequence_count(
 		return 1;
 	}
 	return (short)MAX(bitmap_group->sequences.count, 1);
+}
+
+/* port: a quad drawn with another blend function than its definition's
+(the gore mod's corpse bleed: a splat's shape darkened with reverse
+subtract, then its colour with max); NONE: its definition's again */
+void decal_quad_set_blend_function(
+	long decal_index,
+	short framebuffer_blend_function)
+{
+	struct decal_datum *decal = datum_try_and_get(global_decal_data, decal_index);
+
+	if (!decal)
+	{
+		return;
+	}
+	decal->unused = (framebuffer_blend_function >= 0 && framebuffer_blend_function < 8) ?
+		(byte)(DECAL_BLEND_OVERRIDE_MARK | framebuffer_blend_function) : 0;
 }
 
 short decal_definition_blend_function(
