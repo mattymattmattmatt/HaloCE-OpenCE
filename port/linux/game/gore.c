@@ -71,6 +71,8 @@ front of the player and gibs it, to try it.
 #include "cache/cache_files.h" /* tag_iterator_new, for the test */
 #include "units/bipeds.h"
 #include "units/units.h"
+#include "game/players.h"
+#include "networking/network_game_globals.h"
 
 #include <math.h>
 
@@ -1052,6 +1054,49 @@ boolean gore_object_is_piece(long object_index)
 	return FALSE;
 }
 
+
+/* ---------- debug.gore_object_log: every unit, item, vehicle and garbage
+object made for 20 s after a gib on this machine, by whom */
+
+#if defined(__GLIBC__)
+#include <execinfo.h>
+#endif
+
+boolean network_objects_creating_host_object(void);
+static long gore_object_log_until = NONE;
+
+void gore_object_created(long object_index)
+{
+	struct object_datum *object;
+	char frames[512];
+
+	/* (every one, all game: deaths that do not gib too) */
+	if (!config_boolean("debug.gore_object_log"))
+		return;
+	object = object_try_and_get_and_verify_type(object_index, 0xFFFFFFFF);
+	if (!object || !TEST_FLAG(_object_mask_unit | _object_mask_item | _object_mask_vehicle, object->object.type))
+		return;
+	frames[0] = 0;
+#if defined(__GLIBC__)
+	{
+		void *addresses[12];
+		int count = backtrace(addresses, 12);
+		int index;
+		int length = 0;
+
+		for (index = 1; index < count && length < (int)sizeof(frames) - 24; index++)
+			length += snprintf(frames + length, sizeof(frames) - length, " %p", addresses[index]);
+	}
+#endif
+	error(_error_silent, "gore: object log t%ld %s: made %s type %d at %ld (abs %ld id %04lx)%s%s%s; bt%s",
+		game_time_get(), network_game_distributed_client() ? "CLIENT" : "host",
+		tag_get_name(object->definition_index), object->object.type,
+		object_index, (long)DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index), (unsigned long)((object_index >> 16) & 0xFFFF),
+		network_objects_creating_host_object() ? " the host's (synced)" : " this machine's own",
+		gore_making_copy ? " [gore copy]" : "",
+		object->object.parent_object_index != NONE ? " [attached]" : "", frames);
+}
+
 static struct gore_unit_type const *gore_unit_type_get(long definition_index)
 {
 	char const *name = tag_get_name(definition_index);
@@ -1867,6 +1912,9 @@ static void gore_unit_gib(struct gore_pending const *pending)
 		error(_error_silent, "gore: %s never comes apart: its own death", tag_get_name(unit->definition_index));
 		return;
 	}
+	gore_object_log_until = game_time_get() + 20 * 30;
+	error(_error_silent, "gore: gib t%ld of %s at %ld (%s, %s)", game_time_get(), tag_get_name(unit->definition_index), unit_index,
+		network_game_distributed_client() ? "CLIENT" : "host", ((struct unit_datum *)unit)->unit.player_index != NONE ? "a player" : "not a player");
 	gore_launch_speed_sum = 0.f;
 	gore_launch_spin_sum = 0.f;
 	gore_launch_count = 0;
@@ -2035,8 +2083,16 @@ static void gore_unit_gib(struct gore_pending const *pending)
 
 		/* Extreme: the chunks, after the pieces (whose launches the
 		log's means are) */
+		/* (the campaign's only: in a multiplayer game Extreme is the body's
+		own parts, as Heavy's, with its more blood, and nothing else flies:
+		a player saw its shrunk tinted lumps as health packs and powerups) */
 		if (gore_level() == _gore_level_extreme && model && unit->object.node_matrices.size > 0 && parts >= 2)
-			gore_spawn_chunks(unit_index, model, pending);
+		{
+			if (!game_engine_running())
+				gore_spawn_chunks(unit_index, model, pending);
+			else if (config_boolean("game.gore_log"))
+				error(_error_silent, "gore: extreme chunks: none in multiplayer (the body's own parts only)");
+		}
 		for (index = 0; index < GORE_MAXIMUM_PIECES; index++)
 		{
 			if (gore_pieces[index].object_index != NONE && gore_pieces[index].age == 0)
@@ -2320,6 +2376,8 @@ static void gore_test_update(void)
 
 	if (vehicle_speed > 0.f)
 		sweep_count = 2;
+	if (config_integer("debug.gore_test_repeat") > 0)
+		sweep_count = (short)config_integer("debug.gore_test_repeat");
 	if (gore_test_gib_time != NONE && game_time_get() == gore_test_gib_time + 15)
 		gore_test_items_scan(FALSE, "0.5 s on");
 	/* six seconds after the test's hit: what came of it */
@@ -2359,14 +2417,16 @@ static void gore_test_update(void)
 			gore_blood_requested[_gore_blood_splat] ? (real)gore_blood_emitted[_gore_blood_splat] / gore_blood_requested[_gore_blood_splat] : 0.f);
 	}
 	if (seconds <= 0.f || gore_test_done >= sweep_count ||
-		game_time_get() < (long)((seconds + 4.f * gore_test_done) * 30.f))
+		game_time_get() < (long)((seconds + (real)config_real("debug.gore_test_interval") * gore_test_done) * 30.f))
 		return;
 	if (test_distance < 0.f)
 		test_distance = sweep[gore_test_done];
 	object_iterator_new(&iterator, _object_mask_biped, 0);
 	while ((biped = (struct biped_datum *)object_iterator_next(&iterator)) != NULL)
 	{
-		if (biped->unit.player_index != NONE)
+		/* (this machine's own player first) */
+		if (biped->unit.player_index != NONE &&
+			(!player || player_get(biped->unit.player_index)->local_player_index != NONE))
 		{
 			player = object_get(iterator.index);
 			player_object_index = iterator.index;
@@ -2418,7 +2478,26 @@ static void gore_test_update(void)
 	}
 	/* debug.gore_test_unit "player": the player's own unit, its shield
 	down and its body nearly gone, to see the player come apart */
-	if (!strcmp(config_string("debug.gore_test_unit"), "player"))
+	if (!strcmp(config_string("debug.gore_test_unit"), "other"))
+	{
+		/* "other": another machine's player (a client's, on the host), alive */
+		object_iterator_new(&iterator, _object_mask_biped, 0);
+		while ((biped = (struct biped_datum *)object_iterator_next(&iterator)) != NULL)
+		{
+			if (biped->unit.player_index != NONE && player_get(biped->unit.player_index)->local_player_index == NONE &&
+				!TEST_FLAG(biped->object.damage_flags, _object_dead_bit) &&
+				!TEST_FLAG(biped->object.flags, _object_invisible_bit))
+				best = iterator.index;
+		}
+		if (best == NONE)
+		{
+			error(_error_silent, "gore: test: no other player alive (waiting)");
+			return;
+		}
+		object_get(best)->object.shield_vitality = 0.f;
+		object_get(best)->object.body_vitality = 0.05f;
+	}
+	else if (!strcmp(config_string("debug.gore_test_unit"), "player"))
 	{
 		best = player_object_index;
 		player->object.shield_vitality = 0.f;
