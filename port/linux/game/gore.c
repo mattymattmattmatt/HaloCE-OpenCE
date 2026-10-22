@@ -1404,17 +1404,65 @@ static struct gore_piece *gore_piece_new(boolean chunk)
 	return NULL;
 }
 
+/* an impact splat's pieces (gore_unit_gib sets this while it makes them):
+not a blast's throw. They burst out along the surface it hit, slow, with a
+small bounce off it, and lie in and around the splat; off a wall they drop
+down it to its foot */
+static boolean gore_impact_launching = FALSE;
+static real_vector3d gore_impact_launch_normal;
+
+static void gore_impact_scatter(struct gore_piece *piece, unsigned long *seed, boolean chunk)
+{
+	real_vector3d normal = gore_impact_launch_normal;
+	real_vector3d random;
+	real_vector3d along;
+	real dot;
+	real speed;
+	real bounce;
+	boolean wall;
+
+	if (normalize3d(&normal) == 0.f)
+		normal = *global_up3d;
+	wall = normal.k < 0.6f;
+	seed_random_direction3d(seed, &random);
+	dot = dot_product3d(&random, &normal);
+	along.i = random.i - normal.i * dot;
+	along.j = random.j - normal.j * dot;
+	along.k = random.k - normal.k * dot;
+	/* (down a wall, never up it) */
+	if (wall)
+		along.k = -fabsf(along.k) - 0.3f;
+	if (normalize3d(&along) == 0.f)
+		along = *global_down3d;
+	/* (world units a tick: 1.4 to 4 m/s along it, 0.5 to 1.6 m/s off it;
+	a chunk a little quicker, lighter) */
+	speed = real_seed_random_range(seed, 0.015f, 0.044f) * (chunk ? 1.25f : 1.f);
+	bounce = real_seed_random_range(seed, 0.006f, 0.018f) * (wall ? 1.4f : 1.f);
+	piece->velocity.i = along.i * speed + normal.i * bounce;
+	piece->velocity.j = along.j * speed + normal.j * bounce;
+	piece->velocity.k = along.k * speed + normal.k * bounce;
+	seed_random_direction3d(seed, &piece->spin);
+	scale_vector3d(&piece->spin, real_seed_random_range(seed, 0.05f, chunk ? 0.3f : 0.2f), &piece->spin);
+}
+
 static void gore_piece_launch(struct gore_piece *piece, real_vector3d const *direction, real force)
 {
 	real_vector3d random;
 	real speed = PIN(force, 1.f, 3.f) * real_seed_random_range(&gore_seed, 0.05f, 0.12f); /* world units a tick */
 
-	seed_random_direction3d(&gore_seed, &random);
-	piece->velocity.i = direction->i * speed + random.i * speed * 0.5f;
-	piece->velocity.j = direction->j * speed + random.j * speed * 0.5f;
-	piece->velocity.k = direction->k * speed + fabsf(random.k) * speed * 0.6f + 0.05f;
-	seed_random_direction3d(&gore_seed, &piece->spin);
-	scale_vector3d(&piece->spin, real_seed_random_range(&gore_seed, 0.1f, 0.45f), &piece->spin);
+	if (gore_impact_launching)
+	{
+		gore_impact_scatter(piece, &gore_seed, FALSE);
+	}
+	else
+	{
+		seed_random_direction3d(&gore_seed, &random);
+		piece->velocity.i = direction->i * speed + random.i * speed * 0.5f;
+		piece->velocity.j = direction->j * speed + random.j * speed * 0.5f;
+		piece->velocity.k = direction->k * speed + fabsf(random.k) * speed * 0.6f + 0.05f;
+		seed_random_direction3d(&gore_seed, &piece->spin);
+		scale_vector3d(&piece->spin, real_seed_random_range(&gore_seed, 0.1f, 0.45f), &piece->spin);
+	}
 	/* the level's explosiveness (mild: half; the same draws, so a mild
 	piece flies at exactly half its heavy speed) */
 	{
@@ -1435,6 +1483,11 @@ static void gore_chunk_launch(struct gore_piece *piece, real_vector3d const *dir
 	real_vector3d random;
 	real speed = PIN(force, 1.f, 3.f) * real_seed_random_range(&gore_chunk_seed, 0.04f, 0.1f);
 
+	if (gore_impact_launching)
+	{
+		gore_impact_scatter(piece, &gore_chunk_seed, TRUE);
+		return;
+	}
 	seed_random_direction3d(&gore_chunk_seed, &random);
 	piece->velocity.i = direction->i * speed * 0.6f + random.i * speed;
 	piece->velocity.j = direction->j * speed * 0.6f + random.j * speed;
@@ -1907,7 +1960,7 @@ static short gore_spawn_chunks(long unit_index, struct model *model, struct gore
 	return made;
 }
 
-static void gore_unit_gib(struct gore_pending const *pending)
+static void gore_unit_gib_pieces(struct gore_pending const *pending)
 {
 	long unit_index = pending->unit_index;
 	struct object_datum *unit = object_try_and_get_and_verify_type(unit_index, _object_mask_biped);
@@ -1985,6 +2038,21 @@ static void gore_unit_gib(struct gore_pending const *pending)
 			point_from_line3d(&point, &pending->impact_normal, 0.15f, &point);
 			point_from_line3d(&point, &jitter, unit->object.bounding_sphere_radius * 0.5f, &point);
 			gore_blood_effect_at(blood_effect_index, &point, &pending->impact_normal);
+		}
+		/* and a spray off the body as it bursts: blood flung out and up
+		from its middle, so it reads as coming apart, not vanishing */
+		for (burst = 0; burst < 4; burst++)
+		{
+			real_vector3d way;
+			real_vector3d jitter;
+
+			seed_random_direction3d(&gore_seed, &jitter);
+			way.i = pending->impact_normal.i * 0.6f + jitter.i;
+			way.j = pending->impact_normal.j * 0.6f + jitter.j;
+			way.k = pending->impact_normal.k * 0.6f + jitter.k;
+			if (normalize3d(&way) == 0.f)
+				way = pending->impact_normal;
+			gore_blood_effect_at(blood_effect_index, &center, &way);
 		}
 		error(_error_silent, "gore: impact splat of %s: %.1f m/s at %.2f %.2f %.2f, normal %.2f %.2f %.2f, %d splat quads",
 			tag_get_name(unit->definition_index), pending->impact_speed,
@@ -2162,6 +2230,14 @@ static void gore_unit_gib(struct gore_pending const *pending)
 		return;
 	}
 	object_delete(unit_index);
+}
+
+static void gore_unit_gib(struct gore_pending const *pending)
+{
+	gore_impact_launching = pending->impact;
+	gore_impact_launch_normal = pending->impact_normal;
+	gore_unit_gib_pieces(pending);
+	gore_impact_launching = FALSE;
 }
 
 static void gore_rotate(real rotation[3][3], real_vector3d const *spin)
