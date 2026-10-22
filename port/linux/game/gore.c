@@ -204,6 +204,12 @@ struct gore_pending
 	real force; /* over the threshold, 1 and up */
 	boolean player; /* a player's unit (kept, hidden; its player lets go of it as it dies) */
 	boolean hunter; /* killed by a direct scorpion shell: more blood */
+	/* the impact splat's (gore_biped_impact): where it hit, the surface's
+	normal, how fast (m/s, along the normal) and its way in */
+	boolean impact;
+	real_point3d impact_point;
+	real_vector3d impact_normal;
+	real impact_speed;
 };
 
 /* ---------- globals */
@@ -259,6 +265,19 @@ static unsigned long gore_seed = 0x6f726531;
 static short gore_test_done;
 static long gore_piece_unit_definition = NONE; /* (the unit coming apart) */
 static real gore_last_force = 1.f; /* gore_unit_hit's, for gore_unit_gib_later */
+/* gore_unit_hit's impact (gore_impact_decode), for gore_unit_gib_later */
+static boolean gore_last_impact;
+static real_point3d gore_last_impact_point;
+static real_vector3d gore_last_impact_normal;
+static real gore_last_impact_speed;
+static long gore_impacts_detected; /* (the log's numbers) */
+/* (gore_bleed.c) */
+short gore_bleed_impact_splat(long unit_definition_index, real_point3d const *point, real_vector3d const *normal,
+	real speed, real threshold);
+static real gore_impact_threshold(real *lethal_out);
+boolean gore_unit_gib_pending(long unit_index);
+boolean gore_biped_impact(long biped_index, real_vector3d const *velocity, real_vector3d const *new_velocity,
+	real landing_velocity, real_plane3d const *ground_plane);
 
 /* ---------- the level (game.gore_level) */
 
@@ -1907,7 +1926,7 @@ static void gore_unit_gib(struct gore_pending const *pending)
 		return;
 	type = gore_unit_type_get(unit->definition_index);
 	/* (the Flood: never, whoever asked; the hunter only by its tank gib) */
-	if (gore_is_flood(unit->definition_index) || (type->disabled && !pending->hunter))
+	if (gore_is_flood(unit->definition_index) || (type->disabled && !pending->hunter && !pending->impact))
 	{
 		error(_error_silent, "gore: %s never comes apart: its own death", tag_get_name(unit->definition_index));
 		return;
@@ -1949,6 +1968,29 @@ static void gore_unit_gib(struct gore_pending const *pending)
 				decal_index != NONE ? "found" : "none on this map");
 	}
 	center = unit->object.bounding_sphere_center;
+	/* the impact splat: the big splat on what it hit, and a burst of its
+	blood there, before the pieces fly off it */
+	if (pending->impact)
+	{
+		short quads = gore_bleed_impact_splat(unit->definition_index, &pending->impact_point, &pending->impact_normal,
+			pending->impact_speed, gore_impact_threshold(NULL));
+		short burst;
+
+		for (burst = 0; burst < 3; burst++)
+		{
+			real_point3d point = pending->impact_point;
+			real_vector3d jitter;
+
+			seed_random_direction3d(&gore_seed, &jitter);
+			point_from_line3d(&point, &pending->impact_normal, 0.15f, &point);
+			point_from_line3d(&point, &jitter, unit->object.bounding_sphere_radius * 0.5f, &point);
+			gore_blood_effect_at(blood_effect_index, &point, &pending->impact_normal);
+		}
+		error(_error_silent, "gore: impact splat of %s: %.1f m/s at %.2f %.2f %.2f, normal %.2f %.2f %.2f, %d splat quads",
+			tag_get_name(unit->definition_index), pending->impact_speed,
+			pending->impact_point.x, pending->impact_point.y, pending->impact_point.z,
+			pending->impact_normal.i, pending->impact_normal.j, pending->impact_normal.k, quads);
+	}
 
 	if (model && unit->object.node_matrices.size > 0 && gore_split_by_nodes(unit_index, model, pending,
 		blood_effect_index, decal_index))
@@ -3425,6 +3467,233 @@ static real gore_unit_force(long unit_index, struct damage_data const *damage, r
 	return force;
 }
 
+
+/* ---------- the impact splat
+
+A biped (living, or a corpse flung by a blast or a vehicle) that hits the
+ground or a wall far faster than a deadly fall comes apart where it hit:
+its gib (the pieces fly off the surface), and a big splat of its blood on
+the surface, spattered outward (gore_bleed.c gore_bleed_impact_splat).
+
+The speed is the biped's velocity change in the tick it hit (biped
+physics' collision velocity: a stop against the ground or a wall), along
+the surface's normal. The stock falling damage (bipeds.c
+biped_falling_damage) counts the ground landing's only: below the game
+globals' runtime minimum damage velocity it is harmless, at its runtime
+maximum damage velocity it is the full falling damage (deadly); those come
+from the globals' harmful falling distances (stock: 3 and 6 world units,
+9.1 m and 18.3 m: damage from 13.4 m/s, full at 18.9 m/s; the globals'
+instant-death speed, their maximum falling velocity, is 31.4 m/s; the log
+line "gore: impact splat threshold" has the map's own). The splat takes
+game.gore_impact_speed_scale times the deadly speed (default 1.65: 31.2
+m/s, about the instant-death speed, a fall some 2.7 times the height of one
+that just kills), or game.gore_impact_speed (m/s) if above 0.
+
+Networked: only the host (or a game with no network) decides. A living
+biped's kill is dealt as act-of-god damage of the globals' falling damage
+effect, marked (origin below its epicenter along its direction, by the
+speed: gore_impact_decode), which the host's kill replay deals on every
+client the same, so every machine splats it; a corpse's is the host's
+only (as the rest of gore's corpse gibs). Off: nothing (the stock fall). */
+
+struct gore_falling_damage_globals
+{
+	long unused0[2];
+	real falling_distance_lower_bound;
+	real falling_distance_upper_bound;
+	struct tag_reference falling_damage;
+	long terminal_velocity_unused[2];
+	real maximum_distance;
+	struct tag_reference maximum_distance_damage;
+	struct tag_reference vehicle_hit_environment_damage_effect;
+	struct tag_reference vehicle_killed_unit_damage_effect;
+	struct tag_reference vehicle_collision_damage;
+	struct tag_reference flaming_death_damage;
+	long unused7c[4];
+	real runtime_maximum_falling_velocity;
+	real runtime_minimum_damage_velocity;
+	real runtime_maximum_damage_velocity;
+};
+typedef char gore_falling_damage_globals_size_assert[sizeof(struct gore_falling_damage_globals) == 0x98 ? 1 : -1];
+
+/* what it can splat on: the world, scenery, machines (doors, lifts), not
+water, a vehicle or a biped */
+#define GORE_IMPACT_FLAGS (FLAG(_collision_test_structure_bit) | FLAG(_collision_test_objects_bit) | \
+	FLAG(_collision_test_objects_scenery_bit) | FLAG(_collision_test_objects_machines_bit))
+#define GORE_IMPACT_ENCODE 0.01f /* wu of origin-to-epicenter a m/s */
+#define GORE_TICK_TO_MPS (30.f * GORE_METRES_PER_WORLD_UNIT)
+
+static struct gore_falling_damage_globals *gore_falling_globals(void)
+{
+	struct game_globals *globals = scenario_get_game_globals();
+
+	if (!globals || globals->falling_damage.count < 1)
+		return NULL;
+	return TAG_BLOCK_GET_ELEMENT(&globals->falling_damage, 0, struct gore_falling_damage_globals);
+}
+
+/* m/s: the splat's speed (and the deadly fall's) */
+static real gore_impact_threshold(real *lethal_out)
+{
+	struct gore_falling_damage_globals *falling = gore_falling_globals();
+	real lethal = falling && falling->runtime_maximum_damage_velocity > 0.f ?
+		falling->runtime_maximum_damage_velocity * GORE_TICK_TO_MPS : 7.6f;
+	real absolute = (real)config_real("game.gore_impact_speed");
+	real scale = (real)config_real("game.gore_impact_speed_scale");
+
+	if (lethal_out)
+		*lethal_out = lethal;
+	{
+		static long logged_for = NONE;
+
+		if (falling && logged_for != falling->falling_damage.index + (long)(falling->runtime_maximum_damage_velocity * 1e6f))
+		{
+			logged_for = falling->falling_damage.index + (long)(falling->runtime_maximum_damage_velocity * 1e6f);
+			error(_error_silent, "gore: impact splat threshold: the globals' harmful falls %.2f to %.2f wu (%.1f to %.1f m), "
+				"falling damage from %.1f m/s, full (deadly) at %.1f m/s, terminal %.1f m/s; splat from %.1f m/s",
+				falling->falling_distance_lower_bound, falling->falling_distance_upper_bound,
+				falling->falling_distance_lower_bound * GORE_METRES_PER_WORLD_UNIT, falling->falling_distance_upper_bound * GORE_METRES_PER_WORLD_UNIT,
+				falling->runtime_minimum_damage_velocity * GORE_TICK_TO_MPS, lethal,
+				falling->runtime_maximum_falling_velocity * GORE_TICK_TO_MPS,
+				absolute > 0.f ? absolute : lethal * (scale < 1.f ? 1.65f : scale));
+		}
+	}
+	if (absolute > 0.f)
+		return absolute;
+	if (scale < 1.f)
+		scale = 1.65f;
+	return lethal * scale;
+}
+
+/* the kill's damage is an impact splat's (gore_biped_impact made it):
+where, the surface's normal, and the speed (m/s) */
+static boolean gore_impact_decode(struct damage_data const *damage, real_point3d *point, real_vector3d *normal,
+	real *speed)
+{
+	struct gore_falling_damage_globals *falling = gore_falling_globals();
+	real_vector3d offset;
+	real length;
+	real direction;
+
+	if (!falling || falling->falling_damage.index == NONE || damage->definition_index != falling->falling_damage.index ||
+		!TEST_FLAG(damage->flags, _damage_kill_instantly_bit))
+	{
+		return FALSE;
+	}
+	vector_from_points3d(&damage->origin, &damage->epicenter, &offset);
+	length = magnitude3d(&offset);
+	direction = magnitude3d(&damage->direction);
+	if (length < 0.05f || length > 2.5f || direction < 0.98f || direction > 1.02f ||
+		dot_product3d(&offset, &damage->direction) < 0.99f * length * direction)
+	{
+		return FALSE;
+	}
+	*point = damage->epicenter;
+	*normal = damage->direction;
+	normalize3d(normal);
+	*speed = length / GORE_IMPACT_ENCODE;
+	return TRUE;
+}
+
+/* (gore_bleed.c's test) */
+real gore_impact_splat_speed(real *lethal)
+{
+	return gore_impact_threshold(lethal);
+}
+
+boolean gore_biped_impact(long biped_index, real_vector3d const *velocity, real_vector3d const *new_velocity,
+	real landing_velocity, real_plane3d const *ground_plane)
+{
+	struct biped_datum *biped;
+	struct gore_falling_damage_globals *falling;
+	real_vector3d delta;
+	real_vector3d normal;
+	real speed;
+	real threshold;
+	real lethal;
+	struct collision_result collision;
+	real_point3d from;
+	real_vector3d ray;
+	boolean dead;
+
+	if (!velocity || !new_velocity)
+		return FALSE;
+	vector_from_points3d((real_point3d const *)velocity, (real_point3d const *)new_velocity, &delta);
+	/* (cheap first: almost every tick of every biped ends here) */
+	speed = magnitude3d(&delta) * GORE_TICK_TO_MPS;
+	if (speed < 12.f)
+		return FALSE;
+	if (!config_boolean("game.gore_impact") || !gore_enabled() || network_game_distributed_client())
+		return FALSE;
+	threshold = gore_impact_threshold(&lethal);
+	if (speed < threshold)
+		return FALSE;
+	biped = (struct biped_datum *)object_try_and_get_and_verify_type(biped_index, _object_mask_biped);
+	if (!biped || gore_is_flood(biped->definition_index) || TEST_FLAG(biped->object.flags, _object_invisible_bit) ||
+		gore_object_is_piece(biped_index) || gore_unit_gib_pending(biped_index))
+	{
+		return FALSE;
+	}
+	falling = gore_falling_globals();
+	if (!falling || falling->falling_damage.index == NONE)
+		return FALSE;
+	/* the surface: away from it is the way the stop pushed (a landing's,
+	the ground's plane) */
+	normal = delta;
+	normalize3d(&normal);
+	if (landing_velocity * GORE_TICK_TO_MPS >= threshold * 0.8f && ground_plane && ground_plane->n.k > 0.f)
+		normal = ground_plane->n;
+	/* (the speed along it: a graze along a wall is no impact) */
+	speed = -dot_product3d(velocity, &normal) * GORE_TICK_TO_MPS;
+	if (speed < threshold)
+		return FALSE;
+	/* it must be the world (the structure, scenery): not a vehicle, not
+	another biped */
+	from = biped->object.bounding_sphere_center;
+	ray = normal;
+	scale_vector3d(&ray, -(biped->object.bounding_sphere_radius + 0.6f), &ray);
+	if (config_boolean("game.gore_log"))
+		error(_error_silent, "gore: impact check t%ld %s at %.2f %.2f %.2f: velocity %.3f %.3f %.3f -> %.3f %.3f %.3f, landing %.3f (wu/tick), %.1f m/s along %.2f %.2f %.2f",
+			game_time_get(), tag_get_name(biped->definition_index), from.x, from.y, from.z, velocity->i, velocity->j, velocity->k,
+			new_velocity->i, new_velocity->j, new_velocity->k, landing_velocity, speed, normal.i, normal.j, normal.k);
+	if (!collision_test_vector(GORE_IMPACT_FLAGS, &from, &ray, biped_index, &collision) ||
+		collision.t * magnitude3d(&ray) > biped->object.bounding_sphere_radius + 0.35f)
+	{
+		/* (a landing: its feet, a ray down from its centre) */
+		real_vector3d down = { 0.f, 0.f, -(biped->object.bounding_sphere_radius * 2.f + 0.6f) };
+
+		if (normal.k < 0.5f || !collision_test_vector(GORE_IMPACT_FLAGS, &from, &down, biped_index, &collision) ||
+			collision.t * -down.k > biped->object.bounding_sphere_radius * 1.5f + 0.35f)
+		{
+			if (config_boolean("game.gore_log"))
+				error(_error_silent, "gore: impact of %s at %.1f m/s: no world surface where it hit (an object?): no splat",
+					tag_get_name(biped->definition_index), speed);
+			return FALSE;
+		}
+	}
+	if (dot_product3d(&collision.plane.n, &normal) > 0.5f)
+		normal = collision.plane.n;
+	dead = TEST_FLAG(biped->object.damage_flags, _object_dead_bit);
+	gore_impacts_detected++;
+	error(_error_silent, "gore: impact t%ld: %s %s hit %s at %.1f m/s (deadly fall %.1f m/s, splat from %.1f m/s)",
+		game_time_get(), tag_get_name(biped->definition_index), dead ? "(a corpse)" : "(alive)",
+		normal.k > 0.6f ? "the ground" : normal.k < -0.6f ? "a ceiling" : "a wall", speed, lethal, threshold);
+	{
+		struct damage_data damage;
+
+		damage_data_new(&damage, falling->falling_damage.index);
+		damage.scale = 1.f;
+		SET_FLAG(damage.flags, _damage_kill_instantly_bit, TRUE);
+		damage.epicenter = collision.point;
+		damage.direction = normal;
+		point_from_line3d(&collision.point, &normal, -PIN(speed, 6.f, 240.f) * GORE_IMPACT_ENCODE, &damage.origin);
+		scenario_location_from_point(&damage.location, &damage.epicenter);
+		object_cause_damage(&damage, biped_index, NONE, NONE, NONE, NULL);
+	}
+	/* (gibbed: the stock fall's damage is not dealt as well) */
+	return gore_unit_gib_pending(biped_index);
+}
+
 boolean gore_unit_hit(long unit_index, struct damage_data const *damage, real normalized_damage)
 {
 	struct object_datum *unit = object_try_and_get_and_verify_type(unit_index, _object_mask_biped);
@@ -3438,6 +3707,38 @@ boolean gore_unit_hit(long unit_index, struct damage_data const *damage, real no
 	if (TEST_FLAG(unit->object.flags, _object_invisible_bit))
 		return FALSE;
 	force = gore_unit_force(unit_index, damage, normalized_damage, &type);
+	gore_last_impact = FALSE;
+	/* the impact splat's kill (gore_biped_impact, the host's; replayed on
+	each client as the host dealt it) */
+	if (!gore_is_flood(unit->definition_index) && gore_impact_decode(damage, &gore_last_impact_point,
+		&gore_last_impact_normal, &gore_last_impact_speed))
+	{
+		real threshold = gore_impact_threshold(NULL);
+
+		gore_last_impact = TRUE;
+		force = PIN(1.5f * gore_last_impact_speed / MAX(threshold, 1.f), 1.5f, 3.f);
+		gore_last_force = force;
+		gore_last_player = ((struct biped_datum *)unit)->unit.player_index != NONE;
+		gore_last_hunter = FALSE;
+		/* (the pieces fly off the surface it hit) */
+		gore_last_direction = gore_last_impact_normal;
+		gore_last_direction_valid = TRUE;
+		if (config_boolean("game.gore_log"))
+			error(_error_silent, "gore: impact on %s: %.1f m/s (splats from %.1f): gibs%s", tag_get_name(unit->definition_index),
+				gore_last_impact_speed, threshold, TEST_FLAG(unit->object.damage_flags, _object_dead_bit) ? " (a corpse)" : "");
+		for (index = 0; index < GORE_MAXIMUM_PENDING; index++)
+		{
+			if (gore_pending[index].unit_index == unit_index)
+				return TRUE;
+		}
+		for (index = 0; index < GORE_MAXIMUM_PENDING; index++)
+		{
+			if (gore_pending[index].unit_index == NONE)
+				return TRUE;
+		}
+		gore_last_impact = FALSE;
+		return FALSE;
+	}
 	/* the Flood: its own death, no blood on the vehicle, no shotgun gib */
 	if (gore_is_flood(unit->definition_index))
 	{
@@ -3526,6 +3827,11 @@ void gore_unit_gib_later(long unit_index, struct damage_data const *damage, real
 			pending->force = MAX(force, 1.f);
 			pending->player = gore_last_player;
 			pending->hunter = gore_last_hunter;
+			pending->impact = gore_last_impact;
+			pending->impact_point = gore_last_impact_point;
+			pending->impact_normal = gore_last_impact_normal;
+			pending->impact_speed = gore_last_impact_speed;
+			gore_last_impact = FALSE;
 			pending->direction = gore_last_direction_valid ? gore_last_direction : damage->direction;
 			if (normalize3d(&pending->direction) == 0.f)
 				pending->direction = *global_up3d;
