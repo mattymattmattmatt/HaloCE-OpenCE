@@ -190,6 +190,8 @@ struct gore_bleed
 	long tint_definition_index; /* a max-blend splat (the species', else the grunt's or hunter's glow): the shape of the dark and colour layers */
 	real tint_strength; /* the colour layer's brightness (0: none, the species' splat is already its colour) */
 	real_rgb_color dark_color; /* the dark layer's: what it takes away (reverse subtract) */
+	short tint_blend; /* the colour layer's blend, plus one (0: max) */
+	real dark_scale; /* the dark layer's strength times this (0: as is; the grunt's impact splat: more) */
 	/* its numbers */
 	real run_longest; /* wu */
 	real run_total;
@@ -590,7 +592,8 @@ static short bleed_blend_quad_new(struct gore_bleed const *bleed, short blend, s
 	real_point3d const corners[4], real_point2d const uv[4], real_vector3d const *normal)
 {
 	real_rgb_color const *color = blend == 4 ? &bleed->dark_color : &bleed->color;
-	real strength = blend == 4 ? bleed_dark_strength() : bleed->tint_strength;
+	real strength = blend == 4 ? bleed_dark_strength() * (bleed->dark_scale > 0.f ? bleed->dark_scale : 1.f) :
+		bleed->tint_strength;
 	long definition_index = blend == 4 ? bleed->dark_definition_index : bleed->tint_definition_index;
 	short quad;
 
@@ -1840,7 +1843,8 @@ static short impact_quad(real_point3d const plane_corners[4], real_point2d const
 		short quad;
 
 		if (layer >= base_layers)
-			quad = bleed_blend_quad_new(bleed, layer == base_layers ? 4 : 6, cluster_index, corners, uv, normal);
+			quad = bleed_blend_quad_new(bleed, layer == base_layers ? 4 : bleed->tint_blend ? (short)(bleed->tint_blend - 1) : 6,
+				cluster_index, corners, uv, normal);
 		else
 			quad = bleed_quad_new(bleed->decal_definition_index, 0, cluster_index, corners, uv, &bleed->color, normal);
 		if (quad != NONE)
@@ -1906,6 +1910,31 @@ short gore_bleed_impact_splat(long unit_definition_index, real_point3d const *po
 	bleed->definition_index = unit_definition_index;
 	bleed->species = species;
 	bleed_colors_set(bleed);
+	/* the grunt's: its cyan max splat over bright ground (sand, snow) all
+	but vanished (a max of cyan and sand is sand), and a dark layer in its
+	cyan sprite only takes green and blue (it read faint purple). Its
+	colour at full brightness and a colour layer added over it (the same
+	sprite, additive), the dark one light: a clear cyan */
+	if (!strcmp(gore_bleed_species[species].name, "grunt") && bleed->dark_definition_index != NONE)
+	{
+		real brightest = MAX(bleed->color.red, MAX(bleed->color.green, bleed->color.blue));
+		char const *dark = getenv("HALO_GORE_IMPACT_GRUNT_DARK"); /* (tuning) */
+		char const *tint = getenv("HALO_GORE_IMPACT_GRUNT_TINT");
+
+		if (brightest > 0.01f)
+		{
+			bleed->color.red = MIN(bleed->color.red / brightest, 1.f);
+			bleed->color.green = MIN(bleed->color.green / brightest, 1.f);
+			bleed->color.blue = MIN(bleed->color.blue / brightest, 1.f);
+		}
+		bleed->dark_color.red = 1.f;
+		bleed->dark_color.green = 0.85f;
+		bleed->dark_color.blue = 0.75f;
+		bleed->dark_scale = dark ? (real)atof(dark) : 0.3f;
+		bleed->tint_definition_index = bleed->dark_definition_index;
+		bleed->tint_strength = tint ? (real)atof(tint) : 1.2f;
+		bleed->tint_blend = 3 + 1; /* (add) */
+	}
 	/* its size: twice the species' body (metres: a grunt 1.1, a human
 	1.4, an elite 1.7, a hunter 2.3 across the core's radius), the level's
 	(mild three quarters, extreme a fifth more), a little more the harder
