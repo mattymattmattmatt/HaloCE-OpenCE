@@ -100,6 +100,7 @@ symbols in this file:
 #include "real_math.h"
 #include "console.h"
 #include "game_state.h"
+#include "coop_vehicles.h" /* port: preserve replacement-vehicle homes across reverts */
 #include "game.h"
 #include "tag_files.h"
 #include "cache_files.h"
@@ -183,6 +184,8 @@ typedef void (*game_state_before_save_proc)(void);
 static game_state_before_save_proc before_save_procs[] =
 {
 	dummy,
+	/* port: the host's vehicle home table follows the saved object handles. */
+	coop_vehicles_before_save,
 };
 
 static game_state_before_load_proc before_load_procs[] =
@@ -212,7 +215,9 @@ static game_state_after_load_proc after_load_procs[] =
 	scripted_hud_messages_clear,
 	/* port: the gore mod's corpse bleed forgets what it knew
 	(port/linux/game/gore_bleed.c) */
-	gore_bleed_game_state_loaded
+	gore_bleed_game_state_loaded,
+	/* port: restore matching homes or forget an unrelated disk/core load. */
+	coop_vehicles_after_load
 };
 
 /* ---------- public code */
