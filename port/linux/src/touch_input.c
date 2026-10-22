@@ -32,6 +32,7 @@ int host_touch_gyroscope_request(void);
 /* the game's (port/linux/game/touch_game.c) */
 int touch_game_cinematic_skippable(void);
 int touch_game_cinematic_playing(void);
+int touch_game_respawn_waiting(void);
 int touch_game_playing(void);
 void touch_game_button_controls(int *controls);
 
@@ -213,6 +214,12 @@ void touch_input_gamepad(XINPUT_GAMEPAD *pad)
 		{
 			skip_polls = TOUCH_PRESS_POLLS;
 			platform_log("touch: A pressed to skip a cinematic");
+		}
+		/* (or brings a dead player back, game.manual_respawn) */
+		else if (output.clicks && touch_game_respawn_waiting())
+		{
+			skip_polls = TOUCH_PRESS_POLLS;
+			platform_log("touch: A pressed to respawn");
 		}
 	}
 	if (skip_polls > 0)

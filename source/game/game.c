@@ -121,6 +121,7 @@ struct game_options;
 #include "cseries/cseries.h"
 #include "game/game.h"
 #include "gore.h"
+#include "manual_respawn.h" /* port: port/linux/game/manual_respawn.c */
 #include "hud_toggle.h" /* port: port/linux/game/hud_toggle.c */
 #include "ai/ai.h"
 #include "bink/bink_playback.h"
@@ -392,6 +393,8 @@ void game_tick(
 	profile_scope(game_tick_objects_section, objects_update();)
 	/* port: the gore prototype's pieces (port/linux/game/gore.c) */
 	gore_update();
+	/* port: game.manual_respawn's automated test (port/linux/game/manual_respawn.c) */
+	manual_respawn_test_update();
 	/* port: the HUD/reticle cycle's Back button (port/linux/game/hud_toggle.c) */
 	hud_toggle_update();
 	profile_scope(game_tick_players_after_section, players_update_after_game();)

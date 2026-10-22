@@ -513,6 +513,9 @@ static void biped_bumped_object(
 static void biped_falling_damage(
 	long biped_index,
 	real collision_velocity);
+/* port: port/linux/game/gore.c */
+boolean gore_biped_impact(long biped_index, real_vector3d const *velocity, real_vector3d const *new_velocity,
+	real landing_velocity, real_plane3d const *ground_plane);
 static void biped_start_landing(
 	long biped_index,
 	real landing_velocity);
@@ -4120,7 +4123,15 @@ static void biped_update_moving(
 			biped_index,
 			physics.bumped_object_index,
 			&physics.velocity);
-		biped_falling_damage(biped_index, physics.landing_velocity);
+		/* port: the gore mod's impact splat (port/linux/game/gore.c): a
+		biped, living or a corpse, that hits the ground or a wall far
+		faster than a deadly fall comes apart where it hit, in a big splat
+		of its blood; its death is that, not the stock fall's */
+		if (!gore_biped_impact(biped_index, &physics.velocity, &physics.new_velocity,
+			physics.landing_velocity, &physics.ground_plane))
+		{
+			biped_falling_damage(biped_index, physics.landing_velocity);
+		}
 
 		SET_FLAG(
 			biped->object.flags,

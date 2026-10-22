@@ -412,6 +412,27 @@ static const struct config_setting config_settings[] =
 		"species' blood colour, drying darker over game.gore_blood_seconds.\n"
 		"As much as game.gore_level's blood (none when it is \"off\"). Video\n"
 		"Setup's GRAPHICS screen has this as CORPSE BLEED." },
+	{ "game.gore_impact", _config_boolean, "true", "HALO_GORE_IMPACT", _environment_value, _platform_all,
+		"Gore: a biped (alive, or a body flung by a blast) that hits the ground\n"
+		"or a wall far faster than a deadly fall comes apart where it hit and\n"
+		"leaves a big splat of its blood there (the impact splat). As much as\n"
+		"game.gore_level's gore (none when it is \"off\"); never the Flood." },
+	{ "game.gore_impact_speed_scale", _config_real, "1.65", "HALO_GORE_IMPACT_SPEED_SCALE", _environment_value, _platform_all,
+		"Gore impact splat: the impact speed it takes, times the map's deadly\n"
+		"fall speed (the globals' full falling damage, 18.9 m/s on the stock\n"
+		"maps): 1.65 is 31.2 m/s, about the globals' own instant-death speed,\n"
+		"a fall some 2.7 times the height of one that just kills." },
+	{ "game.gore_impact_speed", _config_real, "0.0", "HALO_GORE_IMPACT_SPEED", _environment_value, _platform_all,
+		"Gore impact splat: the impact speed it takes in m/s, instead of\n"
+		"game.gore_impact_speed_scale (0: that)." },
+	{ "game.manual_respawn", _config_boolean, "false", "HALO_MANUAL_RESPAWN", _environment_value, _platform_all,
+		"Campaign: a dead player stays down, the camera on the body as the\n"
+		"world plays on, until they press jump (A, or the keyboard's jump key;\n"
+		"a tap on a touchscreen) after the stock few seconds; then the game\n"
+		"reverts to the last checkpoint (or brings a split-screen player\n"
+		"back) as it would have by itself. Off: the stock timing.\n"
+		"Multiplayer and network co-op always keep their own respawns.\n"
+		"Video Setup's EXTRA EFFECTS screen has this as MANUAL RESPAWN." },
 	{ "game.gore_threshold_scale", _config_real, "1.0", "HALO_GORE_THRESHOLD_SCALE", _environment_value, _platform_all,
 		"Scales the force each unit needs to come apart: 0.5 gibs at half the\n"
 		"force, 2 at twice it." },
@@ -752,6 +773,13 @@ static const struct config_setting config_settings[] =
 		_platform_all,
 		"The network test's host lists its game in the server browser, as Create\n"
 		"Game > Internet's PUBLIC does (debug.network_test \"browse\" joins it)." },
+	{ "debug.manual_respawn_test", _config_real, "0.0", "HALO_MANUAL_RESPAWN_TEST", _environment_value, _platform_all,
+		"Seconds into a map: then the first player dies, and how the respawn\n"
+		"goes is logged (game.manual_respawn's test). 0: never." },
+	{ "debug.manual_respawn_test_press", _config_real, "0.0", "HALO_MANUAL_RESPAWN_TEST_PRESS", _environment_value,
+		_platform_all,
+		"With debug.manual_respawn_test: press jump this many seconds after the\n"
+		"death. 0: never." },
 	{ "debug.gore_test", _config_real, "0.0", "HALO_GORE_TEST", _environment_value, _platform_all,
 		"Seconds into a map: then the biped nearest the player comes apart, to\n"
 		"try the gore prototype. 0: never." },
@@ -776,6 +804,16 @@ static const struct config_setting config_settings[] =
 		"With debug.gore_bleed_test_rounds: round 2 deletes a corpse mid-bleed, round 3 saves a checkpoint, round 4 reverts to it mid-bleed." },
 	{ "debug.gore_bleed_test_near", _config_string, "\"\"", "HALO_GORE_BLEED_TEST_NEAR", _environment_value, _platform_all,
 		"With debug.gore_bleed_test: \"x y\" (world units) to look for the ground around instead of the player." },
+	{ "debug.gore_impact_test", _config_real, "0.0", "HALO_GORE_IMPACT_TEST", _environment_value, _platform_all,
+		"After this many seconds: make debug.gore_impact_test_unit in front of the player and throw it at the ground (or debug.gore_impact_test_mode \"wall\": the nearest wall) at debug.gore_impact_test_speed, the player held looking on (the impact splat's test)." },
+	{ "debug.gore_impact_test_unit", _config_string, "\"marine\"", "HALO_GORE_IMPACT_TEST_UNIT", _environment_value, _platform_all,
+		"With debug.gore_impact_test: the biped (a part of its tag path)." },
+	{ "debug.gore_impact_test_mode", _config_string, "\"ground\"", "HALO_GORE_IMPACT_TEST_MODE", _environment_value, _platform_all,
+		"With debug.gore_impact_test: \"ground\" (dropped on the ground) or \"wall\" (thrown at the nearest wall)." },
+	{ "debug.gore_impact_test_speed", _config_real, "0.0", "HALO_GORE_IMPACT_TEST_SPEED", _environment_value, _platform_all,
+		"With debug.gore_impact_test: its speed in m/s (0: a quarter over the splat's; below 0: that many times the deadly fall's)." },
+	{ "debug.gore_impact_test_dead", _config_boolean, "false", "HALO_GORE_IMPACT_TEST_DEAD", _environment_value, _platform_all,
+		"With debug.gore_impact_test: killed whole first (a corpse thrown)." },
 	{ "debug.gore_object_log", _config_boolean, "false", "HALO_GORE_OBJECT_LOG", _environment_value, _platform_all,
 		"Log every unit, item, vehicle and garbage object made (host or client, local or the host's), with who made it, for 20 s after each gib." },
 	{ "debug.gore_test_repeat", _config_integer, "0", "HALO_GORE_TEST_REPEAT", _environment_value, _platform_all,
