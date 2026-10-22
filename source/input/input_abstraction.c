@@ -313,6 +313,17 @@ byte input_abstraction_port_accept(
 		keyboard_controls[controller_index].ticks[_game_control_jump] : 0;
 }
 
+/* port: the controller's button the profile puts jump on (A unless its
+layout moves it), or NUMBER_OF_GAMEPAD_BUTTONS for none: game.manual_respawn's
+button (port/linux/game/manual_respawn.c) */
+short input_abstraction_port_jump_button(
+	short controller_index)
+{
+	return controller_index >= 0 && controller_index < MAXIMUM_GAMEPADS ?
+		input_abstraction_globals.player_control_preferences[controller_index].
+			game_control_to_xbox_buttons[_game_control_jump] : NUMBER_OF_GAMEPAD_BUTTONS;
+}
+
 /* port: how far the controller's player pulls the fire control, which a
 trigger with an analog rate of fire reads (weapons.c): a game input state's
 buttons count the ticks a control is held, not its pressure, so a click

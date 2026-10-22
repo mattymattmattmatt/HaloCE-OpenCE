@@ -57,3 +57,11 @@ void touch_game_button_controls(int *controls)
 		controls[index] = buttons[index];
 	}
 }
+
+/* asks whether a dead campaign player is being asked to respawn
+(game.manual_respawn, port/linux/game/manual_respawn.c): a tap presses A */
+unsigned char manual_respawn_waiting(void);
+int touch_game_respawn_waiting(void)
+{
+	return cinematic_globals && game_in_progress() && manual_respawn_waiting();
+}

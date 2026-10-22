@@ -400,6 +400,14 @@ static const struct config_setting config_settings[] =
 		"species' blood colour, drying darker over game.gore_blood_seconds.\n"
 		"As much as game.gore_level's blood (none when it is \"off\"). Video\n"
 		"Setup's GRAPHICS screen has this as CORPSE BLEED." },
+	{ "game.manual_respawn", _config_boolean, "false", "HALO_MANUAL_RESPAWN", _environment_value, _platform_all,
+		"Campaign: a dead player stays down, the camera on the body as the\n"
+		"world plays on, until they press jump (A, or the keyboard's jump key;\n"
+		"a tap on a touchscreen) after the stock few seconds; then the game\n"
+		"reverts to the last checkpoint (or brings a split-screen player\n"
+		"back) as it would have by itself. Off: the stock timing.\n"
+		"Multiplayer and network co-op always keep their own respawns.\n"
+		"Video Setup's EXTRA EFFECTS screen has this as MANUAL RESPAWN." },
 	{ "game.gore_threshold_scale", _config_real, "1.0", "HALO_GORE_THRESHOLD_SCALE", _environment_value, _platform_all,
 		"Scales the force each unit needs to come apart: 0.5 gibs at half the\n"
 		"force, 2 at twice it." },
@@ -740,6 +748,13 @@ static const struct config_setting config_settings[] =
 		_platform_all,
 		"The network test's host lists its game in the server browser, as Create\n"
 		"Game > Internet's PUBLIC does (debug.network_test \"browse\" joins it)." },
+	{ "debug.manual_respawn_test", _config_real, "0.0", "HALO_MANUAL_RESPAWN_TEST", _environment_value, _platform_all,
+		"Seconds into a map: then the first player dies, and how the respawn\n"
+		"goes is logged (game.manual_respawn's test). 0: never." },
+	{ "debug.manual_respawn_test_press", _config_real, "0.0", "HALO_MANUAL_RESPAWN_TEST_PRESS", _environment_value,
+		_platform_all,
+		"With debug.manual_respawn_test: press jump this many seconds after the\n"
+		"death. 0: never." },
 	{ "debug.gore_test", _config_real, "0.0", "HALO_GORE_TEST", _environment_value, _platform_all,
 		"Seconds into a map: then the biped nearest the player comes apart, to\n"
 		"try the gore prototype. 0: never." },
