@@ -67,6 +67,12 @@ static unsigned long manual_respawn_asked_frame = 0;
 static unsigned long manual_respawn_frame = 0;
 /* each controller's jump, held at the last look */
 static boolean manual_respawn_held[MAXIMUM_GAMEPADS];
+/* each local player's look while it waits, not yet given to its death
+camera (radians) */
+static real_euler_angles2d manual_respawn_look[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
+/* (the test's log: the last death camera it turned) */
+static real_euler_angles2d manual_respawn_look_facing;
+static long manual_respawn_look_turns = 0;
 
 /* ---------- private code */
 
@@ -263,6 +269,62 @@ void manual_respawn_draw(
 	rasterizer_draw_unicode_string(&bounds, NULL, NULL, 0, text);
 }
 
+/* the death camera's pitch while the player turns it: always above the
+body looking down at it (the stock camera picks 27 to 63 degrees down),
+from almost overhead to nearly level */
+#define MANUAL_RESPAWN_LOOK_PITCH_HIGHEST (-1.40f)
+#define MANUAL_RESPAWN_LOOK_PITCH_LOWEST (-0.10f)
+
+void manual_respawn_look_add(
+	short local_player_index,
+	real yaw,
+	real pitch)
+{
+	if (local_player_index < 0 || local_player_index >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+		return;
+	if (!manual_respawn_waiting() || game_time_get_paused() || !(yaw == yaw) || !(pitch == pitch) ||
+		fabsf(yaw) > 1.f || fabsf(pitch) > 1.f)
+	{
+		manual_respawn_look[local_player_index].yaw = 0.f;
+		manual_respawn_look[local_player_index].pitch = 0.f;
+		return;
+	}
+	manual_respawn_look[local_player_index].yaw += yaw;
+	manual_respawn_look[local_player_index].pitch += pitch;
+}
+
+boolean manual_respawn_look_apply(
+	long player_index,
+	real_euler_angles2d *facing)
+{
+	short local_player_index;
+
+	if (!facing || player_index == NONE || !manual_respawn_waiting())
+		return FALSE;
+	for (local_player_index = 0; local_player_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS; local_player_index++)
+	{
+		real_euler_angles2d *look = &manual_respawn_look[local_player_index];
+
+		if (local_player_get_player_index(local_player_index) != player_index)
+			continue;
+		if (look->yaw == 0.f && look->pitch == 0.f)
+			return FALSE;
+		facing->yaw += look->yaw;
+		while (facing->yaw < 0.f)
+			facing->yaw += 2.f * _pi;
+		while (facing->yaw >= 2.f * _pi)
+			facing->yaw -= 2.f * _pi;
+		facing->pitch = PIN(facing->pitch + look->pitch, MANUAL_RESPAWN_LOOK_PITCH_HIGHEST,
+			MANUAL_RESPAWN_LOOK_PITCH_LOWEST);
+		look->yaw = 0.f;
+		look->pitch = 0.f;
+		manual_respawn_look_facing = *facing;
+		manual_respawn_look_turns++;
+		return TRUE;
+	}
+	return FALSE;
+}
+
 /* ---------- the automated test (debug.manual_respawn_test)
 
 Kills the first local player that many seconds into a map, presses jump
@@ -311,6 +373,14 @@ void manual_respawn_test_update(
 		platform_log("manual respawn test: pressing jump at tick %ld (%.1f s after the death)",
 			tick, (tick - death_tick) / (double)TICKS_PER_SECOND);
 	}
+	/* (debug.manual_respawn_test_look: a steady turn, radians a tick, as a
+	held stick would, with a little pitch up) */
+	if (killed && config_real("debug.manual_respawn_test_look") != 0.0 && manual_respawn_waiting())
+	{
+		real rate = (real)config_real("debug.manual_respawn_test_look");
+
+		manual_respawn_look_add(local_player_get_next(NONE), rate, rate * 0.25f);
+	}
 	if (killed && (last_report < 0 || tick - last_report >= 2 * TICKS_PER_SECOND || tick < last_report))
 	{
 		struct object_iterator iterator;
@@ -344,6 +414,9 @@ void manual_respawn_test_update(
 			tick, (tick - death_tick) / (double)TICKS_PER_SECOND,
 			player->unit_index != NONE ? "ALIVE" : "dead", manual_respawn_waiting() ? 1 : 0,
 			living, moved, projectiles, (long)player->respawn_timer);
+		if (manual_respawn_look_turns)
+			platform_log("manual respawn test: the death camera turned %ld times, facing yaw %.2f pitch %.2f",
+				manual_respawn_look_turns, manual_respawn_look_facing.yaw, manual_respawn_look_facing.pitch);
 		last_report = tick;
 	}
 }

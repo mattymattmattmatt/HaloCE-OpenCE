@@ -212,6 +212,7 @@ symbols in this file:
 #include "real_math.h"
 #include "passenger_camera.h" /* port: port/linux/game/passenger_camera.c; after the limit2d alias above */
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
+#include "manual_respawn.h" /* port: port/linux/game/manual_respawn.c */
 
 /* ---------- constants */
 
@@ -682,6 +683,16 @@ static void handle_one_player_input(
 		}
 	}
 
+	/* port: a dead player's look, while game.manual_respawn waits, turns its
+	death camera (manual_respawn.c; nothing otherwise) */
+	if (player->unit_index == NONE && local_player_get_player_index(local_player_index) != NONE)
+	{
+		manual_respawn_look_add(
+			local_player_index,
+			input.facing_delta.yaw,
+			input.facing_delta.pitch);
+	}
+
 	if (player->unit_index != NONE)
 	{
 		struct unit_datum *unit = unit_get(player->unit_index);
@@ -1135,6 +1146,18 @@ static void get_local_player_input_blob(
 							(1.f / TICKS_PER_SECOND);
 					}
 				}
+			}
+			/* port: dead and waiting for game.manual_respawn's button, the
+			look turns the death camera (manual_respawn.c), at the player's
+			own rates */
+			else if (manual_respawn_waiting())
+			{
+				look_yaw_rate = DEGREES_TO_RADIANS(
+					player_look_yaw_rate[local_player_index]) *
+					(1.f / TICKS_PER_SECOND);
+				look_pitch_rate = DEGREES_TO_RADIANS(
+					player_look_pitch_rate[local_player_index]) *
+					(1.f / TICKS_PER_SECOND);
 			}
 
 			input->throttle.i = input_state->forward_movement;
