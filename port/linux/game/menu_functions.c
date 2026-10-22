@@ -1678,7 +1678,8 @@ static void profile_gamepad_layout(struct widget_instance *picture)
 	struct player_profile *profile = player_ui_get_edit_player_profile();
 	short frame = picture->animation.current_frame_index;
 
-	if (frame == PROFILE_GAMEPAD_FRAME ||
+	/* Gamepad Setup's row keeps its own preview picture (frame 2); only the layout frames follow the button preset */
+	if (
 		(frame >= PROFILE_FIRST_LAYOUT_FRAME && frame < PROFILE_FIRST_LAYOUT_FRAME + PROFILE_LAYOUT_FRAMES))
 	{
 		byte preset = profile ? profile->controller_settings.button_preset : (byte)_button_preset_standard;
