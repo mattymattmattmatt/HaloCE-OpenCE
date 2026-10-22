@@ -768,6 +768,11 @@ static const struct config_setting config_settings[] =
 		_platform_all,
 		"With debug.manual_respawn_test: press jump this many seconds after the\n"
 		"death. 0: never." },
+	{ "debug.manual_respawn_test_look", _config_real, "0.0", "HALO_MANUAL_RESPAWN_TEST_LOOK", _environment_value,
+		_platform_all,
+		"With debug.manual_respawn_test: while the prompt waits, turn the dead\n"
+		"player's look this many radians a tick (a held stick), which turns the\n"
+		"death camera round the body. 0: never." },
 	{ "debug.gore_test", _config_real, "0.0", "HALO_GORE_TEST", _environment_value, _platform_all,
 		"Seconds into a map: then the biped nearest the player comes apart, to\n"
 		"try the gore prototype. 0: never." },
