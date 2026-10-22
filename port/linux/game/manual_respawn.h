@@ -30,6 +30,21 @@ void manual_respawn_draw(
 boolean manual_respawn_waiting(
 	void);
 
+/* the look input of a dead local player while it waits (player_control.c
+hands it over: the stick, the mouse, the touch controls' swipe and the
+gyroscope, as they would turn a living one) */
+void manual_respawn_look_add(
+	short local_player_index,
+	real yaw,
+	real pitch);
+
+/* the death camera (dead_camera.c) of that player, while it waits: turned
+round the body by that look, its pitch kept above it. FALSE (untouched)
+when it does not wait: the stock camera, as it was */
+boolean manual_respawn_look_apply(
+	long player_index,
+	real_euler_angles2d *facing);
+
 /* debug.manual_respawn_test, each tick (game.c) */
 void manual_respawn_test_update(
 	void);

@@ -25,6 +25,7 @@ symbols in this file:
 #include "game/players.h"
 #include "memory/data.h"
 #include "objects/objects.h"
+#include "manual_respawn.h" /* port: port/linux/game/manual_respawn.c */
 
 /* ---------- constants */
 
@@ -135,6 +136,10 @@ void dead_camera_update(
 	struct dead_camera_command *result)
 {
 	struct object_datum *unit;
+
+	/* port: game.manual_respawn's wait: the player's look turns the
+	camera round the body (above it), as long as it waits */
+	manual_respawn_look_apply(camera->player_index, &camera->facing);
 
 	unit = camera->unit_index == NONE
 		? NULL
