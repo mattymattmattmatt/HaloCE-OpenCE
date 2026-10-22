@@ -384,6 +384,7 @@ symbols in this file:
 #include "network_chat.h" /* port: port/linux/game/network_chat.c */
 #include "network_aim_assist.h" /* port: port/linux/game/network_aim_assist.c */
 #include "map_share.h" /* port: port/linux/game/map_share.c */
+#include "manual_respawn.h" /* port: port/linux/game/manual_respawn.c */
 #include "profile_sections.h" /* port: port/linux/include/profile_sections.h */
 #ifdef HALO_PROFILE
 #include "profile_trace.h" /* port: port/linux/src/profile_trace.c */
@@ -2087,6 +2088,16 @@ static void main_saving_map_private(
 static void main_save_map_private(
 	void)
 {
+	/* port: with game.manual_respawn the dead player can lie there for
+	minutes, and the scripts go on asking for checkpoints: one saved now
+	would revert to the player dead. Dropped, as main_lost_map drops the
+	one asked for before the death (the stock delay was too short for
+	another to come) */
+	if (main_globals.lost_map && manual_respawn_applies_now())
+	{
+		main_globals.saving_map = FALSE;
+		return;
+	}
 	if (!game_time_get_paused())
 	{
 		boolean save_map_safely = main_globals.save_map_safely;
@@ -2193,7 +2204,10 @@ static void main_lost_map_private(
 {
 	if (main_death_timer_expired(
 		&main_globals.loss_timer, &main_loss_last_tick,
-		!game_time_get_paused()))
+		!game_time_get_paused()) &&
+		/* port: game.manual_respawn waits, past the delay, for the button
+		(manual_respawn.c; the campaign on this machine only) */
+		!manual_respawn_hold())
 	{
 		main_globals.lost_map = FALSE;
 		main_globals.loss_timer = 0;
@@ -2215,6 +2229,7 @@ static void main_respawn_private(
 	if (main_death_timer_expired(
 		&main_globals.respawn_timer, &main_respawn_last_tick,
 		!game_time_get_paused() && !cinematic_in_progress()) &&
+		!manual_respawn_hold() &&
 		players_respawn_coop())
 	{
 		main_globals.respawn = FALSE;
