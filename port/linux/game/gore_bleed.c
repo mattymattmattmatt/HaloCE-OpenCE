@@ -190,6 +190,8 @@ struct gore_bleed
 	long tint_definition_index; /* a max-blend splat (the species', else the grunt's or hunter's glow): the shape of the dark and colour layers */
 	real tint_strength; /* the colour layer's brightness (0: none, the species' splat is already its colour) */
 	real_rgb_color dark_color; /* the dark layer's: what it takes away (reverse subtract) */
+	short tint_blend; /* the colour layer's blend, plus one (0: max) */
+	real dark_scale; /* the dark layer's strength times this (0: as is; the grunt's impact splat: more) */
 	/* its numbers */
 	real run_longest; /* wu */
 	real run_total;
@@ -590,7 +592,8 @@ static short bleed_blend_quad_new(struct gore_bleed const *bleed, short blend, s
 	real_point3d const corners[4], real_point2d const uv[4], real_vector3d const *normal)
 {
 	real_rgb_color const *color = blend == 4 ? &bleed->dark_color : &bleed->color;
-	real strength = blend == 4 ? bleed_dark_strength() : bleed->tint_strength;
+	real strength = blend == 4 ? bleed_dark_strength() * (bleed->dark_scale > 0.f ? bleed->dark_scale : 1.f) :
+		bleed->tint_strength;
 	long definition_index = blend == 4 ? bleed->dark_definition_index : bleed->tint_definition_index;
 	short quad;
 
@@ -1220,29 +1223,12 @@ static void bleed_find_nodes(struct gore_bleed *bleed)
 static void bleed_test_aim(struct gore_bleed const *bleed);
 
 /* still: the bleed begins (its slope, its volume, its pool) */
-static void bleed_settle(struct gore_bleed *bleed)
+/* its blood's look: the species' splat, colour, and the dark and colour
+layers' (bleed_blend_quad_new) */
+static void bleed_colors_set(struct gore_bleed *bleed)
 {
 	struct gore_bleed_species const *species = &gore_bleed_species[bleed->species];
-	real_point3d torso;
-	real_point3d ground;
-	short neck = NONE;
 
-	bleed_torso(bleed->unit_index, &torso);
-	bleed_find_nodes(bleed);
-	gore_unit_headless_neck(bleed->unit_index, &neck);
-	/* the wound: the neck of a headless body, else the torso */
-	bleed->wound = torso;
-	if (bleed->headless && neck != NONE &&
-		neck < (short)(object_get(bleed->unit_index)->object.node_matrices.size / (long)sizeof(real_matrix4x3)))
-		bleed->wound = object_get_node_matrices(bleed->unit_index)[neck].position;
-	if (!bleed_fit_plane(&bleed->wound, 0.4f, &bleed->slope, &bleed->downhill, &bleed->normal, &ground))
-	{
-		bleed_retire(bleed);
-		return;
-	}
-	gore_bleed_started++;
-	bleed->wound = ground;
-	bleed->volume = species->area / (WU * WU) * bleed_volume_scale() * (bleed->headless ? 1.25f : 1.f);
 	gore_species_blood_color(bleed->definition_index, &bleed->color);
 	bleed->decal_definition_index = tag_loaded(DECAL_TAG, species->decal_name);
 	if (bleed->decal_definition_index == NONE && species->decal_fallback)
@@ -1285,6 +1271,32 @@ static void bleed_settle(struct gore_bleed *bleed)
 	{
 		bleed->color.red = 1.f; bleed->color.green = 0.95f; bleed->color.blue = 0.25f;
 	}
+}
+
+static void bleed_settle(struct gore_bleed *bleed)
+{
+	struct gore_bleed_species const *species = &gore_bleed_species[bleed->species];
+	real_point3d torso;
+	real_point3d ground;
+	short neck = NONE;
+
+	bleed_torso(bleed->unit_index, &torso);
+	bleed_find_nodes(bleed);
+	gore_unit_headless_neck(bleed->unit_index, &neck);
+	/* the wound: the neck of a headless body, else the torso */
+	bleed->wound = torso;
+	if (bleed->headless && neck != NONE &&
+		neck < (short)(object_get(bleed->unit_index)->object.node_matrices.size / (long)sizeof(real_matrix4x3)))
+		bleed->wound = object_get_node_matrices(bleed->unit_index)[neck].position;
+	if (!bleed_fit_plane(&bleed->wound, 0.4f, &bleed->slope, &bleed->downhill, &bleed->normal, &ground))
+	{
+		bleed_retire(bleed);
+		return;
+	}
+	gore_bleed_started++;
+	bleed->wound = ground;
+	bleed->volume = species->area / (WU * WU) * bleed_volume_scale() * (bleed->headless ? 1.25f : 1.f);
+	bleed_colors_set(bleed);
 	/* the pool's share: all of it on flat ground, less the steeper */
 	if (bleed->slope < GORE_BLEED_FLAT_DEGREES)
 		bleed->pool_share = 1.f;
@@ -1750,6 +1762,284 @@ static void bleed_check_quads(void)
 	}
 }
 
+/* ---------- the impact splat (gore.c: a biped that hit the ground or a
+wall far faster than a deadly fall; it comes apart there)
+
+One big splat on the surface it hit, along that surface (a wall's too, not
+only the ground's): a core of the species' blood a body and a half to two
+across (its size: the species' body, the level's, a little more the
+faster), with streaks thrown radially out of it (more the way it was
+going), each ending in a blob, and droplets beyond. Drawn as the bleed's
+pools are (the species' splat, then the dark and the colour layers), and
+it dries the same way (bleed_dry). Local, like every bleed quad. */
+
+#define GORE_IMPACT_MAXIMUM_STREAKS 18
+
+static struct gore_bleed gore_bleed_impact; /* its look (bleed_colors_set) */
+
+/* a point of the splat's plane put on the surface below it along the
+normal; FALSE if there is none near (over a ledge's edge) */
+static boolean impact_on_surface(real_point3d const *point, real_vector3d const *normal, real_point3d *result)
+{
+	struct collision_result collision;
+	real_point3d start;
+	real_vector3d ray;
+
+	point_from_line3d(point, normal, 0.25f, &start);
+	ray = *normal;
+	scale_vector3d(&ray, -0.6f, &ray);
+	if (collision_test_vector(GORE_BLEED_FLAGS, &start, &ray, NONE, &collision) &&
+		dot_product3d(&collision.plane.n, normal) > 0.4f)
+	{
+		point_from_line3d(&collision.point, &collision.plane.n, GORE_BLEED_LIFT * 1.5f, result);
+		return TRUE;
+	}
+	point_from_line3d(point, normal, GORE_BLEED_LIFT * 1.5f, result);
+	return FALSE;
+}
+
+static short impact_cluster(real_point3d const *point, real_vector3d const *normal)
+{
+	struct location location;
+	real_point3d above;
+
+	point_from_line3d(point, normal, 0.05f, &above);
+	scenario_location_from_point(&location, &above);
+	return location.cluster_index;
+}
+
+/* one quad of the splat (corners in the plane, around), in each layer:
+base_layers of the species' splat, then the dark and the colour ones; how
+many were made */
+static short impact_quad(real_point3d const plane_corners[4], real_point2d const uv[4], real_vector3d const *normal,
+	short base_layers)
+{
+	struct gore_bleed *bleed = &gore_bleed_impact;
+	real_point3d corners[4];
+	real_point3d middle = { 0.f, 0.f, 0.f };
+	short missed = 0;
+	short corner;
+	short cluster_index;
+	short layer;
+	short extra = bleed_extra_layers(bleed);
+	short made = 0;
+
+	for (corner = 0; corner < 4; corner++)
+	{
+		if (!impact_on_surface(&plane_corners[corner], normal, &corners[corner]))
+			missed++;
+		middle.x += plane_corners[corner].x * 0.25f;
+		middle.y += plane_corners[corner].y * 0.25f;
+		middle.z += plane_corners[corner].z * 0.25f;
+	}
+	/* (off the edge: not hung in the air) */
+	if (missed >= 2)
+		return 0;
+	cluster_index = impact_cluster(&middle, normal);
+	if (cluster_index == NONE)
+		return 0;
+	for (layer = 0; layer < base_layers + extra; layer++)
+	{
+		short quad;
+
+		if (layer >= base_layers)
+			quad = bleed_blend_quad_new(bleed, layer == base_layers ? 4 : bleed->tint_blend ? (short)(bleed->tint_blend - 1) : 6,
+				cluster_index, corners, uv, normal);
+		else
+			quad = bleed_quad_new(bleed->decal_definition_index, 0, cluster_index, corners, uv, &bleed->color, normal);
+		if (quad != NONE)
+			made++;
+	}
+	return made;
+}
+
+/* a round blob (the whole sprite, inset) */
+static short impact_blob(real_point3d const *center, real_vector3d const *normal, real_vector3d const *axis,
+	real radius, short base_layers)
+{
+	static real const cu[4] = { 0.f, 1.f, 1.f, 0.f };
+	static real const cv[4] = { 0.f, 0.f, 1.f, 1.f };
+	real_point3d corners[4];
+	real_point2d uv[4];
+	real_vector3d side;
+	short corner;
+
+	cross_product3d(normal, axis, &side);
+	for (corner = 0; corner < 4; corner++)
+	{
+		point_from_line3d(center, axis, (cv[corner] * 2.f - 1.f) * radius, &corners[corner]);
+		point_from_line3d(&corners[corner], &side, (cu[corner] * 2.f - 1.f) * radius, &corners[corner]);
+		uv[corner].x = 0.04f + cu[corner] * 0.92f;
+		uv[corner].y = 0.04f + cv[corner] * 0.92f;
+	}
+	return impact_quad(corners, uv, normal, base_layers);
+}
+
+short gore_bleed_impact_splat(long unit_definition_index, real_point3d const *point, real_vector3d const *normal_in,
+	real speed, real threshold)
+{
+	struct gore_bleed *bleed = &gore_bleed_impact;
+	real level = gore_bleed_level_scale();
+	real_vector3d normal = *normal_in;
+	real_vector3d axis;
+	real_vector3d side;
+	real_point3d center;
+	real radius;
+	real hard;
+	short species;
+	short base_layers;
+	short streaks;
+	short made = 0;
+	short index;
+
+	if (level <= 0.f || !config_boolean("game.gore_impact"))
+		return 0;
+	species = bleed_species_get(unit_definition_index);
+	if (species == NONE)
+	{
+		char const *name = tag_get_name(unit_definition_index);
+
+		/* (the Flood never: gore.c never asks for it) */
+		if (name && strstr(name, "flood"))
+			return 0;
+		species = (short)(NUMBEROF(gore_bleed_species) - 1);
+	}
+	bleed_normalize(&normal, global_up3d);
+	csmemset(bleed, 0, sizeof(*bleed));
+	bleed->unit_index = NONE;
+	bleed->definition_index = unit_definition_index;
+	bleed->species = species;
+	bleed_colors_set(bleed);
+	/* the grunt's: its cyan max splat over bright ground (sand, snow) all
+	but vanished (a max of cyan and sand is sand), and a dark layer in its
+	cyan sprite only takes green and blue (it read faint purple). Its
+	colour at full brightness and a colour layer added over it (the same
+	sprite, additive), the dark one light: a clear cyan */
+	if (!strcmp(gore_bleed_species[species].name, "grunt") && bleed->dark_definition_index != NONE)
+	{
+		real brightest = MAX(bleed->color.red, MAX(bleed->color.green, bleed->color.blue));
+		char const *dark = getenv("HALO_GORE_IMPACT_GRUNT_DARK"); /* (tuning) */
+		char const *tint = getenv("HALO_GORE_IMPACT_GRUNT_TINT");
+
+		if (brightest > 0.01f)
+		{
+			bleed->color.red = MIN(bleed->color.red / brightest, 1.f);
+			bleed->color.green = MIN(bleed->color.green / brightest, 1.f);
+			bleed->color.blue = MIN(bleed->color.blue / brightest, 1.f);
+		}
+		bleed->dark_color.red = 1.f;
+		bleed->dark_color.green = 0.85f;
+		bleed->dark_color.blue = 0.75f;
+		bleed->dark_scale = dark ? (real)atof(dark) : 0.3f;
+		bleed->tint_definition_index = bleed->dark_definition_index;
+		bleed->tint_strength = tint ? (real)atof(tint) : 1.2f;
+		bleed->tint_blend = 3 + 1; /* (add) */
+	}
+	/* its size: twice the species' body (metres: a grunt 1.1, a human
+	1.4, an elite 1.7, a hunter 2.3 across the core's radius), the level's
+	(mild three quarters, extreme a fifth more), a little more the harder
+	it hit (up to a third more at twice the splat's speed) */
+	hard = PIN(threshold > 0.f ? speed / threshold : 1.f, 1.f, 2.f);
+	radius = gore_bleed_species[species].body * 2.f / WU;
+	radius *= level < 0.75f ? 0.75f : level > 1.1f ? 1.2f : 1.f;
+	radius *= 1.f + 0.33f * (hard - 1.f);
+	/* (the decals' sprite fills about the middle of its square: drawn
+	wider than the blood) */
+	radius *= 1.25f;
+	base_layers = (short)(level >= 0.75f ? 2 : 1);
+	if (bleed->dark_definition_index != NONE && bleed_dark_strength() > 0.f)
+		base_layers = 1;
+	streaks = (short)(level < 0.75f ? 7 : level > 1.1f ? 14 : 10);
+	if (strstr(gore_bleed_species[species].name, "hunter"))
+		streaks += 4;
+	streaks = (short)MIN(streaks, GORE_IMPACT_MAXIMUM_STREAKS);
+	/* the plane's axes (random about the normal) */
+	axis = fabsf(normal.k) < 0.9f ? *global_up3d : *global_forward3d;
+	bleed_project(&axis, &normal);
+	bleed_normalize(&axis, global_forward3d);
+	bleed_rotate_about(&axis, &normal, bleed_random(0.f, 6.283f));
+	cross_product3d(&normal, &axis, &side);
+	center = *point;
+	/* the core: a grid over the surface, the sprite across it all */
+	{
+		short grid = radius > 0.3f ? 4 : 3;
+		short x, y;
+
+		for (y = 0; y < grid; y++)
+		{
+			for (x = 0; x < grid; x++)
+			{
+				static real const cu[4] = { 0.f, 1.f, 1.f, 0.f };
+				static real const cv[4] = { 0.f, 0.f, 1.f, 1.f };
+				real_point3d corners[4];
+				real_point2d uv[4];
+				short corner;
+
+				for (corner = 0; corner < 4; corner++)
+				{
+					real u = ((real)x + cu[corner]) / (real)grid;
+					real v = ((real)y + cv[corner]) / (real)grid;
+
+					point_from_line3d(&center, &axis, (v * 2.f - 1.f) * radius, &corners[corner]);
+					point_from_line3d(&corners[corner], &side, (u * 2.f - 1.f) * radius, &corners[corner]);
+					uv[corner].x = 0.06f + u * 0.88f;
+					uv[corner].y = 0.06f + v * 0.88f;
+				}
+				made += impact_quad(corners, uv, &normal, (short)(base_layers + 1));
+			}
+		}
+	}
+	/* the streaks, out of the core's rim, and a blob at each's end; then
+	droplets beyond */
+	for (index = 0; index < streaks; index++)
+	{
+		real angle = (real)index * 6.283f / (real)streaks + bleed_random(-0.25f, 0.25f);
+		real_vector3d out = axis;
+		real_vector3d across;
+		real start = radius * bleed_random(0.35f, 0.5f);
+		real length = radius * bleed_random(0.45f, 1.25f) * (0.8f + 0.2f * hard);
+		real width = radius * bleed_random(0.1f, 0.18f);
+		real_point3d a, b, corners[4];
+		real_point2d uv[4];
+
+		bleed_rotate_about(&out, &normal, angle);
+		cross_product3d(&normal, &out, &across);
+		point_from_line3d(&center, &out, start, &a);
+		point_from_line3d(&center, &out, start + length, &b);
+		/* (narrow at the core, wide at its end) */
+		point_from_line3d(&a, &across, -width * 0.4f, &corners[0]);
+		point_from_line3d(&a, &across, width * 0.4f, &corners[1]);
+		point_from_line3d(&b, &across, width, &corners[2]);
+		point_from_line3d(&b, &across, -width, &corners[3]);
+		uv[0].x = 0.32f; uv[0].y = 0.15f;
+		uv[1].x = 0.68f; uv[1].y = 0.15f;
+		uv[2].x = 0.72f; uv[2].y = 0.85f;
+		uv[3].x = 0.28f; uv[3].y = 0.85f;
+		made += impact_quad(corners, uv, &normal, base_layers);
+		made += impact_blob(&b, &normal, &out, width * 1.3f, base_layers);
+		/* a droplet or two beyond it */
+		{
+			short drops = (short)(level > 1.1f ? 2 : 1);
+			short drop;
+
+			for (drop = 0; drop < drops; drop++)
+			{
+				real_point3d at;
+				real_vector3d way = out;
+
+				bleed_rotate_about(&way, &normal, bleed_random(-0.3f, 0.3f));
+				point_from_line3d(&center, &way, start + length + radius * bleed_random(0.2f, 0.9f), &at);
+				made += impact_blob(&at, &normal, &way, MAX(radius * bleed_random(0.05f, 0.11f), 0.02f), 1);
+			}
+		}
+	}
+	if (bleed_log())
+		error(_error_silent, "gore bleed: impact splat of %s: species %s, radius %.2f m, %d streaks, %d quads (%s)",
+			tag_get_name(unit_definition_index), gore_bleed_species[species].name[0] ? gore_bleed_species[species].name : "other",
+			radius * WU, streaks, made, normal.k > 0.6f ? "ground" : "wall");
+	return made;
+}
+
 /* ---------- the test */
 
 static long bleed_test_player(void)
@@ -2203,6 +2493,281 @@ static void bleed_cost_report(void)
 
 /* a checkpoint revert or a loaded game (game_state.c, after it loads):
 the next update starts over */
+
+/* ---------- the impact splat's test (debug.gore_impact_test seconds):
+debug.gore_impact_test_unit (a part of its tag path) made in front of the
+player and thrown at debug.gore_impact_test_speed m/s (0: a quarter over
+the splat's speed; below 0: that many times the deadly fall's) at the
+ground below it ("ground") or the nearest wall ("wall"), alive or
+(debug.gore_impact_test_dead) a corpse; the player held looking on */
+
+real gore_impact_splat_speed(real *lethal);
+static short gore_impact_test_state;
+static long gore_impact_test_unit = NONE;
+static long gore_impact_test_time;
+static real_point3d gore_impact_test_place;
+static real_vector3d gore_impact_test_facing;
+static real_point3d gore_impact_test_target;
+static real_vector3d gore_impact_test_velocity;
+static real_point3d gore_impact_test_start;
+static short gore_impact_test_tries;
+
+static void impact_test_update(void)
+{
+	real seconds = (real)config_real("debug.gore_impact_test");
+	long player_index;
+	struct object_datum *player;
+	boolean wall = !strcmp(config_string("debug.gore_impact_test_mode"), "wall");
+
+	if (seconds <= 0.f)
+		return;
+	player_index = bleed_test_player();
+	if (player_index == NONE)
+		return;
+	player = object_get(player_index);
+	if (gore_impact_test_state == 1)
+	{
+		real_vector3d forward = gore_impact_test_facing;
+
+		/* (a biped just made stands: its first ticks' physics take a
+		thrown velocity away; it is thrown again once it is airborne) */
+		if (game_time_get() - gore_impact_test_time <= 3)
+		{
+			struct biped_datum *thrown = (struct biped_datum *)object_try_and_get_and_verify_type(gore_impact_test_unit, _object_mask_biped);
+
+			if (thrown)
+				thrown->object.translational_velocity = gore_impact_test_velocity;
+		}
+
+		forward.k = 0.f;
+		bleed_normalize(&forward, global_forward3d);
+		object_set_position(player_index, &gore_impact_test_place, &forward, global_up3d);
+		player->object.translational_velocity = *global_zero_vector3d;
+		player_control_set_facing(0, &gore_impact_test_facing);
+		/* (stuck where it was made: something there holds bipeds up that
+		rays miss; the test goes again elsewhere) */
+		if (game_time_get() == gore_impact_test_time + 8 && !wall && gore_impact_test_tries < 12)
+		{
+			struct object_datum *unit = object_try_and_get_and_verify_type(gore_impact_test_unit, _object_mask_biped);
+
+			if (unit && unit->object.position.z > gore_impact_test_start.z - 0.5f &&
+				!TEST_FLAG(unit->object.flags, _object_invisible_bit))
+			{
+				error(_error_silent, "gore impact test: stuck at %.2f %.2f %.2f (held up): again elsewhere",
+					unit->object.position.x, unit->object.position.y, unit->object.position.z);
+				object_delete(gore_impact_test_unit);
+				gore_impact_test_unit = NONE;
+				gore_impact_test_tries++;
+				gore_impact_test_state = 0;
+				return;
+			}
+		}
+		if (game_time_get() <= gore_impact_test_time + 90 && (game_time_get() - gore_impact_test_time) % 3 == 0)
+		{
+			struct object_datum *unit = object_try_and_get_and_verify_type(gore_impact_test_unit, _object_mask_biped);
+
+			if (unit)
+				error(_error_silent, "gore impact test: t+%ld the %s at %.2f %.2f %.2f, %.1f m/s%s",
+					game_time_get() - gore_impact_test_time, TEST_FLAG(unit->object.damage_flags, _object_dead_bit) ? "corpse" : "unit",
+					unit->object.position.x, unit->object.position.y, unit->object.position.z,
+					magnitude3d(&unit->object.translational_velocity) * 30.f * WU,
+					TEST_FLAG(unit->object.flags, _object_invisible_bit) ? " (hidden)" : "");
+			else if (gore_impact_test_unit != NONE)
+			{
+				error(_error_silent, "gore impact test: t+%ld the unit is gone (gibbed)", game_time_get() - gore_impact_test_time);
+				gore_impact_test_unit = NONE;
+			}
+		}
+		if (game_time_get() == gore_impact_test_time + 240)
+		{
+			struct object_datum *unit = object_try_and_get_and_verify_type(gore_impact_test_unit, _object_mask_biped);
+
+			error(_error_silent, "gore impact test: summary: the unit is %s",
+				!unit ? "gone (it came apart)" : TEST_FLAG(unit->object.damage_flags, _object_dead_bit) ? "a whole corpse (no splat)" : "alive");
+		}
+		return;
+	}
+	if (gore_impact_test_state != 0 || game_time_get() < (long)(seconds * 30.f))
+		return;
+	/* (not riding: a rider's position is its seat's) */
+	if (player->object.parent_object_index != NONE)
+	{
+		if ((game_time_get() % 150) == 0)
+			error(_error_silent, "gore impact test: the player rides a vehicle (waiting)");
+		return;
+	}
+	gore_impact_test_state = 2;
+	{
+		struct unit_datum *player_unit = (struct unit_datum *)player;
+		real_vector3d forward = player_unit->unit.looking_vector;
+		real_vector3d side;
+		real lethal = 0.f;
+		real splat = gore_impact_splat_speed(&lethal);
+		real speed = (real)config_real("debug.gore_impact_test_speed");
+		real_point3d start;
+		real_vector3d velocity;
+		struct collision_result collision;
+		struct tag_iterator tags;
+		long definition_index;
+		long found = NONE;
+		real_point3d eye = player->object.position;
+
+		if (speed == 0.f)
+			speed = splat * 1.25f;
+		else if (speed < 0.f)
+			speed = -speed * lethal;
+		forward.k = 0.f;
+		bleed_normalize(&forward, global_forward3d);
+		cross_product3d(global_up3d, &forward, &side);
+		eye.z += 0.6f;
+		if (wall)
+		{
+			/* the nearest wall about the player (4 to 25 wu off) */
+			short index;
+			real best = 0.f;
+			boolean have = FALSE;
+
+			for (index = 0; index < 32; index++)
+			{
+				real angle = (real)index * 6.283f / 32.f;
+				real_vector3d ray = { cosf(angle) * 40.f, sinf(angle) * 40.f, 0.f };
+				real distance;
+
+				if (!collision_test_vector(GORE_BLEED_FLAGS, &eye, &ray, NONE, &collision) ||
+					fabsf(collision.plane.n.k) > 0.3f)
+					continue;
+				distance = collision.t * 40.f;
+				if (distance < 4.f)
+					continue;
+				if (!have || distance < best)
+				{
+					have = TRUE;
+					best = distance;
+					gore_impact_test_target = collision.point;
+					forward = collision.plane.n; /* (out of the wall) */
+				}
+			}
+			if (!have)
+			{
+				error(_error_silent, "gore impact test: no wall 4 to 40 wu about the player: no test");
+				return;
+			}
+			forward.k = 0.f;
+			bleed_normalize(&forward, global_forward3d);
+			cross_product3d(global_up3d, &forward, &side);
+			point_from_line3d(&gore_impact_test_target, &forward, 3.f, &start);
+			velocity = forward;
+			scale_vector3d(&velocity, -speed / (30.f * WU), &velocity);
+			/* (the player back from it, aside, looking at where it hits) */
+			point_from_line3d(&gore_impact_test_target, &forward, 3.6f, &gore_impact_test_place);
+			point_from_line3d(&gore_impact_test_place, &side, 1.6f, &gore_impact_test_place);
+		}
+		else
+		{
+			real_point3d ahead;
+
+			short tries;
+			boolean have = FALSE;
+
+			/* (open ground about the player: the structure's ground, with
+			nothing on it, a vehicle, a rock, in front first) */
+			for (tries = gore_impact_test_tries; tries < 16 && !have; tries++)
+			{
+				real_vector3d way = forward;
+				struct collision_result any;
+				real_point3d top;
+				real_vector3d down = { 0.f, 0.f, -41.f };
+
+				bleed_rotate_about(&way, global_up3d, (real)((tries + 1) / 2) * 0.3927f * ((tries & 1) ? 1.f : -1.f));
+				point_from_line3d(&eye, &way, 3.f + (real)(tries % 3), &ahead);
+				if (!bleed_ground(&ahead, 2.f, 40.f, &collision))
+					continue;
+				top = ahead;
+				top.z += 0.5f;
+				if (!collision_test_vector(_collision_test_environment_flags, &top, &down, player_index, &any) ||
+					fabsf(any.point.z - collision.point.z) > 0.05f)
+					continue;
+				forward = way;
+				cross_product3d(global_up3d, &forward, &side);
+				gore_impact_test_tries = tries;
+				have = TRUE;
+			}
+			if (!have)
+			{
+				error(_error_silent, "gore impact test: no open ground about the player (at %.2f %.2f %.2f): no test",
+					eye.x, eye.y, eye.z);
+				return;
+			}
+			gore_impact_test_target = collision.point;
+			start = collision.point;
+			/* (2.5 wu up, less under a ceiling) */
+			{
+				struct collision_result above;
+				real_point3d from = collision.point;
+				real_vector3d up = { 0.f, 0.f, 3.2f };
+
+				from.z += 0.05f;
+				start.z += collision_test_vector(GORE_BLEED_FLAGS, &from, &up, NONE, &above) ?
+					MAX(above.t * 3.2f - 0.7f, 0.9f) : 2.5f;
+				start.z = MIN(start.z, collision.point.z + 2.5f);
+			}
+			velocity.i = 0.f; velocity.j = 0.f; velocity.k = -speed / (30.f * WU);
+			/* (the player back and aside, a little up, looking down at it) */
+			point_from_line3d(&gore_impact_test_target, &forward, -2.2f, &gore_impact_test_place);
+			point_from_line3d(&gore_impact_test_place, &side, 0.8f, &gore_impact_test_place);
+		}
+		if (bleed_ground(&gore_impact_test_place, 2.f, 6.f, &collision))
+			gore_impact_test_place = collision.point;
+		gore_impact_test_place.z += 0.1f;
+		gore_impact_test_facing.i = gore_impact_test_target.x - gore_impact_test_place.x;
+		gore_impact_test_facing.j = gore_impact_test_target.y - gore_impact_test_place.y;
+		gore_impact_test_facing.k = gore_impact_test_target.z - (gore_impact_test_place.z + 0.6f);
+		bleed_normalize(&gore_impact_test_facing, global_forward3d);
+		tag_iterator_new(&tags, 'bipd');
+		while ((definition_index = tag_iterator_next(&tags)) != NONE)
+		{
+			if (strstr(tag_get_name(definition_index), config_string("debug.gore_impact_test_unit")))
+			{
+				found = definition_index;
+				break;
+			}
+		}
+		if (found == NONE)
+		{
+			error(_error_silent, "gore impact test: the map has no biped \"%s\"", config_string("debug.gore_impact_test_unit"));
+			return;
+		}
+		{
+			struct object_placement_data placement;
+
+			object_placement_data_new(&placement, found, NONE);
+			placement.position = start;
+			gore_impact_test_start = start;
+			placement.forward = side;
+			placement.up = *global_up3d;
+			gore_impact_test_unit = object_new(&placement);
+		}
+		if (gore_impact_test_unit == NONE)
+		{
+			error(_error_silent, "gore impact test: could not make a %s", tag_get_name(found));
+			return;
+		}
+		if (config_boolean("debug.gore_impact_test_dead"))
+		{
+			object_get(gore_impact_test_unit)->object.body_vitality = 0.f;
+			unit_kill(gore_impact_test_unit);
+		}
+		object_get(gore_impact_test_unit)->object.translational_velocity = velocity;
+		gore_impact_test_velocity = velocity;
+		gore_impact_test_time = game_time_get();
+		gore_impact_test_state = 1;
+		error(_error_silent, "gore impact test: a %s%s thrown at the %s at %.1f m/s (deadly fall %.1f m/s, splat from %.1f m/s; "
+			"target %.2f %.2f %.2f; level %s)", tag_get_name(found), config_boolean("debug.gore_impact_test_dead") ? " corpse" : "",
+			wall ? "wall" : "ground", speed, lethal, splat, gore_impact_test_target.x, gore_impact_test_target.y,
+			gore_impact_test_target.z, config_string("game.gore_level"));
+	}
+}
+
 void gore_bleed_game_state_loaded(void)
 {
 	gore_bleed_loaded = TRUE;
@@ -2233,6 +2798,9 @@ void gore_bleed_reset(void)
 	gore_bleed_test_unit_count = 0;
 	gore_bleed_test_round = 0;
 	gore_bleed_test_rounds_passed = 0;
+	gore_impact_test_state = 0;
+	gore_impact_test_unit = NONE;
+	gore_impact_test_tries = 0;
 	gore_bleed_quads_made = gore_bleed_quads_failed = gore_bleed_quads_remade = 0;
 	gore_bleed_window_ms = 0;
 }
@@ -2280,6 +2848,7 @@ void gore_bleed_update(void)
 	}
 	gore_bleed_last_time = game_time_get();
 	bleed_test_update();
+	impact_test_update();
 	if (bleed_enabled())
 	{
 		if ((game_time_get() % 5) == 0)
