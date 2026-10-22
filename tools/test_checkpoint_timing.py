@@ -19,7 +19,7 @@ PRELUDE = r'''
 typedef int boolean;
 #define TRUE 1
 #define FALSE 0
-static struct {boolean saving_map,save_map_safely,save_map_timeout,save_map_completed;
+static struct {boolean saving_map,save_map_safely,save_map_timeout,save_map_completed,lost_map;
     short ticks_until_next_save_check,safe_intervals;long ticks_unable_to_save;} main_globals;
 static long main_save_last_tick;
 static boolean debug_game_save;
@@ -29,6 +29,7 @@ static long game_time_get(void) {return tick;}
 static int game_time_get_paused(void) {return paused;}
 static boolean game_safe_to_save(void) {checks++;return safe;}
 static void players_note_checkpoint(void) {}
+static boolean manual_respawn_applies_now(void) {return FALSE;}
 static void hud_autosave(boolean on) {saves+=on;}
 static void console_printf(boolean error,const char *text) {(void)error;(void)text;}
 '''
