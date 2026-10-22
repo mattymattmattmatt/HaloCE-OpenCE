@@ -3595,6 +3595,49 @@ static boolean gore_impact_decode(struct damage_data const *damage, real_point3d
 	return TRUE;
 }
 
+/* (gore_biped_impact's first test) */
+static boolean gore_impact_defer_terminal_kill(long biped_index, real_vector3d const *new_velocity)
+{
+	struct gore_falling_damage_globals *falling = gore_falling_globals();
+	struct biped_datum *biped;
+	struct collision_result collision;
+	real_vector3d ray;
+	static long logged_unit = NONE;
+
+	if (!falling || falling->runtime_maximum_falling_velocity <= 0.f)
+		return FALSE;
+	biped = (struct biped_datum *)object_try_and_get_and_verify_type(biped_index, _object_mask_biped);
+	if (!biped || biped->object.translational_velocity.k >= -falling->runtime_maximum_falling_velocity ||
+		TEST_FLAG(biped->object.damage_flags, _object_dead_bit) || TEST_FLAG(biped->object.flags, _object_outside_of_map_bit) ||
+		TEST_FLAG(biped->object.flags, _object_invisible_bit))
+	{
+		return FALSE;
+	}
+	if (!config_boolean("game.gore_impact") || !gore_enabled() || network_game_distributed_client() ||
+		gore_is_flood(biped->definition_index) || gore_object_is_piece(biped_index))
+	{
+		return FALSE;
+	}
+	/* (what it will hit: along its way, 80 wu, some 240 m) */
+	ray = biped->object.translational_velocity;
+	normalize3d(&ray);
+	scale_vector3d(&ray, 80.f, &ray);
+	if (!collision_test_vector(GORE_IMPACT_FLAGS | FLAG(_collision_test_media_bit), &biped->object.bounding_sphere_center, &ray,
+		biped_index, &collision) || collision.type == _collision_result_media)
+	{
+		return FALSE;
+	}
+	if (logged_unit != biped_index)
+	{
+		logged_unit = biped_index;
+		error(_error_silent, "gore: impact: %s falls at %.1f m/s, past the globals' %.1f: its death waits for the ground %.1f m below (the splat)",
+			tag_get_name(biped->definition_index), -biped->object.translational_velocity.k * GORE_TICK_TO_MPS,
+			falling->runtime_maximum_falling_velocity * GORE_TICK_TO_MPS, collision.t * 80.f * GORE_METRES_PER_WORLD_UNIT);
+	}
+	(void)new_velocity;
+	return TRUE;
+}
+
 /* (gore_bleed.c's test) */
 real gore_impact_splat_speed(real *lethal)
 {
@@ -3618,6 +3661,15 @@ boolean gore_biped_impact(long biped_index, real_vector3d const *velocity, real_
 
 	if (!velocity || !new_velocity)
 		return FALSE;
+	/* a living biped past the globals' maximum falling velocity (31.4 m/s
+	on the stock maps): stock, biped_falling_damage kills it in the air
+	(their maximum distance damage) and only its corpse meets the ground,
+	whose splat would be the host's alone (a corpse's damage is never
+	replayed). Over ground it will splat on (the world, scenery; not
+	water, not a vehicle, not nothing below), that kill waits for the
+	impact, which kills it as the splat (synced to every client) */
+	if (new_velocity->k < -0.2f && gore_impact_defer_terminal_kill(biped_index, new_velocity))
+		return TRUE;
 	vector_from_points3d((real_point3d const *)velocity, (real_point3d const *)new_velocity, &delta);
 	/* (cheap first: almost every tick of every biped ends here) */
 	speed = magnitude3d(&delta) * GORE_TICK_TO_MPS;

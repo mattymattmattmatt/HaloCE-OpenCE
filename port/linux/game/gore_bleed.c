@@ -2480,6 +2480,8 @@ static real_point3d gore_impact_test_place;
 static real_vector3d gore_impact_test_facing;
 static real_point3d gore_impact_test_target;
 static real_vector3d gore_impact_test_velocity;
+static real_point3d gore_impact_test_start;
+static short gore_impact_test_tries;
 
 static void impact_test_update(void)
 {
@@ -2513,6 +2515,24 @@ static void impact_test_update(void)
 		object_set_position(player_index, &gore_impact_test_place, &forward, global_up3d);
 		player->object.translational_velocity = *global_zero_vector3d;
 		player_control_set_facing(0, &gore_impact_test_facing);
+		/* (stuck where it was made: something there holds bipeds up that
+		rays miss; the test goes again elsewhere) */
+		if (game_time_get() == gore_impact_test_time + 8 && !wall && gore_impact_test_tries < 12)
+		{
+			struct object_datum *unit = object_try_and_get_and_verify_type(gore_impact_test_unit, _object_mask_biped);
+
+			if (unit && unit->object.position.z > gore_impact_test_start.z - 0.5f &&
+				!TEST_FLAG(unit->object.flags, _object_invisible_bit))
+			{
+				error(_error_silent, "gore impact test: stuck at %.2f %.2f %.2f (held up): again elsewhere",
+					unit->object.position.x, unit->object.position.y, unit->object.position.z);
+				object_delete(gore_impact_test_unit);
+				gore_impact_test_unit = NONE;
+				gore_impact_test_tries++;
+				gore_impact_test_state = 0;
+				return;
+			}
+		}
 		if (game_time_get() <= gore_impact_test_time + 90 && (game_time_get() - gore_impact_test_time) % 3 == 0)
 		{
 			struct object_datum *unit = object_try_and_get_and_verify_type(gore_impact_test_unit, _object_mask_biped);
@@ -2581,13 +2601,13 @@ static void impact_test_update(void)
 			for (index = 0; index < 32; index++)
 			{
 				real angle = (real)index * 6.283f / 32.f;
-				real_vector3d ray = { cosf(angle) * 25.f, sinf(angle) * 25.f, 0.f };
+				real_vector3d ray = { cosf(angle) * 40.f, sinf(angle) * 40.f, 0.f };
 				real distance;
 
 				if (!collision_test_vector(GORE_BLEED_FLAGS, &eye, &ray, NONE, &collision) ||
 					fabsf(collision.plane.n.k) > 0.3f)
 					continue;
-				distance = collision.t * 25.f;
+				distance = collision.t * 40.f;
 				if (distance < 4.f)
 					continue;
 				if (!have || distance < best)
@@ -2600,7 +2620,7 @@ static void impact_test_update(void)
 			}
 			if (!have)
 			{
-				error(_error_silent, "gore impact test: no wall 4 to 25 wu about the player: no test");
+				error(_error_silent, "gore impact test: no wall 4 to 40 wu about the player: no test");
 				return;
 			}
 			forward.k = 0.f;
@@ -2622,24 +2642,25 @@ static void impact_test_update(void)
 
 			/* (open ground about the player: the structure's ground, with
 			nothing on it, a vehicle, a rock, in front first) */
-			for (tries = 0; tries < 16 && !have; tries++)
+			for (tries = gore_impact_test_tries; tries < 16 && !have; tries++)
 			{
 				real_vector3d way = forward;
 				struct collision_result any;
 				real_point3d top;
-				real_vector3d down = { 0.f, 0.f, -46.f };
+				real_vector3d down = { 0.f, 0.f, -41.f };
 
 				bleed_rotate_about(&way, global_up3d, (real)((tries + 1) / 2) * 0.3927f * ((tries & 1) ? 1.f : -1.f));
-				point_from_line3d(&eye, &way, 3.f, &ahead);
+				point_from_line3d(&eye, &way, 3.f + (real)(tries % 3), &ahead);
 				if (!bleed_ground(&ahead, 2.f, 40.f, &collision))
 					continue;
 				top = ahead;
-				top.z += 6.f;
+				top.z += 0.5f;
 				if (!collision_test_vector(_collision_test_environment_flags, &top, &down, player_index, &any) ||
 					fabsf(any.point.z - collision.point.z) > 0.05f)
 					continue;
 				forward = way;
 				cross_product3d(global_up3d, &forward, &side);
+				gore_impact_test_tries = tries;
 				have = TRUE;
 			}
 			if (!have)
@@ -2650,7 +2671,17 @@ static void impact_test_update(void)
 			}
 			gore_impact_test_target = collision.point;
 			start = collision.point;
-			start.z += 2.5f;
+			/* (2.5 wu up, less under a ceiling) */
+			{
+				struct collision_result above;
+				real_point3d from = collision.point;
+				real_vector3d up = { 0.f, 0.f, 3.2f };
+
+				from.z += 0.05f;
+				start.z += collision_test_vector(GORE_BLEED_FLAGS, &from, &up, NONE, &above) ?
+					MAX(above.t * 3.2f - 0.7f, 0.9f) : 2.5f;
+				start.z = MIN(start.z, collision.point.z + 2.5f);
+			}
 			velocity.i = 0.f; velocity.j = 0.f; velocity.k = -speed / (30.f * WU);
 			/* (the player back and aside, a little up, looking down at it) */
 			point_from_line3d(&gore_impact_test_target, &forward, -2.2f, &gore_impact_test_place);
@@ -2682,6 +2713,7 @@ static void impact_test_update(void)
 
 			object_placement_data_new(&placement, found, NONE);
 			placement.position = start;
+			gore_impact_test_start = start;
 			placement.forward = side;
 			placement.up = *global_up3d;
 			gore_impact_test_unit = object_new(&placement);
@@ -2739,6 +2771,7 @@ void gore_bleed_reset(void)
 	gore_bleed_test_rounds_passed = 0;
 	gore_impact_test_state = 0;
 	gore_impact_test_unit = NONE;
+	gore_impact_test_tries = 0;
 	gore_bleed_quads_made = gore_bleed_quads_failed = gore_bleed_quads_remade = 0;
 	gore_bleed_window_ms = 0;
 }
