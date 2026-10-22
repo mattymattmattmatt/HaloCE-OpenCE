@@ -69,6 +69,8 @@ static boolean main_coop_host_revert(void) {return FALSE;}
 /* (game.manual_respawn: holding while a test sets it) */
 static int hold,holds;
 static boolean manual_respawn_hold(void) {holds++;return hold;}
+/* (its death camera look: none in the test) */
+static boolean manual_respawn_look_apply(long player_index, void *facing) {(void)player_index;(void)facing;return FALSE;}
 enum {_biped_airborne_bit=0,_object_mask_vehicle=1};
 static void data_iterator_new(struct data_iterator *i,int d) {(void)d;i->next=0;}
 static void *data_iterator_next(struct data_iterator *i) {
