@@ -37,6 +37,7 @@ and network co-op its own respawns (players.c, coop_spectate.c), untouched.
 #include "interface/ui_widget.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* port_config.c */
@@ -55,7 +56,15 @@ void halo_input_shown_name(char const *binding, char *shown, unsigned int size);
 /* port_config.c */
 double config_real(const char *name);
 
+/* director.c */
+extern long director_port_dead_cameras;
+char const *director_port_camera_name(short local_player_index);
+
 /* ---------- globals */
+
+/* debug.manual_respawn_test_buttons: the test's ticks since the death
+(counted, so a revert's clock going back does not move it), NONE before */
+static long manual_respawn_test_ticks = NONE;
 
 /* debug.manual_respawn_test's press: ticks left of the jump held down */
 static long manual_respawn_test_down = 0;
@@ -325,6 +334,57 @@ boolean manual_respawn_look_apply(
 	return FALSE;
 }
 
+/* the buttons debug.manual_respawn_test_buttons holds now (xinput_sdl.c
+presses them on the first gamepad), as bits in the order of the names */
+static char const *const manual_respawn_test_button_names[] =
+{
+	"a", "b", "x", "y", "black", "white", "lt", "rt", "back", "ls", "rs", "up", "down", "left", "right", "stick"
+};
+
+unsigned long manual_respawn_test_buttons(
+	void)
+{
+	char const *list;
+	char item[64];
+	unsigned long held = 0;
+
+	if (manual_respawn_test_ticks == NONE)
+		return 0;
+	list = config_string("debug.manual_respawn_test_buttons");
+	while (list && *list)
+	{
+		char const *comma = strchr(list, ',');
+		size_t length = comma ? (size_t)(comma - list) : strlen(list);
+		char *at;
+		double start, hold = 0.1;
+		short index;
+
+		if (length >= sizeof(item))
+			length = sizeof(item) - 1;
+		memcpy(item, list, length);
+		item[length] = 0;
+		list = comma ? comma + 1 : NULL;
+		at = strchr(item, '@');
+		if (!at)
+			continue;
+		*at++ = 0;
+		start = atof(at);
+		if (strchr(at, ':'))
+			hold = atof(strchr(at, ':') + 1);
+		if (manual_respawn_test_ticks < (long)(start * TICKS_PER_SECOND) ||
+			manual_respawn_test_ticks >= (long)((start + hold) * TICKS_PER_SECOND))
+		{
+			continue;
+		}
+		for (index = 0; index < (short)NUMBEROF(manual_respawn_test_button_names); index++)
+		{
+			if (!strcmp(item, manual_respawn_test_button_names[index]))
+				held |= 1UL << index;
+		}
+	}
+	return held;
+}
+
 /* ---------- the automated test (debug.manual_respawn_test)
 
 Kills the first local player that many seconds into a map, presses jump
@@ -365,7 +425,10 @@ void manual_respawn_test_update(
 		platform_log("manual respawn test: killing the player at tick %ld (setting %s, multiplayer %d)",
 			tick, manual_respawn_setting() ? "on" : "off", game_engine_running() ? 1 : 0);
 		unit_kill(player->unit_index);
+		manual_respawn_test_ticks = 0;
 	}
+	else if (manual_respawn_test_ticks != NONE)
+		manual_respawn_test_ticks++;
 	if (killed && !pressed && press_seconds > 0.f && tick >= death_tick + (long)(press_seconds * TICKS_PER_SECOND))
 	{
 		pressed = TRUE;
@@ -417,6 +480,9 @@ void manual_respawn_test_update(
 		if (manual_respawn_look_turns)
 			platform_log("manual respawn test: the death camera turned %ld times, facing yaw %.2f pitch %.2f",
 				manual_respawn_look_turns, manual_respawn_look_facing.yaw, manual_respawn_look_facing.pitch);
+		platform_log("manual respawn test: camera %s, death cameras started %ld, buttons held 0x%lx",
+			director_port_camera_name(local_player_get_next(NONE)), director_port_dead_cameras,
+			manual_respawn_test_buttons());
 		last_report = tick;
 	}
 }

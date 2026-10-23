@@ -777,6 +777,16 @@ static const struct config_setting config_settings[] =
 		_platform_all,
 		"With debug.manual_respawn_test: press jump this many seconds after the\n"
 		"death. 0: never." },
+	{ "debug.manual_respawn_test_buttons", _config_string, "\"\"", "HALO_MANUAL_RESPAWN_TEST_BUTTONS", _environment_value,
+		_platform_all,
+		"With debug.manual_respawn_test: other buttons to press, comma separated,\n"
+		"each name@seconds after the death[:seconds held] (a b x y black white\n"
+		"lt rt back ls rs up down left right, stick: the right stick turning),\n"
+		"held over a revert as given." },
+	{ "debug.camera_switch", _config_boolean, "false", "HALO_CAMERA_SWITCH", _environment_value, _platform_all,
+		"In a game, holding switch grenades a second (or Backspace) cycles the\n"
+		"developers' cameras (flying, third person). Off: it does not, so\n"
+		"holding the button in play keeps the player's view. Never while dead." },
 	{ "debug.manual_respawn_test_look", _config_real, "0.0", "HALO_MANUAL_RESPAWN_TEST_LOOK", _environment_value,
 		_platform_all,
 		"With debug.manual_respawn_test: while the prompt waits, turn the dead\n"
