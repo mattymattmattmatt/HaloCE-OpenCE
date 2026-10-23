@@ -2868,14 +2868,19 @@ static void gore_test_update(void)
 A sniper rifle kill on the head (the damage tag's name has "sniper" in it,
 and the hit was on a material the collision model flags as the head, which
 is what the engine's own headshot multiplier goes by) takes off the head
-only: a copy of the unit showing just the head flies off along the shot, and
-the body keeps its head drawn shrunk to the neck (only as drawn,
-gore_render_node_matrices: its own node matrices, which its limp body
-works on, are left alone) while it dies its normal death, the neck bleeding
-for a while. */
+only: it pops, a burst of blood out of the neck along the shot and up, a
+spray of small bloody bits all about (the blood effect thrown in many ways
+at once), and in the campaign a copy of the unit showing just the head
+flies off along the shot (a multiplayer game makes no object for it: its
+pieces are the body's parts only, the same as its gibs). The body keeps its
+head drawn shrunk to the neck (only as drawn, gore_render_node_matrices:
+its own node matrices, which its limp body works on, are left alone) while
+it dies its normal death (its spin, its fall), the neck spurting in pulses,
+fast then slower, for five seconds, and dripping on the ground below. */
 
 #define GORE_MAXIMUM_HEADLESS 64
-#define GORE_NECK_BLEED_TICKS 150
+#define GORE_NECK_BLEED_TICKS 150 /* (spurts: every 5 ticks at first, every 15 at the end) */
+#define GORE_NECK_DRIP_TICKS 90
 
 struct gore_headless
 {
@@ -2883,6 +2888,8 @@ struct gore_headless
 	short head_node;
 	long time;
 	long bleed_effect_index;
+	long burst_effect_index; /* (the pop's, the bigger) */
+	long decal_index; /* the neck's drips */
 	signed char in_head[GORE_MAXIMUM_NODES]; /* the head's nodes */
 };
 
@@ -2916,6 +2923,51 @@ static boolean gore_headshot_unit_kind(long definition_index)
 			return TRUE;
 	}
 	return FALSE;
+}
+
+/* the pop: blood out of the neck along the shot and up, and bits of the
+head every way (the blood effect, thrown at once in many directions; the
+map's own particles, no object), a splat on the ground under it */
+static void gore_headshot_pop(struct gore_headless const *headless, real_vector3d const *direction)
+{
+	struct object_datum *unit = object_get(headless->unit_index);
+	real_matrix4x3 const *matrices = object_get_node_matrices(headless->unit_index);
+	real_point3d head;
+	short sprays = (short)(gore_level() >= _gore_level_extreme ? 10 : gore_level() >= _gore_level_heavy ? 7 : 4);
+	short index;
+
+	if (headless->head_node >= (short)(unit->object.node_matrices.size / (long)sizeof(real_matrix4x3)))
+		return;
+	head = matrices[headless->head_node].position;
+	{
+		real_vector3d along = *direction;
+
+		along.k += 0.4f;
+		normalize3d(&along);
+		gore_blood_effect_at(headless->burst_effect_index, &head, &along);
+	}
+	for (index = 0; index < sprays; index++)
+	{
+		real_vector3d way;
+		real_point3d point = head;
+
+		seed_random_direction3d(&gore_jitter_seed, &way);
+		/* (more along the shot, and up) */
+		way.i += direction->i * 0.8f;
+		way.j += direction->j * 0.8f;
+		way.k = fabsf(way.k) + 0.3f;
+		normalize3d(&way);
+		point_from_line3d(&point, &way, 0.05f, &point);
+		gore_effect_at(index & 1 ? headless->bleed_effect_index : headless->burst_effect_index, &point, &way);
+	}
+	if (headless->decal_index != NONE)
+	{
+		struct collision_result collision;
+		real_vector3d down = { direction->i * 0.6f, direction->j * 0.6f, -2.f };
+
+		if (collision_test_vector(_collision_test_environment_flags, &head, &down, headless->unit_index, &collision))
+			gore_blood_decal(headless->decal_index, &collision, &down, 1.f);
+	}
 }
 
 boolean gore_unit_headshot(long unit_index, struct damage_data const *damage, boolean head)
@@ -2991,13 +3043,19 @@ boolean gore_unit_headshot(long unit_index, struct damage_data const *damage, bo
 	if (normalize3d(&direction) == 0.f)
 		direction = *global_up3d;
 	gore_piece_unit_definition = unit->definition_index;
-	/* (the head piece's burst at the neck is gore_spawn_copy's) */
-	gore_spawn_copy(unit_index, 0xFFFFFFFF, head_node, collapse, &direction, 1.f, blood_effect_index, decal_index, FALSE);
+	/* (the head piece's burst at the neck is gore_spawn_copy's; a
+	multiplayer game's head is gone in the pop, no object made for it) */
+	if (!game_engine_running())
+		gore_spawn_copy(unit_index, 0xFFFFFFFF, head_node, collapse, &direction, 1.f, blood_effect_index, decal_index, FALSE);
 	headless->unit_index = unit_index;
 	headless->head_node = head_node;
 	headless->time = game_time_get();
+	headless->burst_effect_index = blood_effect_index;
+	headless->decal_index = decal_index;
+	gore_headshot_pop(headless, &direction);
 	if (config_boolean("game.gore_log"))
-		error(_error_silent, "gore: sniper headshot: %s lost its head (%s)", tag_get_name(unit->definition_index), damage_name);
+		error(_error_silent, "gore: sniper headshot: %s lost its head (%s)%s", tag_get_name(unit->definition_index), damage_name,
+			game_engine_running() ? ": popped (multiplayer: no head object)" : "");
 	return TRUE;
 }
 
@@ -3021,13 +3079,26 @@ static void gore_headless_update(void)
 			continue;
 		}
 		age = game_time_get() - headless->time;
-		if (age > 0 && age < GORE_NECK_BLEED_TICKS && (age % 10) == 0 && headless->bleed_effect_index != NONE)
+		/* the neck spurts in pulses, fast while it spins and drops, then
+		slower (a heartbeat running down), out along the neck */
+		if (age > 0 && age < GORE_NECK_BLEED_TICKS && headless->bleed_effect_index != NONE &&
+			headless->head_node < (short)(unit->object.node_matrices.size / (long)sizeof(real_matrix4x3)) &&
+			(age % (age < 45 ? 5 : age < 100 ? 9 : 15)) == 0)
 		{
 			real_matrix4x3 const *matrices = object_get_node_matrices(headless->unit_index);
+			real_vector3d out = matrices[headless->head_node].forward;
 
-			if (headless->head_node < (short)(unit->object.node_matrices.size / (long)sizeof(real_matrix4x3)))
-				gore_blood_effect_at(headless->bleed_effect_index, &matrices[headless->head_node].position,
-					&matrices[headless->head_node].forward);
+			gore_blood_effect_at(headless->bleed_effect_index, &matrices[headless->head_node].position, &out);
+			/* (and a drip under it, now and then) */
+			if (headless->decal_index != NONE && (age % 30) == 0 && age <= GORE_NECK_DRIP_TICKS)
+			{
+				struct collision_result collision;
+				real_vector3d down = { 0.f, 0.f, -2.f };
+
+				if (collision_test_vector(_collision_test_environment_flags, &matrices[headless->head_node].position, &down,
+						headless->unit_index, &collision))
+					gore_blood_decal(headless->decal_index, &collision, &down, 0.5f);
+			}
 		}
 	}
 }
