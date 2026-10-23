@@ -75,6 +75,7 @@ unsigned long system_milliseconds(void);
 
 /* (gore.c) */
 real gore_bleed_level_scale(void);
+real gore_blood_seconds(void);
 void gore_species_blood_color(long unit_definition_index, real_rgb_color *color);
 boolean gore_unit_headless_neck(long unit_index, short *node_index);
 boolean gore_unit_gib_pending(long unit_index);
@@ -1694,8 +1695,7 @@ static void bleed_watch(void)
 /* drying: darker over game.gore_blood_seconds, then fading */
 static void bleed_dry(void)
 {
-	real seconds = (real)config_real("game.gore_blood_seconds");
-	long life = (long)((seconds > 0.f ? seconds : 180.f) * 30.f);
+	long life = (long)(gore_blood_seconds() * 30.f);
 	short index;
 
 	for (index = 0; index < GORE_BLEED_MAXIMUM_QUADS; index++)

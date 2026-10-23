@@ -329,6 +329,72 @@ static short gore_level(void)
 	return _gore_level_heavy;
 }
 
+/* ---------- how long gore stays (game.gore_duration)
+
+"normal" (the seconds game.gore_blood_seconds and game.gore_piece_seconds
+give), "long" (twice), "very_long" (four times), "permanent" (as long as
+the limits allow: the oldest blood goes only when the decals or the bleed
+quads run out, the oldest piece past game.gore_max_pieces). Corpses: the
+garbage collection keeps half again, twice, three times as many bodies
+about before it takes the unseen ones (gore_corpse_limit_scale, objects.c).
+A multiplayer game's is "long" at most, its corpses the stock number. */
+
+static real gore_duration_scale(void)
+{
+	char const *duration = config_string("game.gore_duration");
+	real scale = 1.f;
+
+	if (!duration || gore_level() == _gore_level_off)
+		return 1.f;
+	if (!strcmp(duration, "long"))
+		scale = 2.f;
+	else if (!strcmp(duration, "very_long"))
+		scale = 4.f;
+	else if (!strcmp(duration, "permanent"))
+		scale = 0.f; /* (none: for ever) */
+	if (game_engine_running() && (scale == 0.f || scale > 2.f))
+		scale = 2.f;
+	return scale;
+}
+
+#define GORE_PERMANENT_SECONDS 1000000.f /* (11 days: for ever, and no overflow in ticks) */
+
+/* seconds blood stays (dries, then fades) */
+real gore_blood_seconds(void)
+{
+	real seconds = (real)config_real("game.gore_blood_seconds");
+	real scale = gore_duration_scale();
+
+	if (seconds <= 0.f)
+		seconds = 180.f;
+	return scale > 0.f ? MIN(seconds * scale, GORE_PERMANENT_SECONDS) : GORE_PERMANENT_SECONDS;
+}
+
+/* seconds a piece stays */
+static real gore_piece_seconds(void)
+{
+	real seconds = (real)PIN(config_real("game.gore_piece_seconds"), 1.0, 3600.0);
+	real scale = gore_duration_scale();
+
+	return scale > 0.f ? MIN(seconds * scale, GORE_PERMANENT_SECONDS) : GORE_PERMANENT_SECONDS;
+}
+
+/* objects.c's active garbage limits (corpses about) times this */
+real gore_corpse_limit_scale(void)
+{
+	char const *duration = config_string("game.gore_duration");
+
+	if (!duration || gore_level() == _gore_level_off || game_engine_running())
+		return 1.f;
+	if (!strcmp(duration, "long"))
+		return 1.5f;
+	if (!strcmp(duration, "very_long"))
+		return 2.f;
+	if (!strcmp(duration, "permanent"))
+		return 3.f;
+	return 1.f;
+}
+
 /* how many blood events the level makes of each one heavy makes */
 static real gore_blood_scale(void)
 {
@@ -534,7 +600,7 @@ static void gore_coverage_add(long vehicle_index, short node_index, real amount,
 
 static void gore_coverage_update(void)
 {
-	real seconds = (real)config_real("game.gore_blood_seconds");
+	real seconds = gore_blood_seconds();
 	real dry = seconds > 0.f ? 1.f / (seconds * 2.f * 30.f) : 0.f;
 	short index;
 
@@ -1603,7 +1669,7 @@ static struct gore_piece *gore_spawn_copy(long unit_index, unsigned long region_
 	piece->hunter = FALSE;
 	piece->chunk = chunk;
 	piece->age = 0;
-	piece->life = (long)(PIN(config_real("game.gore_piece_seconds"), 1.0, 3600.0) * 30.0);
+	piece->life = (long)(gore_piece_seconds() * 30.f);
 	piece->resting = FALSE;
 	piece->impacted = FALSE;
 	piece->blood_effect_index = blood_effect_index;
@@ -1663,7 +1729,7 @@ static struct gore_piece *gore_spawn_garbage_ex(char const *name, real_point3d c
 	piece->hunter = FALSE;
 	piece->chunk = chunk;
 	piece->age = 0;
-	piece->life = (long)(PIN(config_real("game.gore_piece_seconds"), 1.0, 3600.0) * 30.0);
+	piece->life = (long)(gore_piece_seconds() * 30.f);
 	piece->resting = FALSE;
 	piece->impacted = FALSE;
 	piece->blood_effect_index = blood_effect_index;
@@ -1988,6 +2054,9 @@ static void gore_unit_gib_pieces(struct gore_pending const *pending)
 		return;
 	}
 	gore_object_log_until = game_time_get() + 20 * 30;
+	if (config_boolean("game.gore_log"))
+		error(_error_silent, "gore: duration %s%s: blood %.0f s, pieces %.0f s, bodies kept x%.1f", config_string("game.gore_duration"),
+			game_engine_running() ? " (multiplayer)" : "", gore_blood_seconds(), gore_piece_seconds(), gore_corpse_limit_scale());
 	error(_error_silent, "gore: gib t%ld of %s at %ld (%s, %s)", game_time_get(), tag_get_name(unit->definition_index), unit_index,
 		network_game_distributed_client() ? "CLIENT" : "host", ((struct unit_datum *)unit)->unit.player_index != NONE ? "a player" : "not a player");
 	gore_launch_speed_sum = 0.f;
@@ -3967,7 +4036,7 @@ boolean gore_unit_hit(long unit_index, struct damage_data const *damage, real no
 	}
 	if (damage->vehicle_impact_speed > 0.f && type && force > 0.f)
 	{
-		decal_lifetime_minimum = (real)config_real("game.gore_blood_seconds");
+		decal_lifetime_minimum = gore_blood_seconds();
 		gore_vehicle_hit_blood(damage->vehicle_impact_object_index, unit_index, force);
 		decal_lifetime_minimum = 0.f;
 	}
@@ -4052,7 +4121,7 @@ void gore_update(void)
 		gore_reset();
 		initialized = TRUE;
 	}
-	decal_lifetime_minimum = (real)config_real("game.gore_blood_seconds");
+	decal_lifetime_minimum = gore_blood_seconds();
 	gore_test_update();
 	for (index = 0; index < GORE_MAXIMUM_PENDING; index++)
 	{
