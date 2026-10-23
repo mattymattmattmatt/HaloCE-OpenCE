@@ -436,6 +436,11 @@ static const struct config_setting config_settings[] =
 		"Gore: blood splat decals on vehicles, the most at once (0-256; 0: none, the coverage instead; the oldest goes first)." },
 	{ "game.gore_max_pieces", _config_integer, "384", "HALO_GORE_MAX_PIECES", _environment_value, _platform_all,
 		"The most gore pieces at once (6 to 512); the oldest goes first." },
+	{ "game.gore_duration", _config_string, "\"normal\"", "HALO_GORE_DURATION", _environment_value, _platform_all,
+		"Gore: how long blood, pieces and bodies stay. \"normal\": game.gore_blood_seconds and\n"
+		"game.gore_piece_seconds; \"long\": twice; \"very_long\": four times; \"permanent\": until the\n"
+		"decal and piece limits take the oldest. Bodies: 1.5, 2 or 3 times as many kept about.\n"
+		"Multiplayer: \"long\" at most, the stock number of bodies." },
 	{ "game.gore_piece_seconds", _config_real, "600.0", "HALO_GORE_PIECE_SECONDS", _environment_value, _platform_all,
 		"How long a gore piece stays, in seconds." },
 	{ "game.gore_headshots", _config_boolean, "true", "HALO_GORE_HEADSHOTS", _environment_value, _platform_all,
@@ -1661,6 +1666,7 @@ static const struct
 	{ "input.touch_controls", { "auto", "on", "off", NULL }, NULL },
 	{ "game.console_log", { "important", "all", "none", NULL }, NULL },
 	{ "game.gore_level", { "off", "mild", "heavy", "extreme", NULL }, NULL },
+	{ "game.gore_duration", { "normal", "long", "very_long", "permanent", NULL }, NULL },
 	{ "game.language", { "", "ja", "de", "fr", "es", "it", NULL }, NULL },
 	{ "network.text_chat", { "on", "links", "off", NULL }, NULL },
 	{ "network.voice_mode", { "off", "team_proximity", "team_enemy_proximity", "team_global",
