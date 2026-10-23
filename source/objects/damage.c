@@ -1816,6 +1816,15 @@ void object_cause_damage(
 					(friendly_damage == _friendly_damage_all || distributed_damage_authorized) &&
 					!TEST_FLAG(current_object->object.damage_flags, _object_dead_bit))
 				{
+					/* port: the gore prototype's sniper headshot, here too: a
+					network client replays every killing blow the host sends
+					it this way (damage_replay_kill: the blow's damage, node and
+					material, as any host of this netcode sends them), which
+					never reaches object_damage_body's death below, the body
+					already dead (port/linux/game/gore.c) */
+					if (damaged_object_count == 0 && TEST_FLAG(_object_mask_biped, current_object->object.type))
+						gore_unit_headshot(current_object_index, damage,
+							damage_material && TEST_FLAG(damage_material->flags, _damage_material_head_bit));
 					current_object->object.body_vitality = 0.f;
 					object_deplete_body(current_object_index);
 					SET_FLAG(
