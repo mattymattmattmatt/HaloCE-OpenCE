@@ -2939,9 +2939,7 @@ static void footprint_free(struct gore_footprint *print)
 
 static long footprint_life(void)
 {
-	real seconds = (real)config_real("game.gore_blood_seconds");
-
-	return (long)((seconds > 0.f ? seconds : 180.f) * 30.f);
+	return (long)(gore_blood_seconds() * 30.f);
 }
 
 /* the blood a point stands in: its unit's definition, NONE */
