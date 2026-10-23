@@ -80,6 +80,8 @@ void gore_species_blood_color(long unit_definition_index, real_rgb_color *color)
 boolean gore_unit_headless_neck(long unit_index, short *node_index);
 boolean gore_unit_gib_pending(long unit_index);
 void gore_bleed_blood_spot(long unit_definition_index, real_point3d const *point, real radius);
+static void footprint_spot_add(long unit_definition_index, real_point3d const *point, real radius, long time,
+	short quad, long serial);
 boolean gore_object_is_piece(long object_index);
 
 /* ---------- constants */
@@ -710,7 +712,16 @@ static void bleed_stain_update(struct gore_bleed_stain *stain)
 		decal_quad_set(quad->decal_index, quad->corners);
 	}
 	if (stain->grown)
-		stain->quad_count = 0; /* (its quads live on as quads) */
+	{
+		/* (its quads live on as quads; the pool, for footprints, as a spot
+		as long as they do: bloody feet each time someone steps in it) */
+		if (stain->blood_definition_index != NONE && stain->quad_count > 0)
+		{
+			footprint_spot_add(stain->blood_definition_index, &stain->center,
+				stain->radius * MAX(stain->stretch, 1.f), stain->time, stain->quads[0], stain->serials[0]);
+		}
+		stain->quad_count = 0;
+	}
 }
 
 static real gore_bleed_stain_inset; /* the next stain's (bleed_stain_new) */
@@ -2802,7 +2813,7 @@ last, gone after 12 to 18 steps. Local cosmetics like every bleed quad; the
 gore level's (Off: none); fewer at once in multiplayer.
 game.gore_footprints. */
 
-#define GORE_FOOTPRINT_MAXIMUM_SPOTS 64
+#define GORE_FOOTPRINT_MAXIMUM_SPOTS 256
 #define GORE_FOOTPRINT_MAXIMUM_WALKERS 24
 #define GORE_FOOTPRINT_MAXIMUM_PRINTS 96
 #define GORE_FOOTPRINT_MAXIMUM_PRINTS_MP 32
@@ -2830,6 +2841,10 @@ struct gore_footprint_spot
 	real_point3d center;
 	real radius; /* wu */
 	long time;
+	/* the bleed quad it is drawn with (a grown pool's), NONE: none; the
+	blood is there while that quad is */
+	short quad;
+	long serial;
 };
 
 struct gore_footprint_walker
@@ -2877,7 +2892,6 @@ static struct gore_footprint_shape const gore_footprint_shapes[] =
 };
 
 static struct gore_footprint_spot gore_footprint_spots[GORE_FOOTPRINT_MAXIMUM_SPOTS];
-static short gore_footprint_spot_next;
 static struct gore_footprint_walker gore_footprint_walkers[GORE_FOOTPRINT_MAXIMUM_WALKERS];
 static struct gore_footprint gore_footprints[GORE_FOOTPRINT_MAXIMUM_PRINTS];
 static short gore_footprint_next;
@@ -2913,19 +2927,88 @@ static struct gore_footprint_shape const *footprint_shape(long definition_index)
 	return &gore_footprint_shapes[NUMBEROF(gore_footprint_shapes) - 1];
 }
 
-/* blood on the ground there (a splat's, a pool's centre; wu across) */
-void gore_bleed_blood_spot(long unit_definition_index, real_point3d const *point, real radius)
-{
-	struct gore_footprint_spot *spot;
+static long footprint_life(void);
 
-	if (unit_definition_index == NONE || !point)
+/* whether the spot's blood is still on the ground (as long as its quads
+last: bleed_dry's life and fade, or the quad it is drawn with) */
+static boolean footprint_spot_live(struct gore_footprint_spot const *spot)
+{
+	long age = game_time_get() - spot->time;
+
+	if (spot->definition_index == NONE || age < 0 || age > footprint_life() + 240)
+		return FALSE;
+	if (spot->quad != NONE)
+	{
+		struct gore_bleed_quad const *quad = &gore_bleed_quads[spot->quad];
+
+		if (quad->decal_index == NONE || quad->serial != spot->serial)
+			return FALSE;
+	}
+	return TRUE;
+}
+
+/* a spot of blood remembered for footprints: one over a spot of the same
+blood already there grows it (a spray over a pool does not push the pool
+out); else a free or dried one, else the smallest gives way */
+static void footprint_spot_add(long unit_definition_index, real_point3d const *point, real radius, long time,
+	short quad, long serial)
+{
+	struct gore_footprint_spot *spot = NULL;
+	short index;
+
+	if (unit_definition_index == NONE || !point || !(radius > 0.f))
 		return;
-	spot = &gore_footprint_spots[gore_footprint_spot_next];
-	gore_footprint_spot_next = (short)((gore_footprint_spot_next + 1) % GORE_FOOTPRINT_MAXIMUM_SPOTS);
+	for (index = 0; index < GORE_FOOTPRINT_MAXIMUM_SPOTS; index++)
+	{
+		struct gore_footprint_spot *other = &gore_footprint_spots[index];
+		real dx, dy;
+
+		if (!footprint_spot_live(other) || other->definition_index != unit_definition_index)
+			continue;
+		dx = point->x - other->center.x;
+		dy = point->y - other->center.y;
+		if (fabsf(point->z - other->center.z) < 0.35f &&
+			dx * dx + dy * dy < MAX(other->radius, radius) * MAX(other->radius, radius) * 0.25f)
+		{
+			if (radius > other->radius)
+			{
+				other->center = *point;
+				other->radius = radius;
+				other->quad = quad;
+				other->serial = serial;
+			}
+			other->time = MAX(other->time, time);
+			return;
+		}
+	}
+	for (index = 0; index < GORE_FOOTPRINT_MAXIMUM_SPOTS && !spot; index++)
+	{
+		if (!footprint_spot_live(&gore_footprint_spots[index]))
+			spot = &gore_footprint_spots[index];
+	}
+	if (!spot)
+	{
+		spot = &gore_footprint_spots[0];
+		for (index = 1; index < GORE_FOOTPRINT_MAXIMUM_SPOTS; index++)
+		{
+			struct gore_footprint_spot *other = &gore_footprint_spots[index];
+
+			if (other->radius < spot->radius || (other->radius == spot->radius && other->time < spot->time))
+				spot = other;
+		}
+	}
 	spot->definition_index = unit_definition_index;
 	spot->center = *point;
 	spot->radius = radius;
-	spot->time = game_time_get();
+	spot->time = time;
+	spot->quad = quad;
+	spot->serial = serial;
+}
+
+/* blood on the ground there (a splat's, a pool's centre; wu across) */
+void gore_bleed_blood_spot(long unit_definition_index, real_point3d const *point, real radius)
+{
+	footprint_spot_add(unit_definition_index, point, radius, game_time_get(), NONE, 0);
 }
 
 static void footprint_free(struct gore_footprint *print)
@@ -2950,7 +3033,6 @@ static long footprint_life(void)
 /* the blood a point stands in: its unit's definition, NONE */
 static long footprint_blood_at(real_point3d const *point)
 {
-	long life = footprint_life();
 	short index;
 
 	for (index = 0; index < GORE_FOOTPRINT_MAXIMUM_SPOTS; index++)
@@ -2958,8 +3040,7 @@ static long footprint_blood_at(real_point3d const *point)
 		struct gore_footprint_spot const *spot = &gore_footprint_spots[index];
 		real dx, dy;
 
-		if (spot->definition_index == NONE || game_time_get() - spot->time > life ||
-			game_time_get() < spot->time)
+		if (!footprint_spot_live(spot))
 			continue;
 		dx = point->x - spot->center.x;
 		dy = point->y - spot->center.y;
@@ -3245,6 +3326,7 @@ player (an impact splat of debug.gore_footprint_test_blood's blood, else
 the walker's), then a debug.gore_footprint_test_unit biped (its tag name,
 "marine" if none) walked through it and on, the player aside, looking. */
 static short gore_footprint_test_state;
+static long gore_footprint_test_delay; /* (ticks before the walks) */
 static long gore_footprint_test_time;
 #define GORE_FOOTPRINT_TEST_LANES 4
 static long gore_footprint_test_units[GORE_FOOTPRINT_TEST_LANES] = { NONE, NONE, NONE, NONE };
@@ -3286,6 +3368,15 @@ static void footprint_test_update(void)
 		real_vector3d forward = gore_footprint_test_facing;
 		/* (a walk: 1.4 m/s; 13 m of it) */
 		real along = MIN((real)age, 280.f) * 1.4f / 30.f / WU;
+		/* (HALO_GORE_FOOTPRINT_TEST_PASSES: the first lane walks there and
+		back through its blood this many times; HALO_GORE_FOOTPRINT_TEST_SHARED:
+		the others walk the first lane's line, through its blood, once each
+		after it, waiting aside till then) */
+		short passes = (short)MAX(1, getenv("HALO_GORE_FOOTPRINT_TEST_PASSES") ?
+			atoi(getenv("HALO_GORE_FOOTPRINT_TEST_PASSES")) : 1);
+		boolean shared = getenv("HALO_GORE_FOOTPRINT_TEST_SHARED") != NULL;
+		long leg = passes > 1 || shared ? 200 : 280;
+		long delay = gore_footprint_test_delay;
 		short lane;
 
 		forward.k = 0.f;
@@ -3301,18 +3392,62 @@ static void footprint_test_update(void)
 
 			if (!walker)
 				continue;
-			point_from_line3d(&gore_footprint_test_starts[lane], &gore_footprint_test_way, along, &at);
+			if (passes > 1 || shared || delay > 0)
+			{
+				long start_tick = delay + (lane == 0 ? 0 : (long)passes * leg + (long)(lane - 1) * leg);
+				long legs = lane == 0 ? passes : 1;
+				long t = age - start_tick;
+				long leg_index;
+				real_point3d const *start = shared ? &gore_footprint_test_starts[0] : &gore_footprint_test_starts[lane];
+
+				if (t < 0 || t >= legs * leg)
+				{
+					/* (waiting, or done: aside, out of the walk) */
+					real_vector3d side;
+
+					cross_product3d(global_up3d, &gore_footprint_test_way, &side);
+					point_from_line3d(start, &side, t < 0 ? 2.5f + 0.7f * lane : -6.f - 0.7f * lane, &at);
+					if (t < 0)
+						point_from_line3d(&at, &gore_footprint_test_way, -0.5f, &at);
+					else
+						point_from_line3d(&at, &gore_footprint_test_way, 6.f, &at);
+					if (bleed_ground(&at, 1.f, 2.f, &collision))
+						at = collision.point;
+					at.z += 0.02f;
+					object_set_position(gore_footprint_test_units[lane], &at, &gore_footprint_test_way, global_up3d);
+					walker->object.translational_velocity = *global_zero_vector3d;
+					continue;
+				}
+				leg_index = t / leg;
+				along = (real)(t % leg) * 1.4f / 30.f / WU;
+				if (leg_index & 1)
+					along = (real)leg * 1.4f / 30.f / WU - along;
+				point_from_line3d(start, &gore_footprint_test_way, along, &at);
+				if (t % leg == 0)
+					error(_error_silent, "gore footprint test: lane %d %s, leg %ld of %ld", lane,
+						tag_get_name(walker->definition_index), leg_index + 1, legs);
+			}
+			else
+				point_from_line3d(&gore_footprint_test_starts[lane], &gore_footprint_test_way, along, &at);
 			if (bleed_ground(&at, 1.f, 2.f, &collision))
 				at = collision.point;
 			at.z += 0.02f;
-			object_set_position(gore_footprint_test_units[lane], &at, &gore_footprint_test_way, global_up3d);
-			walker->object.translational_velocity = gore_footprint_test_way;
+			{
+				/* (facing the way it walks) */
+				real_vector3d way = gore_footprint_test_way;
+
+				if ((passes > 1 || shared || delay > 0) && (((age - delay - (lane == 0 ? 0 : (long)passes * leg +
+					(long)(lane - 1) * leg)) / leg) & 1))
+					scale_vector3d(&way, -1.f, &way);
+				object_set_position(gore_footprint_test_units[lane], &at, &way, global_up3d);
+				walker->object.translational_velocity = way;
+			}
 			scale_vector3d(&walker->object.translational_velocity, 1.4f / 30.f / WU, &walker->object.translational_velocity);
 			/* (moved, not walking: on its feet all the same) */
 			SET_FLAG(walker->biped.flags, _biped_airborne_bit, FALSE);
 			walker->biped.airborne_ticks = 0;
 		}
-		if (age == 300 || age == 600)
+		if (age == 300 || age == 600 || (age > 600 && age % 600 == 0))
 		{
 			short print_index;
 			short live = 0, exists = 0, total = 0;
@@ -3441,7 +3576,29 @@ static void footprint_test_update(void)
 				point_from_line3d(&start, &gore_footprint_test_way, 1.f / WU + 0.3f, &pool);
 				if (bleed_ground(&pool, 1.f, 2.f, &collision))
 					pool = collision.point;
-				gore_bleed_impact_splat(blood_definition, &pool, global_up3d, 30.f, 30.f);
+				/* (HALO_GORE_FOOTPRINT_TEST_CORPSE: the blood a corpse's pool, bled
+				there, the walks waiting for it to grow; only the first lane's
+				with HALO_GORE_FOOTPRINT_TEST_SHARED) */
+				if (!(getenv("HALO_GORE_FOOTPRINT_TEST_SHARED") && lane > 0))
+				{
+					if (getenv("HALO_GORE_FOOTPRINT_TEST_CORPSE"))
+					{
+						struct object_placement_data body;
+						long body_index;
+
+						object_placement_data_new(&body, blood_definition, NONE);
+						body.position = pool;
+						body.position.z += 0.1f;
+						body.forward = side;
+						body.up = *global_up3d;
+						body_index = object_new(&body);
+						if (body_index != NONE)
+							unit_kill(body_index);
+						gore_footprint_test_delay = 25 * 30;
+					}
+					else
+						gore_bleed_impact_splat(blood_definition, &pool, global_up3d, 30.f, 30.f);
+				}
 				object_placement_data_new(&placement, walker_definition, NONE);
 				placement.position = start;
 				placement.position.z += 0.05f;
@@ -3483,15 +3640,18 @@ static void footprints_reset(void)
 	short index;
 
 	for (index = 0; index < GORE_FOOTPRINT_MAXIMUM_SPOTS; index++)
+	{
 		gore_footprint_spots[index].definition_index = NONE;
+		gore_footprint_spots[index].quad = NONE;
+	}
 	for (index = 0; index < GORE_FOOTPRINT_MAXIMUM_WALKERS; index++)
 		gore_footprint_walkers[index].unit_index = NONE;
 	for (index = 0; index < GORE_FOOTPRINT_MAXIMUM_PRINTS; index++)
 		gore_footprints[index].quad_count = 0;
-	gore_footprint_spot_next = 0;
 	gore_footprint_next = 0;
 	gore_footprint_look.definition_index = NONE;
 	gore_footprint_test_state = 0;
+	gore_footprint_test_delay = 0;
 	for (index = 0; index < GORE_FOOTPRINT_TEST_LANES; index++)
 		gore_footprint_test_units[index] = NONE;
 }
