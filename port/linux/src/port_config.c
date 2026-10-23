@@ -448,10 +448,19 @@ static const struct config_setting config_settings[] =
 		"Gore: blood splat decals on vehicles, the most at once (0-256; 0: none, the coverage instead; the oldest goes first)." },
 	{ "game.gore_max_pieces", _config_integer, "384", "HALO_GORE_MAX_PIECES", _environment_value, _platform_all,
 		"The most gore pieces at once (6 to 512); the oldest goes first." },
+	{ "game.gore_duration", _config_string, "\"normal\"", "HALO_GORE_DURATION", _environment_value, _platform_all,
+		"Gore: how long blood, pieces and bodies stay. \"normal\": game.gore_blood_seconds and\n"
+		"game.gore_piece_seconds; \"long\": twice; \"very_long\": four times; \"permanent\": until the\n"
+		"decal and piece limits take the oldest. Bodies: 1.5, 2 or 3 times as many kept about.\n"
+		"Multiplayer: \"long\" at most, the stock number of bodies." },
 	{ "game.gore_piece_seconds", _config_real, "600.0", "HALO_GORE_PIECE_SECONDS", _environment_value, _platform_all,
 		"How long a gore piece stays, in seconds." },
 	{ "game.gore_headshots", _config_boolean, "true", "HALO_GORE_HEADSHOTS", _environment_value, _platform_all,
 		"Gore: a sniper rifle kill on the head of a grunt, jackal, elite, marine or the player takes only the head off." },
+	{ "game.gore_footprints", _config_boolean, "true", "HALO_GORE_FOOTPRINTS", _environment_value, _platform_all,
+		"Gore: anyone who walks through blood leaves bloody footprints of their own feet, fading over 8 to 12 steps." },
+	{ "game.gore_flood", _config_boolean, "true", "HALO_GORE_FLOOD", _environment_value, _platform_all,
+		"Gore: a Flood combat form hit hard enough to gib bursts with its pale yellow-green blood and flesh (its body stays, to rise again); its bodies bleed that colour." },
 	{ "game.gore_shotgun", _config_boolean, "true", "HALO_GORE_SHOTGUN", _environment_value, _platform_all,
 		"Gore: any shotgun kill at point blank (below)\n"
 		"makes its victim come apart, however soft a pellet's force is." },
@@ -868,6 +877,12 @@ static const struct config_setting config_settings[] =
 		"Seconds after the start before anything is damaged, so that a game can\n"
 		"be set up and started first (a host's messages to its own client are\n"
 		"damaged too)." },
+	{ "debug.gore_footprint_test", _config_real, "0.0", "HALO_GORE_FOOTPRINT_TEST", _environment_value, _platform_all,
+		"Seconds after the start before a biped (debug.gore_footprint_test_unit) is walked through blood ahead of the player (gore's bloody footprints); 0 never." },
+	{ "debug.gore_footprint_test_unit", _config_string, "\"marine\"", "HALO_GORE_FOOTPRINT_TEST_UNIT", _environment_value, _platform_all,
+		"The footprint test's walker: a biped tag name's part." },
+	{ "debug.gore_footprint_test_blood", _config_string, "\"\"", "HALO_GORE_FOOTPRINT_TEST_BLOOD", _environment_value, _platform_all,
+		"The footprint test's blood: a biped tag name's part (empty: the walker's own)." },
 	{ "debug.test_input", _config_string, "\"\"", "HALO_TEST_INPUT", _environment_value, _platform_all,
 		"\"bot:<seed>\" plays controller 1 with a scripted pattern (automated\n"
 		"network tests); \"look:<seed>\" stands still, only turning and looking\n"
@@ -1673,6 +1688,7 @@ static const struct
 	{ "input.touch_controls", { "auto", "on", "off", NULL }, NULL },
 	{ "game.console_log", { "important", "all", "none", NULL }, NULL },
 	{ "game.gore_level", { "off", "mild", "heavy", "extreme", NULL }, NULL },
+	{ "game.gore_duration", { "normal", "long", "very_long", "permanent", NULL }, NULL },
 	{ "game.language", { "", "ja", "de", "fr", "es", "it", NULL }, NULL },
 	{ "network.text_chat", { "on", "links", "off", NULL }, NULL },
 	{ "network.voice_mode", { "off", "team_proximity", "team_enemy_proximity", "team_global",

@@ -4111,8 +4111,11 @@ static long active_garbage_limit(
 	long limit_per_16_players)
 {
 	long player_count = player_data ? player_data->actual_count : 0;
+	/* port: the gore mod's duration keeps more bodies about
+	(port/linux/game/gore.c, game.gore_duration; the campaign's only) */
+	extern real gore_corpse_limit_scale(void);
 
-	return limit_per_16_players * MAX(16, player_count) / 16;
+	return (long)((real)(limit_per_16_players * MAX(16, player_count) / 16) * gore_corpse_limit_scale());
 }
 
 /* port: whether a collection of active garbage may be tried

@@ -139,7 +139,7 @@ static struct gore_unit_type const gore_unit_types[] =
 	stock destruction (damage.c: the gib is taken instead of
 	object_destroy, so a carrier never burst, nor a combat form threw its
 	own bits) and gore_unit_gib then deleted it: it vanished. */
-	{ "flood", 0.f, 0.f, NULL, TRUE },
+	{ "flood", 2.5f, 4.f, NULL, TRUE }, /* (its force: for gore_flood_burst; never gibbed) */
 	{ "hunter", 0.f, 0.f, NULL, TRUE },
 	{ "grunt", 2.8f, 3.f, "effects\\decals\\blood splats\\blood grunt splat", FALSE },
 	{ "jackal", 2.5f, 3.5f, "effects\\decals\\blood splats\\blood grunt splat", FALSE },
@@ -329,6 +329,72 @@ static short gore_level(void)
 	return _gore_level_heavy;
 }
 
+/* ---------- how long gore stays (game.gore_duration)
+
+"normal" (the seconds game.gore_blood_seconds and game.gore_piece_seconds
+give), "long" (twice), "very_long" (four times), "permanent" (as long as
+the limits allow: the oldest blood goes only when the decals or the bleed
+quads run out, the oldest piece past game.gore_max_pieces). Corpses: the
+garbage collection keeps half again, twice, three times as many bodies
+about before it takes the unseen ones (gore_corpse_limit_scale, objects.c).
+A multiplayer game's is "long" at most, its corpses the stock number. */
+
+static real gore_duration_scale(void)
+{
+	char const *duration = config_string("game.gore_duration");
+	real scale = 1.f;
+
+	if (!duration || gore_level() == _gore_level_off)
+		return 1.f;
+	if (!strcmp(duration, "long"))
+		scale = 2.f;
+	else if (!strcmp(duration, "very_long"))
+		scale = 4.f;
+	else if (!strcmp(duration, "permanent"))
+		scale = 0.f; /* (none: for ever) */
+	if (game_engine_running() && (scale == 0.f || scale > 2.f))
+		scale = 2.f;
+	return scale;
+}
+
+#define GORE_PERMANENT_SECONDS 1000000.f /* (11 days: for ever, and no overflow in ticks) */
+
+/* seconds blood stays (dries, then fades) */
+real gore_blood_seconds(void)
+{
+	real seconds = (real)config_real("game.gore_blood_seconds");
+	real scale = gore_duration_scale();
+
+	if (seconds <= 0.f)
+		seconds = 180.f;
+	return scale > 0.f ? MIN(seconds * scale, GORE_PERMANENT_SECONDS) : GORE_PERMANENT_SECONDS;
+}
+
+/* seconds a piece stays */
+static real gore_piece_seconds(void)
+{
+	real seconds = (real)PIN(config_real("game.gore_piece_seconds"), 1.0, 3600.0);
+	real scale = gore_duration_scale();
+
+	return scale > 0.f ? MIN(seconds * scale, GORE_PERMANENT_SECONDS) : GORE_PERMANENT_SECONDS;
+}
+
+/* objects.c's active garbage limits (corpses about) times this */
+real gore_corpse_limit_scale(void)
+{
+	char const *duration = config_string("game.gore_duration");
+
+	if (!duration || gore_level() == _gore_level_off || game_engine_running())
+		return 1.f;
+	if (!strcmp(duration, "long"))
+		return 1.5f;
+	if (!strcmp(duration, "very_long"))
+		return 2.f;
+	if (!strcmp(duration, "permanent"))
+		return 3.f;
+	return 1.f;
+}
+
 /* how many blood events the level makes of each one heavy makes */
 static real gore_blood_scale(void)
 {
@@ -381,7 +447,8 @@ static struct gore_unit_type const *gore_unit_type_get(long definition_index);
 static boolean gore_is_flood(long definition_index);
 static short gore_blood_count(short kind);
 static void gore_blood_decal(long decal_index, struct collision_result const *collision,
-	real_vector3d const *velocity, real radius);
+	real_vector3d const *velocity, real radius, long unit_definition_index);
+void gore_bleed_blood_spot(long unit_definition_index, real_point3d const *point, real radius);
 static boolean gore_vehicle_node_is_wheel(long vehicle_index, short node_index);
 static struct model *gore_model_get(long definition_index);
 /* cache_files.c's */
@@ -533,7 +600,7 @@ static void gore_coverage_add(long vehicle_index, short node_index, real amount,
 
 static void gore_coverage_update(void)
 {
-	real seconds = (real)config_real("game.gore_blood_seconds");
+	real seconds = gore_blood_seconds();
 	real dry = seconds > 0.f ? 1.f / (seconds * 2.f * 30.f) : 0.f;
 	short index;
 
@@ -564,7 +631,12 @@ static void gore_chunk_color(long unit_definition_index, real_rgb_color *color)
 	color->red = 0.62f; color->green = 0.05f; color->blue = 0.04f;
 	if (!name)
 		return;
-	if (strstr(name, "hunter"))
+	if (strstr(name, "flood"))
+	{
+		/* the Flood's: pale, sickly yellow-green */
+		color->red = 0.66f; color->green = 0.72f; color->blue = 0.22f;
+	}
+	else if (strstr(name, "hunter"))
 	{
 		color->red = 0.95f; color->green = 0.42f; color->blue = 0.04f;
 	}
@@ -977,7 +1049,7 @@ static void gore_vehicle_run_over(long vehicle_index, long object_index, real_po
 			collision_test_vector(FLAG(_collision_test_front_facing_surfaces_bit) | FLAG(_collision_test_structure_bit),
 				&above, &down, NONE, &collision))
 		{
-			gore_blood_decal(decal_index, &collision, &down, 0.8f);
+			gore_blood_decal(decal_index, &collision, &down, 0.8f, object_get(object_index)->definition_index);
 		}
 	}
 	if (config_boolean("game.gore_log"))
@@ -1261,7 +1333,7 @@ static void gore_blood_effect_at(long effect_index, real_point3d const *position
 
 /* a blood decal, likewise (the extra ones beside it on its surface) */
 static void gore_blood_decal(long decal_index, struct collision_result const *collision,
-	real_vector3d const *velocity, real radius)
+	real_vector3d const *velocity, real radius, long unit_definition_index)
 {
 	short count;
 	short index;
@@ -1287,6 +1359,8 @@ static void gore_blood_decal(long decal_index, struct collision_result const *co
 		}
 		decal_new_from_collision(decal_index, &moved, velocity, radius, FALSE, NONE, NULL);
 	}
+	/* (bloody footprints: blood to step in, gore_bleed.c) */
+	gore_bleed_blood_spot(unit_definition_index, &collision->point, 0.35f / 3.048f * radius);
 }
 
 /* a garbage tag of the loaded map's, whose objects are garbage: what a
@@ -1600,7 +1674,7 @@ static struct gore_piece *gore_spawn_copy(long unit_index, unsigned long region_
 	piece->hunter = FALSE;
 	piece->chunk = chunk;
 	piece->age = 0;
-	piece->life = (long)(PIN(config_real("game.gore_piece_seconds"), 1.0, 3600.0) * 30.0);
+	piece->life = (long)(gore_piece_seconds() * 30.f);
 	piece->resting = FALSE;
 	piece->impacted = FALSE;
 	piece->blood_effect_index = blood_effect_index;
@@ -1660,7 +1734,7 @@ static struct gore_piece *gore_spawn_garbage_ex(char const *name, real_point3d c
 	piece->hunter = FALSE;
 	piece->chunk = chunk;
 	piece->age = 0;
-	piece->life = (long)(PIN(config_real("game.gore_piece_seconds"), 1.0, 3600.0) * 30.0);
+	piece->life = (long)(gore_piece_seconds() * 30.f);
 	piece->resting = FALSE;
 	piece->impacted = FALSE;
 	piece->blood_effect_index = blood_effect_index;
@@ -1985,6 +2059,9 @@ static void gore_unit_gib_pieces(struct gore_pending const *pending)
 		return;
 	}
 	gore_object_log_until = game_time_get() + 20 * 30;
+	if (config_boolean("game.gore_log"))
+		error(_error_silent, "gore: duration %s%s: blood %.0f s, pieces %.0f s, bodies kept x%.1f", config_string("game.gore_duration"),
+			game_engine_running() ? " (multiplayer)" : "", gore_blood_seconds(), gore_piece_seconds(), gore_corpse_limit_scale());
 	error(_error_silent, "gore: gib t%ld of %s at %ld (%s, %s)", game_time_get(), tag_get_name(unit->definition_index), unit_index,
 		network_game_distributed_client() ? "CLIENT" : "host", ((struct unit_datum *)unit)->unit.player_index != NONE ? "a player" : "not a player");
 	gore_launch_speed_sum = 0.f;
@@ -2161,7 +2238,7 @@ static void gore_unit_gib_pieces(struct gore_pending const *pending)
 				from.z += 0.5f;
 				if (collision_test_vector(_collision_test_environment_flags, &from, &down, unit_index, &collision))
 				{
-					gore_blood_decal(decal_index, &collision, &down, 1.4f);
+					gore_blood_decal(decal_index, &collision, &down, 1.4f, unit->definition_index);
 					made++;
 				}
 			}
@@ -2348,7 +2425,7 @@ static void gore_piece_update(struct gore_piece *piece)
 			if (piece->decal_index != NONE &&
 				collision_test_vector(_collision_test_environment_flags, &object->object.position, &down, piece->object_index, &collision))
 			{
-				gore_blood_decal(piece->decal_index, &collision, &down, piece->hunter ? 1.4f : 1.f);
+				gore_blood_decal(piece->decal_index, &collision, &down, piece->hunter ? 1.4f : 1.f, piece->unit_definition_index);
 			}
 		}
 		else if (!piece->impacted && piece->age <= (piece->hunter ? 90 : 36) && (piece->age % (piece->hunter ? 6 : 12)) == 0)
@@ -2387,7 +2464,7 @@ static void gore_piece_update(struct gore_piece *piece)
 						piece->age, piece->position.x, piece->position.y, piece->position.z);
 					piece->impacted = TRUE;
 					if (piece->decal_index != NONE)
-						gore_blood_decal(piece->decal_index, &collision, &step, piece->hunter ? 1.3f : 0.6f);
+						gore_blood_decal(piece->decal_index, &collision, &step, piece->hunter ? 1.3f : 0.6f, piece->unit_definition_index);
 					gore_blood_effect_at(piece->blood_effect_index, &collision.point, &collision.plane.n);
 				}
 				if (magnitude3d(&piece->velocity) < 0.02f && collision.plane.n.k > 0.5f)
@@ -2865,14 +2942,19 @@ static void gore_test_update(void)
 A sniper rifle kill on the head (the damage tag's name has "sniper" in it,
 and the hit was on a material the collision model flags as the head, which
 is what the engine's own headshot multiplier goes by) takes off the head
-only: a copy of the unit showing just the head flies off along the shot, and
-the body keeps its head drawn shrunk to the neck (only as drawn,
-gore_render_node_matrices: its own node matrices, which its limp body
-works on, are left alone) while it dies its normal death, the neck bleeding
-for a while. */
+only: it pops, a burst of blood out of the neck along the shot and up, a
+spray of small bloody bits all about (the blood effect thrown in many ways
+at once), and in the campaign a copy of the unit showing just the head
+flies off along the shot (a multiplayer game makes no object for it: its
+pieces are the body's parts only, the same as its gibs). The body keeps its
+head drawn shrunk to the neck (only as drawn, gore_render_node_matrices:
+its own node matrices, which its limp body works on, are left alone) while
+it dies its normal death (its spin, its fall), the neck spurting in pulses,
+fast then slower, for five seconds, and dripping on the ground below. */
 
 #define GORE_MAXIMUM_HEADLESS 64
-#define GORE_NECK_BLEED_TICKS 150
+#define GORE_NECK_BLEED_TICKS 150 /* (spurts: every 5 ticks at first, every 15 at the end) */
+#define GORE_NECK_DRIP_TICKS 90
 
 struct gore_headless
 {
@@ -2880,6 +2962,8 @@ struct gore_headless
 	short head_node;
 	long time;
 	long bleed_effect_index;
+	long burst_effect_index; /* (the pop's, the bigger) */
+	long decal_index; /* the neck's drips */
 	signed char in_head[GORE_MAXIMUM_NODES]; /* the head's nodes */
 };
 
@@ -2913,6 +2997,51 @@ static boolean gore_headshot_unit_kind(long definition_index)
 			return TRUE;
 	}
 	return FALSE;
+}
+
+/* the pop: blood out of the neck along the shot and up, and bits of the
+head every way (the blood effect, thrown at once in many directions; the
+map's own particles, no object), a splat on the ground under it */
+static void gore_headshot_pop(struct gore_headless const *headless, real_vector3d const *direction)
+{
+	struct object_datum *unit = object_get(headless->unit_index);
+	real_matrix4x3 const *matrices = object_get_node_matrices(headless->unit_index);
+	real_point3d head;
+	short sprays = (short)(gore_level() >= _gore_level_extreme ? 10 : gore_level() >= _gore_level_heavy ? 7 : 4);
+	short index;
+
+	if (headless->head_node >= (short)(unit->object.node_matrices.size / (long)sizeof(real_matrix4x3)))
+		return;
+	head = matrices[headless->head_node].position;
+	{
+		real_vector3d along = *direction;
+
+		along.k += 0.4f;
+		normalize3d(&along);
+		gore_blood_effect_at(headless->burst_effect_index, &head, &along);
+	}
+	for (index = 0; index < sprays; index++)
+	{
+		real_vector3d way;
+		real_point3d point = head;
+
+		seed_random_direction3d(&gore_jitter_seed, &way);
+		/* (more along the shot, and up) */
+		way.i += direction->i * 0.8f;
+		way.j += direction->j * 0.8f;
+		way.k = fabsf(way.k) + 0.3f;
+		normalize3d(&way);
+		point_from_line3d(&point, &way, 0.05f, &point);
+		gore_effect_at(index & 1 ? headless->bleed_effect_index : headless->burst_effect_index, &point, &way);
+	}
+	if (headless->decal_index != NONE)
+	{
+		struct collision_result collision;
+		real_vector3d down = { direction->i * 0.6f, direction->j * 0.6f, -2.f };
+
+		if (collision_test_vector(_collision_test_environment_flags, &head, &down, headless->unit_index, &collision))
+			gore_blood_decal(headless->decal_index, &collision, &down, 1.f, unit->definition_index);
+	}
 }
 
 boolean gore_unit_headshot(long unit_index, struct damage_data const *damage, boolean head)
@@ -2988,13 +3117,19 @@ boolean gore_unit_headshot(long unit_index, struct damage_data const *damage, bo
 	if (normalize3d(&direction) == 0.f)
 		direction = *global_up3d;
 	gore_piece_unit_definition = unit->definition_index;
-	/* (the head piece's burst at the neck is gore_spawn_copy's) */
-	gore_spawn_copy(unit_index, 0xFFFFFFFF, head_node, collapse, &direction, 1.f, blood_effect_index, decal_index, FALSE);
+	/* (the head piece's burst at the neck is gore_spawn_copy's; a
+	multiplayer game's head is gone in the pop, no object made for it) */
+	if (!game_engine_running())
+		gore_spawn_copy(unit_index, 0xFFFFFFFF, head_node, collapse, &direction, 1.f, blood_effect_index, decal_index, FALSE);
 	headless->unit_index = unit_index;
 	headless->head_node = head_node;
 	headless->time = game_time_get();
+	headless->burst_effect_index = blood_effect_index;
+	headless->decal_index = decal_index;
+	gore_headshot_pop(headless, &direction);
 	if (config_boolean("game.gore_log"))
-		error(_error_silent, "gore: sniper headshot: %s lost its head (%s)", tag_get_name(unit->definition_index), damage_name);
+		error(_error_silent, "gore: sniper headshot: %s lost its head (%s)%s", tag_get_name(unit->definition_index), damage_name,
+			game_engine_running() ? ": popped (multiplayer: no head object)" : "");
 	return TRUE;
 }
 
@@ -3018,13 +3153,26 @@ static void gore_headless_update(void)
 			continue;
 		}
 		age = game_time_get() - headless->time;
-		if (age > 0 && age < GORE_NECK_BLEED_TICKS && (age % 10) == 0 && headless->bleed_effect_index != NONE)
+		/* the neck spurts in pulses, fast while it spins and drops, then
+		slower (a heartbeat running down), out along the neck */
+		if (age > 0 && age < GORE_NECK_BLEED_TICKS && headless->bleed_effect_index != NONE &&
+			headless->head_node < (short)(unit->object.node_matrices.size / (long)sizeof(real_matrix4x3)) &&
+			(age % (age < 45 ? 5 : age < 100 ? 9 : 15)) == 0)
 		{
 			real_matrix4x3 const *matrices = object_get_node_matrices(headless->unit_index);
+			real_vector3d out = matrices[headless->head_node].forward;
 
-			if (headless->head_node < (short)(unit->object.node_matrices.size / (long)sizeof(real_matrix4x3)))
-				gore_blood_effect_at(headless->bleed_effect_index, &matrices[headless->head_node].position,
-					&matrices[headless->head_node].forward);
+			gore_blood_effect_at(headless->bleed_effect_index, &matrices[headless->head_node].position, &out);
+			/* (and a drip under it, now and then) */
+			if (headless->decal_index != NONE && (age % 30) == 0 && age <= GORE_NECK_DRIP_TICKS)
+			{
+				struct collision_result collision;
+				real_vector3d down = { 0.f, 0.f, -2.f };
+
+				if (collision_test_vector(_collision_test_environment_flags, &matrices[headless->head_node].position, &down,
+						headless->unit_index, &collision))
+					gore_blood_decal(headless->decal_index, &collision, &down, 0.5f, unit->definition_index);
+			}
 		}
 	}
 }
@@ -3822,6 +3970,110 @@ boolean gore_biped_impact(long biped_index, real_vector3d const *velocity, real_
 	return gore_unit_gib_pending(biped_index);
 }
 
+/* ---------- the Flood
+
+A combat form (human or elite) hit hard enough to gib anyone else keeps its
+own death, its body whole (the stock game raises combat forms again; gore
+takes nothing from that), and bursts: its stock blood effect thrown out
+several ways, a splat of its pale yellow-green blood on the ground (the
+impact splat's, smaller), and in the campaign a few of the map's own Flood
+flesh bits (innards, skin, limbs: garbage) flying off along the hit, as
+pieces (local, gone with the others). Infection forms and carriers pop their
+own stock way. Its body at rest bleeds the same colour (gore_bleed.c). */
+
+static boolean gore_flood_combat_form(long definition_index)
+{
+	char const *name = definition_index != NONE ? tag_get_name(definition_index) : NULL;
+
+	return name && strstr(name, "flood") && !strstr(name, "infection") && !strstr(name, "carrier");
+}
+
+static long gore_flood_bursts; /* (the numbers) */
+
+boolean gore_flood_burst(long unit_index, struct damage_data const *damage, real force)
+{
+	static char const *const flood_flesh[] =
+	{
+		"characters\\floodcombat_human\\flood_bit_innards\\flood_bit_innards",
+		"characters\\floodcombat_human\\flood_bit_skin\\flood_bit_skin",
+		"characters\\floodcombat_human\\flood_bit_limbs\\flood_bit_limbs",
+	};
+	struct object_datum *unit = object_try_and_get_and_verify_type(unit_index, _object_mask_biped);
+	struct damage_resistance const *resistance;
+	real_vector3d direction;
+	real_point3d center;
+	short bits;
+	short made = 0;
+	short sprays;
+	short index;
+
+	if (!unit || !gore_enabled() || !gore_flood_combat_form(unit->definition_index) ||
+		!config_boolean("game.gore_flood") || gore_object_is_piece(unit_index))
+		return FALSE;
+	center = unit->object.bounding_sphere_center;
+	direction = damage->direction;
+	if (normalize3d(&direction) == 0.f)
+		direction = *global_up3d;
+	resistance = gore_resistance_get(unit->definition_index);
+	sprays = (short)(gore_level() >= _gore_level_extreme ? 5 : gore_level() >= _gore_level_heavy ? 3 : 2);
+	if (resistance)
+	{
+		long effect_index = resistance->area_damage_effect.index != NONE ? resistance->area_damage_effect.index :
+			resistance->localized_damage_effect.index != NONE ? resistance->localized_damage_effect.index :
+			resistance->body_destroyed_effect.index;
+
+		for (index = 0; index < sprays && effect_index != NONE; index++)
+		{
+			real_vector3d way;
+			real_point3d at = center;
+
+			seed_random_direction3d(&gore_jitter_seed, &way);
+			way.i += direction.i;
+			way.j += direction.j;
+			way.k = fabsf(way.k) + 0.2f;
+			normalize3d(&way);
+			point_from_line3d(&at, &way, unit->object.bounding_sphere_radius * 0.4f, &at);
+			gore_blood_effect_at(effect_index, &at, &way);
+		}
+	}
+	/* its blood on the ground under it */
+	{
+		struct collision_result collision;
+		real_vector3d down = { 0.f, 0.f, -2.f };
+
+		if (collision_test_vector(_collision_test_environment_flags, &center, &down, unit_index, &collision) &&
+			collision.plane.n.k > 0.5f)
+		{
+			real threshold = gore_impact_threshold(NULL);
+
+			gore_bleed_impact_splat(unit->definition_index, &collision.point, &collision.plane.n,
+				threshold * PIN(force, 1.f, 2.f), threshold);
+		}
+	}
+	/* the campaign's flesh (a multiplayer game's pieces are bodies' parts only) */
+	bits = (short)(gore_level() >= _gore_level_extreme ? 6 : gore_level() >= _gore_level_heavy ? 4 : 2);
+	if (!game_engine_running())
+	{
+		gore_piece_unit_definition = unit->definition_index;
+		for (index = 0; index < bits; index++)
+		{
+			real_vector3d offset;
+			real_point3d at;
+
+			seed_random_direction3d(&gore_jitter_seed, &offset);
+			point_from_line3d(&center, &offset, unit->object.bounding_sphere_radius * 0.3f, &at);
+			if (gore_spawn_garbage_ex(flood_flesh[index % NUMBEROF(flood_flesh)], &at, &direction,
+					PIN(force, 1.f, 2.f) * 0.8f, NONE, NONE, FALSE))
+				made++;
+		}
+	}
+	gore_flood_bursts++;
+	if (config_boolean("game.gore_log"))
+		error(_error_silent, "gore: Flood burst of %s (force %.2f): %d sprays, %d flesh bits%s", tag_get_name(unit->definition_index),
+			force, sprays, made, game_engine_running() ? " (multiplayer: none)" : "");
+	return TRUE;
+}
+
 boolean gore_unit_hit(long unit_index, struct damage_data const *damage, real normalized_damage)
 {
 	struct object_datum *unit = object_try_and_get_and_verify_type(unit_index, _object_mask_biped);
@@ -3867,12 +4119,17 @@ boolean gore_unit_hit(long unit_index, struct damage_data const *damage, real no
 		gore_last_impact = FALSE;
 		return FALSE;
 	}
-	/* the Flood: its own death, no blood on the vehicle, no shotgun gib */
+	/* the Flood: its own death (a combat form's body stays, to rise again
+	as the stock game has it), no shotgun gib; a hit hard enough to gib
+	anyone else bursts a combat form with its blood and flesh
+	(gore_flood_burst) */
 	if (gore_is_flood(unit->definition_index))
 	{
+		boolean burst = force >= 1.f && gore_flood_burst(unit_index, damage, force);
+
 		if (config_boolean("game.gore_log"))
-			error(_error_silent, "gore: %s is Flood: its own death, no gore%s", tag_get_name(unit->definition_index),
-				TEST_FLAG(unit->object.damage_flags, _object_dead_bit) ? " (a corpse)" : "");
+			error(_error_silent, "gore: %s is Flood: its own death%s%s", tag_get_name(unit->definition_index),
+				burst ? ", a Flood burst" : ", no gore", TEST_FLAG(unit->object.damage_flags, _object_dead_bit) ? " (a corpse)" : "");
 		return FALSE;
 	}
 	gore_last_force = force;
@@ -3893,7 +4150,7 @@ boolean gore_unit_hit(long unit_index, struct damage_data const *damage, real no
 	}
 	if (damage->vehicle_impact_speed > 0.f && type && force > 0.f)
 	{
-		decal_lifetime_minimum = (real)config_real("game.gore_blood_seconds");
+		decal_lifetime_minimum = gore_blood_seconds();
 		gore_vehicle_hit_blood(damage->vehicle_impact_object_index, unit_index, force);
 		decal_lifetime_minimum = 0.f;
 	}
@@ -3978,7 +4235,7 @@ void gore_update(void)
 		gore_reset();
 		initialized = TRUE;
 	}
-	decal_lifetime_minimum = (real)config_real("game.gore_blood_seconds");
+	decal_lifetime_minimum = gore_blood_seconds();
 	gore_test_update();
 	for (index = 0; index < GORE_MAXIMUM_PENDING; index++)
 	{

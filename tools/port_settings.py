@@ -129,6 +129,9 @@ SCREENS = {
             ("GORE:", "game.gore_level",
              [("OFF", "off"), ("MILD", "mild"), ("HEAVY", "heavy"), ("EXTREME", "extreme")],
              "Kills by a close blast, a fast vehicle, a point-\nblank shotgun or a headshot come apart. Mild: half\nthe blood and force. Extreme: more, and chunks.", None),
+            ("GORE DURATION:", "game.gore_duration",
+             [("NORMAL", "normal"), ("LONG", "long"), ("VERY LONG", "very_long"), ("PERMANENT", "permanent")],
+             "How long blood, pieces and bodies stay. Long:\ntwice; Very Long: four times. Permanent: until\nthe limits. Multiplayer: Long at most.", None),
             ("CORPSE BLEED:", "game.gore_corpse_bleed", ON_OFF,
              "With gore on, a body at rest pools blood that\nruns down a slope. Off: no pools or runs.", None),
             # (manual_respawn.c: the campaign alone; with the gore mod's
@@ -247,7 +250,7 @@ _graphics = {"display.high_res_hud", "display.hud_button_style", "display.high_r
 # (the visual modifiers: a screen of their own, Extra Effects)
 _extra_effects = {"display.shield_glow", "display.shield_glow_intensity",
                   "display.overshield_effect", "display.hdr", "display.hdr_output",
-                  "game.gore_level", "game.gore_corpse_bleed", "game.manual_respawn"}
+                  "game.gore_level", "game.gore_duration", "game.gore_corpse_bleed", "game.manual_respawn"}
 SCREENS["video_settings/graphics"] = {
     "screen": "graphics_settings_screen", "header": _video["header"], "spacing": 30,
     "same_place": ["anti_aliasing_android"],
