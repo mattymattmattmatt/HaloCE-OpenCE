@@ -127,6 +127,9 @@ struct gore_bleed_species
 /* (the first that matches; the last is anyone else with blood) */
 static struct gore_bleed_species const gore_bleed_species[] =
 {
+	/* (first: "floodcombat elite" is no elite) the Flood's combat forms:
+	thin, pale yellow-green, its colour layer over the plain splat */
+	{ "flood", 1.2f, 1, 2, 0.07f, "effects\\decals\\blood splats\\blood splat", 1, 0.45f, NULL, 1.f },
 	{ "grunt", 0.6f, 1, 2, 0.065f, "effects\\decals\\blood splats\\blood grunt splat", 1, 0.55f, NULL, 0.f },
 	{ "jackal", 1.0f, 2, 3, 0.075f, "effects\\decals\\blood splats\\blood grunt splat", 1, 0.65f, NULL, 0.f },
 	{ "elite", 2.4f, 3, 4, 0.095f, "effects\\decals\\blood splats\\blood elite splat", 1, 0.85f, NULL, 0.85f },
@@ -138,7 +141,9 @@ static struct gore_bleed_species const gore_bleed_species[] =
 	{ "", 1.6f, 2, 3, 0.08f, "effects\\decals\\blood splats\\blood splat", 1, 0.7f, NULL, 0.5f },
 };
 
-static char const *const gore_bleed_never[] = { "flood", "sentinel", "monitor", "engineer" };
+/* (the Flood's combat forms bleed, their pale yellow-green; its infection
+forms and carriers pop their own stock way) */
+static char const *const gore_bleed_never[] = { "infection", "carrier", "sentinel", "monitor", "engineer" };
 
 /* the nodes rivulets start from (any the model has) */
 static char const *const gore_bleed_node_names[GORE_BLEED_MAXIMUM_NODES] =
@@ -1927,7 +1932,7 @@ short gore_bleed_impact_splat(long unit_definition_index, real_point3d const *po
 	{
 		char const *name = tag_get_name(unit_definition_index);
 
-		/* (the Flood never: gore.c never asks for it) */
+		/* (a Flood infection form or carrier: their own stock pop) */
 		if (name && strstr(name, "flood"))
 			return 0;
 		species = (short)(NUMBEROF(gore_bleed_species) - 1);

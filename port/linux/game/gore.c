@@ -139,7 +139,7 @@ static struct gore_unit_type const gore_unit_types[] =
 	stock destruction (damage.c: the gib is taken instead of
 	object_destroy, so a carrier never burst, nor a combat form threw its
 	own bits) and gore_unit_gib then deleted it: it vanished. */
-	{ "flood", 0.f, 0.f, NULL, TRUE },
+	{ "flood", 2.5f, 4.f, NULL, TRUE }, /* (its force: for gore_flood_burst; never gibbed) */
 	{ "hunter", 0.f, 0.f, NULL, TRUE },
 	{ "grunt", 2.8f, 3.f, "effects\\decals\\blood splats\\blood grunt splat", FALSE },
 	{ "jackal", 2.5f, 3.5f, "effects\\decals\\blood splats\\blood grunt splat", FALSE },
@@ -631,7 +631,12 @@ static void gore_chunk_color(long unit_definition_index, real_rgb_color *color)
 	color->red = 0.62f; color->green = 0.05f; color->blue = 0.04f;
 	if (!name)
 		return;
-	if (strstr(name, "hunter"))
+	if (strstr(name, "flood"))
+	{
+		/* the Flood's: pale, sickly yellow-green */
+		color->red = 0.66f; color->green = 0.72f; color->blue = 0.22f;
+	}
+	else if (strstr(name, "hunter"))
 	{
 		color->red = 0.95f; color->green = 0.42f; color->blue = 0.04f;
 	}
@@ -3965,6 +3970,110 @@ boolean gore_biped_impact(long biped_index, real_vector3d const *velocity, real_
 	return gore_unit_gib_pending(biped_index);
 }
 
+/* ---------- the Flood
+
+A combat form (human or elite) hit hard enough to gib anyone else keeps its
+own death, its body whole (the stock game raises combat forms again; gore
+takes nothing from that), and bursts: its stock blood effect thrown out
+several ways, a splat of its pale yellow-green blood on the ground (the
+impact splat's, smaller), and in the campaign a few of the map's own Flood
+flesh bits (innards, skin, limbs: garbage) flying off along the hit, as
+pieces (local, gone with the others). Infection forms and carriers pop their
+own stock way. Its body at rest bleeds the same colour (gore_bleed.c). */
+
+static boolean gore_flood_combat_form(long definition_index)
+{
+	char const *name = definition_index != NONE ? tag_get_name(definition_index) : NULL;
+
+	return name && strstr(name, "flood") && !strstr(name, "infection") && !strstr(name, "carrier");
+}
+
+static long gore_flood_bursts; /* (the numbers) */
+
+boolean gore_flood_burst(long unit_index, struct damage_data const *damage, real force)
+{
+	static char const *const flood_flesh[] =
+	{
+		"characters\\floodcombat_human\\flood_bit_innards\\flood_bit_innards",
+		"characters\\floodcombat_human\\flood_bit_skin\\flood_bit_skin",
+		"characters\\floodcombat_human\\flood_bit_limbs\\flood_bit_limbs",
+	};
+	struct object_datum *unit = object_try_and_get_and_verify_type(unit_index, _object_mask_biped);
+	struct damage_resistance const *resistance;
+	real_vector3d direction;
+	real_point3d center;
+	short bits;
+	short made = 0;
+	short sprays;
+	short index;
+
+	if (!unit || !gore_enabled() || !gore_flood_combat_form(unit->definition_index) ||
+		!config_boolean("game.gore_flood") || gore_object_is_piece(unit_index))
+		return FALSE;
+	center = unit->object.bounding_sphere_center;
+	direction = damage->direction;
+	if (normalize3d(&direction) == 0.f)
+		direction = *global_up3d;
+	resistance = gore_resistance_get(unit->definition_index);
+	sprays = (short)(gore_level() >= _gore_level_extreme ? 5 : gore_level() >= _gore_level_heavy ? 3 : 2);
+	if (resistance)
+	{
+		long effect_index = resistance->area_damage_effect.index != NONE ? resistance->area_damage_effect.index :
+			resistance->localized_damage_effect.index != NONE ? resistance->localized_damage_effect.index :
+			resistance->body_destroyed_effect.index;
+
+		for (index = 0; index < sprays && effect_index != NONE; index++)
+		{
+			real_vector3d way;
+			real_point3d at = center;
+
+			seed_random_direction3d(&gore_jitter_seed, &way);
+			way.i += direction.i;
+			way.j += direction.j;
+			way.k = fabsf(way.k) + 0.2f;
+			normalize3d(&way);
+			point_from_line3d(&at, &way, unit->object.bounding_sphere_radius * 0.4f, &at);
+			gore_blood_effect_at(effect_index, &at, &way);
+		}
+	}
+	/* its blood on the ground under it */
+	{
+		struct collision_result collision;
+		real_vector3d down = { 0.f, 0.f, -2.f };
+
+		if (collision_test_vector(_collision_test_environment_flags, &center, &down, unit_index, &collision) &&
+			collision.plane.n.k > 0.5f)
+		{
+			real threshold = gore_impact_threshold(NULL);
+
+			gore_bleed_impact_splat(unit->definition_index, &collision.point, &collision.plane.n,
+				threshold * PIN(force, 1.f, 2.f), threshold);
+		}
+	}
+	/* the campaign's flesh (a multiplayer game's pieces are bodies' parts only) */
+	bits = (short)(gore_level() >= _gore_level_extreme ? 6 : gore_level() >= _gore_level_heavy ? 4 : 2);
+	if (!game_engine_running())
+	{
+		gore_piece_unit_definition = unit->definition_index;
+		for (index = 0; index < bits; index++)
+		{
+			real_vector3d offset;
+			real_point3d at;
+
+			seed_random_direction3d(&gore_jitter_seed, &offset);
+			point_from_line3d(&center, &offset, unit->object.bounding_sphere_radius * 0.3f, &at);
+			if (gore_spawn_garbage_ex(flood_flesh[index % NUMBEROF(flood_flesh)], &at, &direction,
+					PIN(force, 1.f, 2.f) * 0.8f, NONE, NONE, FALSE))
+				made++;
+		}
+	}
+	gore_flood_bursts++;
+	if (config_boolean("game.gore_log"))
+		error(_error_silent, "gore: Flood burst of %s (force %.2f): %d sprays, %d flesh bits%s", tag_get_name(unit->definition_index),
+			force, sprays, made, game_engine_running() ? " (multiplayer: none)" : "");
+	return TRUE;
+}
+
 boolean gore_unit_hit(long unit_index, struct damage_data const *damage, real normalized_damage)
 {
 	struct object_datum *unit = object_try_and_get_and_verify_type(unit_index, _object_mask_biped);
@@ -4010,12 +4119,17 @@ boolean gore_unit_hit(long unit_index, struct damage_data const *damage, real no
 		gore_last_impact = FALSE;
 		return FALSE;
 	}
-	/* the Flood: its own death, no blood on the vehicle, no shotgun gib */
+	/* the Flood: its own death (a combat form's body stays, to rise again
+	as the stock game has it), no shotgun gib; a hit hard enough to gib
+	anyone else bursts a combat form with its blood and flesh
+	(gore_flood_burst) */
 	if (gore_is_flood(unit->definition_index))
 	{
+		boolean burst = force >= 1.f && gore_flood_burst(unit_index, damage, force);
+
 		if (config_boolean("game.gore_log"))
-			error(_error_silent, "gore: %s is Flood: its own death, no gore%s", tag_get_name(unit->definition_index),
-				TEST_FLAG(unit->object.damage_flags, _object_dead_bit) ? " (a corpse)" : "");
+			error(_error_silent, "gore: %s is Flood: its own death%s%s", tag_get_name(unit->definition_index),
+				burst ? ", a Flood burst" : ", no gore", TEST_FLAG(unit->object.damage_flags, _object_dead_bit) ? " (a corpse)" : "");
 		return FALSE;
 	}
 	gore_last_force = force;
