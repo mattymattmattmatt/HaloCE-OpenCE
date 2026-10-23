@@ -2798,13 +2798,13 @@ pad and toes (grunt), a narrow pad and claws (jackal), a big pad and toes
 the species' splat sprite (bleed quads: the same layers as an impact splat,
 so the same colour on any ground), left and right in turn, put down at the
 foot's node a stride apart, turned the way it walks; each fainter than the
-last, gone after 8 to 12 steps. Local cosmetics like every bleed quad; the
+last, gone after 12 to 18 steps. Local cosmetics like every bleed quad; the
 gore level's (Off: none); fewer at once in multiplayer.
 game.gore_footprints. */
 
 #define GORE_FOOTPRINT_MAXIMUM_SPOTS 64
 #define GORE_FOOTPRINT_MAXIMUM_WALKERS 24
-#define GORE_FOOTPRINT_MAXIMUM_PRINTS 72
+#define GORE_FOOTPRINT_MAXIMUM_PRINTS 96
 #define GORE_FOOTPRINT_MAXIMUM_PRINTS_MP 32
 #define GORE_FOOTPRINT_MAXIMUM_BLOBS 5
 #define GORE_FOOTPRINT_MAXIMUM_QUADS (GORE_FOOTPRINT_MAXIMUM_BLOBS * 4)
@@ -3214,7 +3214,7 @@ static void footprints_update(void)
 		{
 			/* (in it: the prints start where it steps out) */
 			walker->blood_definition_index = blood;
-			walker->steps = (short)(8 + (short)bleed_random(0.f, 4.99f));
+			walker->steps = (short)(12 + (short)bleed_random(0.f, 6.99f));
 			walker->steps_left = walker->steps;
 			walker->last = biped->object.position;
 			continue;

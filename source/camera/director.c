@@ -141,6 +141,12 @@ symbols in this file:
 
 /* network_game_globals.c's */
 boolean network_game_distributed_client(void);
+/* port_config.c */
+int config_boolean(const char *name);
+
+/* port: how many death cameras were started (the manual respawn test's
+log: one a death, never one a button press) */
+long director_port_dead_cameras = 0;
 
 /* ---------- constants */
 
@@ -699,8 +705,15 @@ static void director_choose_camera_game(
 {
 	struct director *director = director_get(local_player_index);
 
+	/* port: whether each local player was watching its death camera: the
+	first frame alive again (a respawn, a revert to a checkpoint) the view is
+	the game's own again, whatever happened while dead */
+	static boolean was_dead[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
+
 	if (initialize)
 	{
+		was_dead[local_player_index] = FALSE;
+		director->debug_controls = FALSE;
 		first_person_camera_new((struct first_person_camera *)director->camera_data);
 		director_set_camera(
 			local_player_index,
@@ -739,6 +752,7 @@ static void director_choose_camera_game(
 						(struct dead_camera *)director->camera_data,
 						local_player_index,
 						watched_unit_index);
+					director_port_dead_cameras++;
 					director_set_camera(
 						local_player_index,
 						(director_camera_update_proc)dead_camera_update,
@@ -746,9 +760,15 @@ static void director_choose_camera_game(
 				}
 				if (watched_unit_index != NONE)
 					coop_spectate_camera((struct dead_camera *)director->camera_data);
+				was_dead[local_player_index] = TRUE;
 			}
-			else if (director->camera_proc == (director_camera_update_proc)dead_camera_update)
+			else if (director->camera_proc == (director_camera_update_proc)dead_camera_update ||
+				was_dead[local_player_index])
 			{
+				/* port: (any camera left from the death: first person, or the
+				seat's own third person) */
+				was_dead[local_player_index] = FALSE;
+				director->debug_controls = FALSE;
 				director_choose_game_perspective(local_player_index, TRUE);
 			}
 		}
@@ -804,6 +824,52 @@ static void director_choose_camera_script_camera_record(
 	return;
 }
 
+/* port: the game's (not the editor's) view of a local player who is dead:
+the death camera, or no unit. Then no button of the debug cameras applies
+(switch grenades held, zoom, the triggers, Backspace, Tab, the right mouse
+button): they would turn the death camera into a flying one that swallows the
+look, or start it again somewhere else, and one switched as the player came
+back stays on, third person, after the respawn. */
+static boolean director_port_dead_view(
+	short local_player_index)
+{
+	struct director *director = director_get(local_player_index);
+	long player_index = local_player_get_player_index(local_player_index);
+
+	if (director_globals.game_mode != _director_mode_game &&
+		director_globals.game_mode != _director_mode_netgame)
+	{
+		return FALSE;
+	}
+	return director->camera_proc == (director_camera_update_proc)dead_camera_update ||
+		(player_index != NONE && player_get(player_index)->unit_index == NONE);
+}
+
+/* port: whether the hold that switches the camera (the gamepad's switch
+grenades, held a second; Backspace) does, in the game: only with
+debug.camera_switch on (a developer's camera; holding switch grenades, R1 on
+the touch controls, is ordinary play), never for a dead player, nor a hold
+that began while dead (held through the respawn) */
+static boolean director_port_switch_allowed(
+	short local_player_index,
+	boolean held)
+{
+	static boolean held_since_death[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
+
+	if (director_globals.game_mode != _director_mode_game &&
+		director_globals.game_mode != _director_mode_netgame)
+	{
+		return TRUE;
+	}
+	if (!held)
+		held_since_death[local_player_index] = FALSE;
+	else if (director_port_dead_view(local_player_index))
+		held_since_death[local_player_index] = TRUE;
+	return !held_since_death[local_player_index] &&
+		!director_port_dead_view(local_player_index) &&
+		config_boolean("debug.camera_switch");
+}
+
 static boolean director_update_controls(
 	short local_player_index,
 	struct camera_control *controls)
@@ -840,11 +906,22 @@ static boolean director_update_controls(
 				ticks != last_ticks[local_player_index];
 			last_ticks[local_player_index] = ticks;
 		}
+		/* port: (director_port_switch_allowed) */
+		if (!director_port_switch_allowed(local_player_index,
+				gamepad->buttons[_gamepad_analog_button_black] != 0))
+		{
+			switch_camera = FALSE;
+		}
+		/* port: and no debug camera controls for the dead (zoom toggled
+		them, swallowing the death camera's look) */
+		if (director_port_dead_view(local_player_index))
+			director->debug_controls = FALSE;
 
 		if (director->camera_proc !=
 				(director_camera_update_proc)first_person_camera_update &&
 			director->camera_proc !=
-				(director_camera_update_proc)following_camera_update)
+				(director_camera_update_proc)following_camera_update &&
+			!director_port_dead_view(local_player_index))
 		{
 			if (gamepad->buttons[_gamepad_binary_button_right_thumb] == 1)
 				director->debug_controls = !director->debug_controls;
@@ -892,8 +969,13 @@ static boolean director_update_controls(
 		struct mouse_state const *mouse = input_get_mouse_state();
 
 		switch_camera = input_key_is_down(_key_backspace) == TRUE;
-		/* port: the passenger follows their aim, never the debug mouse orbit */
-		if (!passenger_camera_enabled(local_player_index) && ((director->camera_proc !=
+		/* port: (director_port_switch_allowed) */
+		if (!director_port_switch_allowed(local_player_index, input_key_is_down(_key_backspace) != 0))
+			switch_camera = FALSE;
+		/* port: the passenger follows their aim, never the debug mouse orbit;
+		nor the dead their death camera's turn (director_port_dead_view) */
+		if (!passenger_camera_enabled(local_player_index) &&
+			!director_port_dead_view(local_player_index) && ((director->camera_proc !=
 				(director_camera_update_proc)first_person_camera_update &&
 			mouse->buttons[1]) || input_key_is_down(_key_tab)))
 		{
@@ -1099,3 +1181,27 @@ short director_camera_deterministic(
 }
 
 /* ---------- private code */
+
+/* port: the local player's camera, by name (the manual respawn test's log) */
+char const *director_port_camera_name(
+	short local_player_index)
+{
+	struct director *director;
+
+	if (local_player_index < 0 || local_player_index >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+		return "none";
+	director = director_get(local_player_index);
+	if (director->camera_proc == (director_camera_update_proc)first_person_camera_update)
+		return "first person";
+	if (director->camera_proc == (director_camera_update_proc)following_camera_update)
+		return "following";
+	if (director->camera_proc == (director_camera_update_proc)dead_camera_update)
+		return "dead";
+	if (director->camera_proc == (director_camera_update_proc)flying_camera_update)
+		return "flying";
+	if (director->camera_proc == (director_camera_update_proc)orbiting_camera_update)
+		return "orbiting";
+	if (director->camera_proc == (director_camera_update_proc)scripted_camera_update)
+		return "scripted";
+	return "other";
+}

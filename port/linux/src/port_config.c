@@ -458,7 +458,7 @@ static const struct config_setting config_settings[] =
 	{ "game.gore_headshots", _config_boolean, "true", "HALO_GORE_HEADSHOTS", _environment_value, _platform_all,
 		"Gore: a sniper rifle kill on the head of a grunt, jackal, elite, marine or the player takes only the head off." },
 	{ "game.gore_footprints", _config_boolean, "true", "HALO_GORE_FOOTPRINTS", _environment_value, _platform_all,
-		"Gore: anyone who walks through blood leaves bloody footprints of their own feet, fading over 8 to 12 steps." },
+		"Gore: anyone who walks through blood leaves bloody footprints of their own feet, fading over 12 to 18 steps." },
 	{ "game.gore_flood", _config_boolean, "true", "HALO_GORE_FLOOD", _environment_value, _platform_all,
 		"Gore: a Flood combat form hit hard enough to gib bursts with its pale yellow-green blood and flesh (its body stays, to rise again); its bodies bleed that colour." },
 	{ "game.gore_shotgun", _config_boolean, "true", "HALO_GORE_SHOTGUN", _environment_value, _platform_all,
@@ -789,6 +789,16 @@ static const struct config_setting config_settings[] =
 		_platform_all,
 		"With debug.manual_respawn_test: press jump this many seconds after the\n"
 		"death. 0: never." },
+	{ "debug.manual_respawn_test_buttons", _config_string, "\"\"", "HALO_MANUAL_RESPAWN_TEST_BUTTONS", _environment_value,
+		_platform_all,
+		"With debug.manual_respawn_test: other buttons to press, comma separated,\n"
+		"each name@seconds after the death[:seconds held] (a b x y black white\n"
+		"lt rt back ls rs up down left right, stick: the right stick turning),\n"
+		"held over a revert as given." },
+	{ "debug.camera_switch", _config_boolean, "false", "HALO_CAMERA_SWITCH", _environment_value, _platform_all,
+		"In a game, holding switch grenades a second (or Backspace) cycles the\n"
+		"developers' cameras (flying, third person). Off: it does not, so\n"
+		"holding the button in play keeps the player's view. Never while dead." },
 	{ "debug.manual_respawn_test_look", _config_real, "0.0", "HALO_MANUAL_RESPAWN_TEST_LOOK", _environment_value,
 		_platform_all,
 		"With debug.manual_respawn_test: while the prompt waits, turn the dead\n"

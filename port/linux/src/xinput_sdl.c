@@ -900,6 +900,38 @@ static void test_input_menu_gamepad(XINPUT_GAMEPAD *pad)
 	}
 }
 
+/* manual_respawn.c: debug.manual_respawn_test_buttons' buttons held now */
+unsigned long manual_respawn_test_buttons(void);
+
+static void manual_respawn_test_pad(XINPUT_GAMEPAD *pad)
+{
+	static const int analog[] =
+	{
+		XINPUT_GAMEPAD_A, XINPUT_GAMEPAD_B, XINPUT_GAMEPAD_X, XINPUT_GAMEPAD_Y,
+		XINPUT_GAMEPAD_BLACK, XINPUT_GAMEPAD_WHITE, XINPUT_GAMEPAD_LEFT_TRIGGER, XINPUT_GAMEPAD_RIGHT_TRIGGER
+	};
+	static const WORD digital[] =
+	{
+		XINPUT_GAMEPAD_BACK, XINPUT_GAMEPAD_LEFT_THUMB, XINPUT_GAMEPAD_RIGHT_THUMB,
+		XINPUT_GAMEPAD_DPAD_UP, XINPUT_GAMEPAD_DPAD_DOWN, XINPUT_GAMEPAD_DPAD_LEFT, XINPUT_GAMEPAD_DPAD_RIGHT
+	};
+	unsigned long held = manual_respawn_test_buttons();
+	int index;
+
+	for (index = 0; index < 8; index++)
+	{
+		if (held & (1UL << index))
+			pad->bAnalogButtons[analog[index]] = 0xff;
+	}
+	for (index = 0; index < 7; index++)
+	{
+		if (held & (1UL << (8 + index)))
+			pad->wButtons |= digital[index];
+	}
+	if (held & (1UL << 15))
+		pad->sThumbRX = 20000;
+}
+
 static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 {
 	static const WORD digital[] =
@@ -1291,6 +1323,7 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 		if (port_gamepad(gamepads, count, 0))
 			sdl_gamepad_state(gamepads[0], &state->Gamepad);
 		test_input_gamepad(&state->Gamepad);
+		manual_respawn_test_pad(&state->Gamepad);
 		touch_input_gamepad(&state->Gamepad);
 #if defined(HALO_ANDROID) || defined(HALO_WEB)
 		touch_input_controls(&state->Gamepad, input.menus);
