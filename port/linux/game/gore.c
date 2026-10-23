@@ -381,7 +381,8 @@ static struct gore_unit_type const *gore_unit_type_get(long definition_index);
 static boolean gore_is_flood(long definition_index);
 static short gore_blood_count(short kind);
 static void gore_blood_decal(long decal_index, struct collision_result const *collision,
-	real_vector3d const *velocity, real radius);
+	real_vector3d const *velocity, real radius, long unit_definition_index);
+void gore_bleed_blood_spot(long unit_definition_index, real_point3d const *point, real radius);
 static boolean gore_vehicle_node_is_wheel(long vehicle_index, short node_index);
 static struct model *gore_model_get(long definition_index);
 /* cache_files.c's */
@@ -977,7 +978,7 @@ static void gore_vehicle_run_over(long vehicle_index, long object_index, real_po
 			collision_test_vector(FLAG(_collision_test_front_facing_surfaces_bit) | FLAG(_collision_test_structure_bit),
 				&above, &down, NONE, &collision))
 		{
-			gore_blood_decal(decal_index, &collision, &down, 0.8f);
+			gore_blood_decal(decal_index, &collision, &down, 0.8f, object_get(object_index)->definition_index);
 		}
 	}
 	if (config_boolean("game.gore_log"))
@@ -1261,7 +1262,7 @@ static void gore_blood_effect_at(long effect_index, real_point3d const *position
 
 /* a blood decal, likewise (the extra ones beside it on its surface) */
 static void gore_blood_decal(long decal_index, struct collision_result const *collision,
-	real_vector3d const *velocity, real radius)
+	real_vector3d const *velocity, real radius, long unit_definition_index)
 {
 	short count;
 	short index;
@@ -1287,6 +1288,8 @@ static void gore_blood_decal(long decal_index, struct collision_result const *co
 		}
 		decal_new_from_collision(decal_index, &moved, velocity, radius, FALSE, NONE, NULL);
 	}
+	/* (bloody footprints: blood to step in, gore_bleed.c) */
+	gore_bleed_blood_spot(unit_definition_index, &collision->point, 0.35f / 3.048f * radius);
 }
 
 /* a garbage tag of the loaded map's, whose objects are garbage: what a
@@ -2161,7 +2164,7 @@ static void gore_unit_gib_pieces(struct gore_pending const *pending)
 				from.z += 0.5f;
 				if (collision_test_vector(_collision_test_environment_flags, &from, &down, unit_index, &collision))
 				{
-					gore_blood_decal(decal_index, &collision, &down, 1.4f);
+					gore_blood_decal(decal_index, &collision, &down, 1.4f, unit->definition_index);
 					made++;
 				}
 			}
@@ -2348,7 +2351,7 @@ static void gore_piece_update(struct gore_piece *piece)
 			if (piece->decal_index != NONE &&
 				collision_test_vector(_collision_test_environment_flags, &object->object.position, &down, piece->object_index, &collision))
 			{
-				gore_blood_decal(piece->decal_index, &collision, &down, piece->hunter ? 1.4f : 1.f);
+				gore_blood_decal(piece->decal_index, &collision, &down, piece->hunter ? 1.4f : 1.f, piece->unit_definition_index);
 			}
 		}
 		else if (!piece->impacted && piece->age <= (piece->hunter ? 90 : 36) && (piece->age % (piece->hunter ? 6 : 12)) == 0)
@@ -2387,7 +2390,7 @@ static void gore_piece_update(struct gore_piece *piece)
 						piece->age, piece->position.x, piece->position.y, piece->position.z);
 					piece->impacted = TRUE;
 					if (piece->decal_index != NONE)
-						gore_blood_decal(piece->decal_index, &collision, &step, piece->hunter ? 1.3f : 0.6f);
+						gore_blood_decal(piece->decal_index, &collision, &step, piece->hunter ? 1.3f : 0.6f, piece->unit_definition_index);
 					gore_blood_effect_at(piece->blood_effect_index, &collision.point, &collision.plane.n);
 				}
 				if (magnitude3d(&piece->velocity) < 0.02f && collision.plane.n.k > 0.5f)

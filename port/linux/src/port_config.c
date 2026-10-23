@@ -440,6 +440,8 @@ static const struct config_setting config_settings[] =
 		"How long a gore piece stays, in seconds." },
 	{ "game.gore_headshots", _config_boolean, "true", "HALO_GORE_HEADSHOTS", _environment_value, _platform_all,
 		"Gore: a sniper rifle kill on the head of a grunt, jackal, elite, marine or the player takes only the head off." },
+	{ "game.gore_footprints", _config_boolean, "true", "HALO_GORE_FOOTPRINTS", _environment_value, _platform_all,
+		"Gore: anyone who walks through blood leaves bloody footprints of their own feet, fading over 8 to 12 steps." },
 	{ "game.gore_shotgun", _config_boolean, "true", "HALO_GORE_SHOTGUN", _environment_value, _platform_all,
 		"Gore: any shotgun kill at point blank (below)\n"
 		"makes its victim come apart, however soft a pellet's force is." },
@@ -856,6 +858,12 @@ static const struct config_setting config_settings[] =
 		"Seconds after the start before anything is damaged, so that a game can\n"
 		"be set up and started first (a host's messages to its own client are\n"
 		"damaged too)." },
+	{ "debug.gore_footprint_test", _config_real, "0.0", "HALO_GORE_FOOTPRINT_TEST", _environment_value, _platform_all,
+		"Seconds after the start before a biped (debug.gore_footprint_test_unit) is walked through blood ahead of the player (gore's bloody footprints); 0 never." },
+	{ "debug.gore_footprint_test_unit", _config_string, "\"marine\"", "HALO_GORE_FOOTPRINT_TEST_UNIT", _environment_value, _platform_all,
+		"The footprint test's walker: a biped tag name's part." },
+	{ "debug.gore_footprint_test_blood", _config_string, "\"\"", "HALO_GORE_FOOTPRINT_TEST_BLOOD", _environment_value, _platform_all,
+		"The footprint test's blood: a biped tag name's part (empty: the walker's own)." },
 	{ "debug.test_input", _config_string, "\"\"", "HALO_TEST_INPUT", _environment_value, _platform_all,
 		"\"bot:<seed>\" plays controller 1 with a scripted pattern (automated\n"
 		"network tests); \"look:<seed>\" stands still, only turning and looking\n"
