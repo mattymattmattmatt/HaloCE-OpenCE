@@ -446,7 +446,7 @@ static const struct config_setting config_settings[] =
 	{ "game.gore_headshots", _config_boolean, "true", "HALO_GORE_HEADSHOTS", _environment_value, _platform_all,
 		"Gore: a sniper rifle kill on the head of a grunt, jackal, elite, marine or the player takes only the head off." },
 	{ "game.gore_footprints", _config_boolean, "true", "HALO_GORE_FOOTPRINTS", _environment_value, _platform_all,
-		"Gore: anyone who walks through blood leaves bloody footprints of their own feet, fading over 8 to 12 steps." },
+		"Gore: anyone who walks through blood leaves bloody footprints of their own feet, fading over 12 to 18 steps." },
 	{ "game.gore_flood", _config_boolean, "true", "HALO_GORE_FLOOD", _environment_value, _platform_all,
 		"Gore: a Flood combat form hit hard enough to gib bursts with its pale yellow-green blood and flesh (its body stays, to rise again); its bodies bleed that colour." },
 	{ "game.gore_shotgun", _config_boolean, "true", "HALO_GORE_SHOTGUN", _environment_value, _platform_all,
