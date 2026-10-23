@@ -386,9 +386,37 @@ static const char shader_prologue[] =
 	"	return vec4(1.0, max(s.x, 0.0), specular, 1.0);\n"
 	"}\n";
 
-char *nv2a_vertex_shader_to_glsl(const DWORD *instructions, unsigned long instruction_count,
-	unsigned long packed_attribute_mask, const struct nv2a_vertex_lighting *lighting)
+/* an attribute of a word (nv2a_vertex_words): the components the format's
+conversion gives, the rest as OpenGL fills them (0, 0, 1) */
+static void word_attribute(struct xgpu_text *text, unsigned long index, const struct nv2a_vertex_words *words)
 {
+	unsigned long component, components = words->components[index];
+	unsigned long width = words->kind[index] == _nv2a_word_unsigned_normalized_byte ? 8 : 16;
+
+	xgpu_text_append(text, "\tvec4 v%lu = vec4(", index);
+	for (component = 0; component < 4; component++)
+	{
+		unsigned long shift = words->shift[index] * 8 + component * width;
+
+		if (component)
+			xgpu_text_append(text, ", ");
+		if (component >= components)
+			xgpu_text_append(text, component == 3 ? "1.0" : "0.0");
+		else if (words->kind[index] == _nv2a_word_unsigned_normalized_byte)
+			xgpu_text_append(text, "float((v%lu_word >> %luu) & 255u) / 255.0", index, shift);
+		else if (words->kind[index] == _nv2a_word_short)
+			xgpu_text_append(text, "float(int(v%lu_word << %luu) >> 16)", index, 16 - shift);
+		else
+			xgpu_text_append(text, "max(float(int(v%lu_word << %luu) >> 16) / 32767.0, -1.0)", index, 16 - shift);
+	}
+	xgpu_text_append(text, ");\n");
+}
+
+char *nv2a_vertex_shader_to_glsl(const DWORD *instructions, unsigned long instruction_count,
+	unsigned long packed_attribute_mask, const struct nv2a_vertex_words *words,
+	const struct nv2a_vertex_lighting *lighting)
+{
+	unsigned long word_mask = words ? words->mask : 0;
 	struct xgpu_text text = { 0 };
 	unsigned long index;
 
@@ -405,6 +433,8 @@ char *nv2a_vertex_shader_to_glsl(const DWORD *instructions, unsigned long instru
 	{
 		if (packed_attribute_mask & (1UL << index))
 			xgpu_text_append(&text, "layout(location = %lu) in uint v%lu_packed;\n", index, index);
+		else if (word_mask & (1UL << index))
+			xgpu_text_append(&text, "layout(location = %lu) in uint v%lu_word;\n", index, index);
 		else
 			xgpu_text_append(&text, "layout(location = %lu) in vec4 v%lu_in;\n", index, index);
 	}
@@ -414,6 +444,8 @@ char *nv2a_vertex_shader_to_glsl(const DWORD *instructions, unsigned long instru
 	{
 		if (packed_attribute_mask & (1UL << index))
 			xgpu_text_append(&text, "\tvec4 v%lu = unpack_normpacked3(v%lu_packed);\n", index, index);
+		else if (word_mask & (1UL << index))
+			word_attribute(&text, index, words);
 		else
 			xgpu_text_append(&text, "\tvec4 v%lu = v%lu_in;\n", index, index);
 	}
