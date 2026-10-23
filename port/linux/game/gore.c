@@ -2966,7 +2966,7 @@ static void gore_headshot_pop(struct gore_headless const *headless, real_vector3
 		real_vector3d down = { direction->i * 0.6f, direction->j * 0.6f, -2.f };
 
 		if (collision_test_vector(_collision_test_environment_flags, &head, &down, headless->unit_index, &collision))
-			gore_blood_decal(headless->decal_index, &collision, &down, 1.f);
+			gore_blood_decal(headless->decal_index, &collision, &down, 1.f, unit->definition_index);
 	}
 }
 
@@ -3097,7 +3097,7 @@ static void gore_headless_update(void)
 
 				if (collision_test_vector(_collision_test_environment_flags, &matrices[headless->head_node].position, &down,
 						headless->unit_index, &collision))
-					gore_blood_decal(headless->decal_index, &collision, &down, 0.5f);
+					gore_blood_decal(headless->decal_index, &collision, &down, 0.5f, unit->definition_index);
 			}
 		}
 	}
