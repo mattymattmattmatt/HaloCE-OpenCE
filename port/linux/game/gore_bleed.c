@@ -3404,17 +3404,26 @@ static void footprint_test_update(void)
 		{
 			char names[256];
 			char *name;
-			char *rest = NULL;
+			char *next = names;
 			short lane = 0;
 
 			csstrncpy(names, unit_name && *unit_name ? unit_name : "marine", sizeof(names) - 1);
 			names[sizeof(names) - 1] = 0;
-			for (name = strtok_r(names, ",", &rest); name && lane < GORE_FOOTPRINT_TEST_LANES; name = strtok_r(NULL, ",", &rest))
+			/* (comma separated; no strtok_r on Windows) */
+			while ((name = next) != NULL && lane < GORE_FOOTPRINT_TEST_LANES)
 			{
-				long walker_definition = footprint_test_biped(name);
-				long blood_definition = blood_name && *blood_name ? footprint_test_biped(blood_name) : walker_definition;
+				long walker_definition;
+				long blood_definition;
 				struct object_placement_data placement;
 				real_point3d start;
+
+				next = strchr(name, ',');
+				if (next)
+					*next++ = 0;
+				if (!*name)
+					continue;
+				walker_definition = footprint_test_biped(name);
+				blood_definition = blood_name && *blood_name ? footprint_test_biped(blood_name) : walker_definition;
 
 				if (walker_definition == NONE || blood_definition == NONE)
 				{
