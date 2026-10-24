@@ -470,6 +470,8 @@ static const struct config_setting config_settings[] =
 		"Gore: a sniper rifle kill on the head of a grunt, jackal, elite, marine or the player takes only the head off." },
 	{ "game.gore_footprints", _config_boolean, "true", "HALO_GORE_FOOTPRINTS", _environment_value, _platform_all,
 		"Gore: anyone who walks through blood leaves bloody footprints of their own feet, fading over 12 to 18 steps." },
+	{ "game.gore_vehicle_tracks", _config_boolean, "true", "HALO_GORE_VEHICLE_TRACKS", _environment_value, _platform_all,
+		"Gore: a wheeled vehicle or a tank that runs over a corpse or through blood leaves bloody tyre or tread tracks, fading over 22 m (tyres) or 30 m (treads)." },
 	{ "game.gore_flood", _config_boolean, "true", "HALO_GORE_FLOOD", _environment_value, _platform_all,
 		"Gore: a Flood combat form hit hard enough to gib bursts with its pale yellow-green blood and flesh (its body stays, to rise again); its bodies bleed that colour." },
 	{ "game.gore_shotgun", _config_boolean, "true", "HALO_GORE_SHOTGUN", _environment_value, _platform_all,
@@ -917,6 +919,12 @@ static const struct config_setting config_settings[] =
 		"The footprint test's walker: a biped tag name's part." },
 	{ "debug.gore_footprint_test_blood", _config_string, "\"\"", "HALO_GORE_FOOTPRINT_TEST_BLOOD", _environment_value, _platform_all,
 		"The footprint test's blood: a biped tag name's part (empty: the walker's own)." },
+	{ "debug.gore_track_test", _config_real, "0.0", "HALO_GORE_TRACK_TEST", _environment_value, _platform_all,
+		"Seconds after the start before a vehicle (debug.gore_track_test_vehicle) is driven over corpses ahead of the player (gore's bloody vehicle tracks); 0 never." },
+	{ "debug.gore_track_test_vehicle", _config_string, "\"warthog\"", "HALO_GORE_TRACK_TEST_VEHICLE", _environment_value, _platform_all,
+		"The track test's vehicle: a vehicle tag name's part." },
+	{ "debug.gore_track_test_blood", _config_string, "\"marine\"", "HALO_GORE_TRACK_TEST_BLOOD", _environment_value, _platform_all,
+		"The track test's corpses: a biped tag name's part." },
 	{ "debug.test_input", _config_string, "\"\"", "HALO_TEST_INPUT", _environment_value, _platform_all,
 		"\"bot:<seed>\" plays controller 1 with a scripted pattern (automated\n"
 		"network tests); \"look:<seed>\" stands still, only turning and looking\n"
