@@ -58,12 +58,7 @@ void host_log(int priority, const char *text)
 
 void host_fatal(const char *format, ...)
 {
-#ifdef __arm__
-	/* (room for the reasons the memory could not be had) */
-	char message[3072];
-#else
 	char message[1024];
-#endif
 	va_list arguments;
 
 	va_start(arguments, format);
@@ -397,32 +392,13 @@ static void *game_main(void *unused)
 	}
 	snprintf(path, sizeof(path), "%s/config.toml", data_root);
 
-#ifdef __arm__
-	/* the 32-bit app's (armeabi-v7a) build of the guest */
-	image = SDL_LoadFile("halo_guest_armv7.elf", &image_size);
-#else
 	image = SDL_LoadFile("halo_guest.elf", &image_size);
-#endif
 	if (!image)
 		host_fatal("cannot read the game image from the APK: %s", SDL_GetError());
 	if (host_load_image(image, image_size) != 0)
 	{
 		FILE *report;
 
-#ifdef __arm__
-		/* (on screen too: memory_map.txt is out of reach on a TV) */
-		if (host_memory_fixed_unavailable())
-		{
-			snprintf(path, sizeof(path), "%s/memory_map.txt", data_root);
-			report = fopen(path, "w");
-			host_memory_report_low_mappings(report);
-			if (report)
-				fclose(report);
-			host_fatal("The game cannot start: the memory it needs at 0x80000000 is taken on this device.\n\n"
-				"%.2400s\nRestarting the device may help. Please report it with a photo of this message "
-				"or memory_map.txt from\n%s", host_memory_findings(), data_root);
-		}
-#endif
 		if (!host_memory_fixed_unavailable())
 			host_fatal("cannot load the game image; see logcat (tag \"halo\") for details");
 
@@ -436,10 +412,6 @@ static void *game_main(void *unused)
 			"memory_map.txt from\n%s\n(or adb logcat -s halo).", data_root);
 	}
 	SDL_free(image);
-#ifdef __arm__
-	/* the parts of the window another mapping has (port/linux/src/xbox_memory.c) */
-	environment_set(&environment, "HALO_WINDOW_HOLES", host_memory_window_holes());
-#endif
 
 	{
 		char seconds[32];

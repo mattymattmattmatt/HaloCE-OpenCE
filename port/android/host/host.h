@@ -43,17 +43,6 @@ host_memory_initialize */
 void host_memory_reserve_early(void);
 /* takes the fixed ranges for the image; returns 0 on success */
 int host_memory_initialize(uint32_t image_base, uint32_t image_size);
-#ifdef __arm__
-/* the 32-bit app's: reserves the fixed ranges if not done yet and a place
-for the image linked at link_base (its own if free, else another); returns
-the place, 0 if there is none */
-uint32_t host_memory_place_image(uint32_t link_base, uint32_t size);
-/* the window's holes, as HALO_WINDOW_HOLES gives them to the guest
-("start-end,..." in hex; empty if none) */
-const char *host_memory_window_holes(void);
-/* why the fixed ranges could not be had, one reason a line */
-const char *host_memory_findings(void);
-#endif
 /* 1 if the fixed ranges could not be reserved (something else holds them) */
 int host_memory_fixed_unavailable(void);
 /* lists the mappings below 4 GB in logcat and, if file is not NULL, in it */
@@ -79,24 +68,12 @@ struct host_guest_image
 {
 	const struct halo_guest_header *header;
 	uint32_t base, end;
-#ifdef __arm__
-	/* where it was linked (it may be loaded elsewhere: base) */
-	uint32_t link_base;
-#endif
 };
 
 extern struct host_guest_image host_image;
 
 /* maps the image from the ELF file in memory; returns 0 on success */
 int host_load_image(const void *elf, size_t size);
-
-#ifdef __arm__
-/* emulates the misaligned access that raised SIGBUS in the 32-bit guest;
-returns 1 if done, the context then resuming after the instruction
-(host_alignment.c) */
-int host_alignment_fixup(void *context);
-uint64_t host_alignment_fixups(void);
-#endif
 
 /* ---------- entering guest code (host_thread.c) */
 

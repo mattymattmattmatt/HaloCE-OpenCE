@@ -7,14 +7,6 @@
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
     <uses-feature android:name="android.hardware.gamepad" android:required="false" />
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
-    <!-- what the permissions and the landscape activities below would
-         otherwise imply as required, so that a TV box (no microphone, wired
-         network only, no screen orientation) is a match too; voice chat and
-         system link still use them where present -->
-    <uses-feature android:name="android.hardware.microphone" android:required="false" />
-    <uses-feature android:name="android.hardware.wifi" android:required="false" />
-    <uses-feature android:name="android.hardware.screen.landscape" android:required="false" />
-    <uses-feature android:name="android.software.leanback" android:required="false" />
 
     <!-- controller rumble -->
     <uses-permission android:name="android.permission.VIBRATE" />

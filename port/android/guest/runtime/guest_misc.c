@@ -100,12 +100,3 @@ void backtrace_symbols_fd(void *const *frames, int size, int fd)
 	(void)size;
 	(void)fd;
 }
-
-#ifdef HALO_ARM32_GUEST
-/* MSVC's compiler barrier (scenario.c), an intrinsic clang knows for x86 and
-AArch64 but not for the 32-bit ARM guest */
-void _ReadWriteBarrier(void)
-{
-	__atomic_signal_fence(__ATOMIC_SEQ_CST);
-}
-#endif

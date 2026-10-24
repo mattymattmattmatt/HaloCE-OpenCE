@@ -1,7 +1,6 @@
 # Android
 
-`ninja android` builds the game for 64-bit ARM Android (arm64-v8a) and for
-32-bit ARM Android (armeabi-v7a); the app holds both.
+`ninja android` builds the game for 64-bit ARM Android (arm64-v8a).
 `ninja android_apk` makes an app from it:
 `port/android/app/build/outputs/apk/debug/app-debug.apk`.
 
@@ -9,8 +8,7 @@ The game shows its graphics with OpenGL ES 3. It plays sound through SDL3
 (AAudio). It accepts input from game controllers, for example a PlayStation
 5 DualSense on Bluetooth, and from the touchscreen (refer to "Controls").
 The app needs Android 9 (API 28) or later. It operates on 64-bit-only
-devices, for example the Pixel 9 Pro XL, and on devices with a 32-bit-only
-system, for example Android TV boxes (refer to "32-bit ARM devices").
+devices, for example the Pixel 9 Pro XL.
 
 The Android build uses the platform layer of the Linux build
 (`port/linux/src`). Refer to [port/linux/README.md](../linux/README.md).
@@ -441,17 +439,14 @@ floating-point contraction, as on x86.
 The port's code tells three things apart, each its own macro, which the
 Android build defines all of (`tools/android_build.py`):
 
-- `HALO_ANDROID_GUEST`: the guest's ABI (32-bit pointers in the Android
-  app, of either guest); `HALO_ARM64_GUEST` (ILP32 AArch64 code in a 64-bit
-  process) and `HALO_ARM32_GUEST` (Thumb-2 code in a 32-bit process) for
-  what is particular to one;
+- `HALO_ARM64_GUEST`: the guest's ABI (ILP32 AArch64 code in a 64-bit
+  process);
 - `HALO_GLES`: the OpenGL ES renderer;
 - `HALO_ANDROID`: the app (its display, input, files and lifecycle).
 
 The x86 inline assembly is replaced by C (refer to
 [port/linux/README.md](../linux/README.md#game-source-changes)).
-These changes are in `#ifdef HALO_ANDROID_GUEST` (the stack walker, by
-guest):
+These changes are in `#ifdef HALO_ARM64_GUEST`:
 
 - Seven `#pragma bss_seg(".bss")` lines are removed. The Darwin target does
   not accept them.
@@ -465,51 +460,6 @@ assembly of the port is necessary:
   address.
 - The symbol aliases in `guest/libc/src_include/features.h`. The Darwin
   target does not accept alias attributes.
-
-## 32-bit ARM devices
-
-Some devices run a 32-bit Android system on a 64-bit processor (the 2019
-NVIDIA Shield TV) or have a 32-bit processor: they install only an app with
-armeabi-v7a code. The build makes the same game a second time for them:
-
-- The guest is Thumb-2 code (`armv7a-unknown-linux-eabi`, NEON, the
-  soft-float calling convention of armeabi-v7a, signed `char` as in the
-  arm64 guest and on x86), with the musl of the arm64 guest
-  (`guest/libc/arch/arm64_32`: the same 32-bit types and AArch64 system
-  call numbers). `guest/guest_arm.ld` links it at the same address:
-  `build/android/armv7/halo_guest.elf`, in the app as
-  `assets/halo_guest_armv7.elf`.
-- `libmain.so` and `libSDL3.so` for armeabi-v7a are the same sources built
-  by the NDK for 32-bit ARM (`build/android/armv7/`). The host loads the
-  ELF32 image, and translates the guest's system calls to 32-bit ARM Linux
-  (`host/host_syscall_arm.h`: its numbers, 64-bit file offsets, `stat64`).
-  The import table keeps its 8-byte entries; the stubs are Thumb-2
-  (`tools/android_imports.py --arch arm`), and the GL wrappers pass the
-  arguments as they are (`tools/android_gl_stubs.py --abi arm32`).
-- Data of the game is not always 4-aligned, and a 32-bit process on a
-  64-bit kernel receives SIGBUS for a misaligned LDRD/STRD, LDM/STM or VFP
-  load and store. The guest is compiled not to pair loads and stores
-  (`-mllvm -arm-assume-misaligned-load-store`); the rest (mostly a float
-  at a 2-aligned address, in the scripts' stack) is performed by the SIGBUS
-  handler (`host/host_alignment.c`), which logs each place once.
-- A 32-bit app shares its address space with what the zygote mapped before
-  forking it (ART's spaces, the WebView loader's reservation, libraries
-  coming down from the top), so the fixed ranges can be taken. Only the
-  tag cache and game state must be where the game's data puts them
-  (0x803A6000-0x82FC0000). The host reserves the rest of the window around
-  any other mapping in it, and names those holes to the guest
-  (`HALO_WINDOW_HOLES`), whose contiguous allocator never hands them out
-  (`port/linux/src/xbox_memory.c`). The image is linked with
-  `--emit-relocs --pic-veneer`, and `tools/android_rebase.py` keeps a table
-  of the places that hold its addresses (section `.halo_rebase`): when
-  0x88000000 is taken, the host loads it at another free place (0x68000000
-  first, below ART's boot image) and adjusts them (`host/host_loader.c`).
-  The WebView reservation is taken back like ART's large object space. If
-  the fixed part itself is taken, the start-up dialog lists the mappings
-  in the way (also in `memory_map.txt`), for a report.
-
-Android installs the library of the device's preferred ABI: a 64-bit device
-uses the arm64-v8a code, unchanged by the 32-bit build.
 
 ## Geometry uploads
 

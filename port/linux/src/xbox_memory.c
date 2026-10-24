@@ -33,9 +33,6 @@ C heap there, do not run.
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
-#ifdef HALO_ARM32_GUEST
-#include <stdlib.h>
-#endif
 
 #ifdef HALO_WEB
 /* the memory's size: whether it covers the window */
@@ -66,39 +63,6 @@ static int protection_to_host(DWORD protect)
 	}
 }
 
-#ifdef HALO_ARM32_GUEST
-/* The 32-bit Android app's window may have holes: mappings the process had
-there before the game started, which its host left alone
-(port/android/host/host_memory.c) and names in HALO_WINDOW_HOLES, as
-"start-end" ranges in hex separated by commas. They are kept as blocks that
-are never handed out or freed: placed requests (the tag cache and game
-state, whose part of the window is never a hole) and the top-down ones all
-go around them. */
-static void contiguous_arena_mark_holes(void)
-{
-	const char *text = getenv("HALO_WINDOW_HOLES");
-
-	while (text && *text)
-	{
-		char *end;
-		unsigned long start = strtoul(text, &end, 16), stop, page;
-
-		if (*end != '-')
-			break;
-		stop = strtoul(end + 1, &end, 16);
-		if (start < PLATFORM_CONTIGUOUS_BASE)
-			start = PLATFORM_CONTIGUOUS_BASE;
-		for (page = (start - PLATFORM_CONTIGUOUS_BASE) / PAGE_SIZE_BYTES;
-			page < CONTIGUOUS_PAGE_COUNT && PLATFORM_CONTIGUOUS_BASE + page * PAGE_SIZE_BYTES < stop; page++)
-			page_protection[page] = PAGE_NOACCESS;
-		platform_log("the Xbox contiguous memory window has a hole at %08lx-%08lx (another mapping's)", start, stop);
-		if (*end != ',')
-			break;
-		text = end + 1;
-	}
-}
-#endif
-
 /* Reserve the window before anything else can map into it. */
 __attribute__((constructor(101)))
 static void contiguous_arena_reserve(void)
@@ -117,9 +81,6 @@ static void contiguous_arena_reserve(void)
 	if (result == wanted)
 	{
 		arena_reserved = TRUE;
-#ifdef HALO_ARM32_GUEST
-		contiguous_arena_mark_holes();
-#endif
 	}
 	else
 	{
