@@ -1700,8 +1700,16 @@ static void gore_spawn_garbage(char const *name, real_point3d const *position,
 	gore_spawn_garbage_ex(name, position, direction, force, blood_effect_index, decal_index, FALSE);
 }
 
+/* a chunk's life (ticks), from a piece's: the same in the campaign (they
+were gone in a minute, a hunter's orange lumps first of all its remains
+to go), a minute at most in multiplayer */
+static long gore_chunk_life(long piece_life)
+{
+	return game_engine_running() ? MIN(piece_life, 60 * 30) : piece_life;
+}
+
 /* a stock bit (garbage) on its own physics; a chunk (Extreme's: launched
-as one, tinted, a minute at most) or a piece */
+as one, tinted) or a piece */
 static struct gore_piece *gore_spawn_garbage_ex(char const *name, real_point3d const *position,
 	real_vector3d const *direction, real force, long blood_effect_index, long decal_index, boolean chunk)
 {
@@ -1743,7 +1751,7 @@ static struct gore_piece *gore_spawn_garbage_ex(char const *name, real_point3d c
 	piece->node_count = 0;
 	piece->position = *position;
 	if (chunk)
-		piece->life = MIN(piece->life, 60 * 30);
+		piece->life = gore_chunk_life(piece->life);
 	return piece;
 }
 
@@ -1832,7 +1840,9 @@ like (any model: the nodes its geometry's parts centre on). The renderer
 tints the whole of it in the victim's blood colour (gore_chunk_color;
 gore_render_part_blood). They scatter wider and spin more than the pieces,
 draw no blood of their own (the level's blood is the pieces', counted),
-and are gone in a minute at most. */
+and stay as long as the pieces (game.gore_duration; their own cap,
+GORE_MAXIMUM_CHUNKS, takes the oldest first); in multiplayer a minute at
+most. */
 
 /* the model's geometry, as models.c has it (there file-local): the node
 each part centres on, which has mesh */
@@ -2021,7 +2031,7 @@ static short gore_spawn_chunks(long unit_index, struct model *model, struct gore
 		if (!piece)
 			continue;
 		piece->base_matrices[node].scale *= real_seed_random_range(&gore_chunk_seed, 0.5f, 0.7f);
-		piece->life = MIN(piece->life, 60 * 30);
+		piece->life = gore_chunk_life(piece->life);
 		if (config_boolean("game.gore_log"))
 			error(_error_silent, "gore: chunk lump of node '%s'",
 				TAG_BLOCK_GET_ELEMENT(&model->nodes, node, struct model_node)->name);
@@ -2404,7 +2414,13 @@ static void gore_piece_update(struct gore_piece *piece)
 	piece->age++;
 	/* far from the player for a while: gone sooner (every second) */
 	if (piece->age > 300 && (piece->age % 30) == 0 && gore_far_from_players(&object->object.position))
+	{
+		if (config_boolean("game.gore_log"))
+			error(_error_silent, "gore: a %s (age %ld s) is far from the players: gone (%.2f %.2f %.2f)",
+				piece->chunk ? "chunk" : "piece", piece->age / 30, object->object.position.x, object->object.position.y,
+				object->object.position.z);
 		piece->age = piece->life;
+	}
 	if (piece->age >= piece->life)
 	{
 		object_delete(piece->object_index);
@@ -2610,6 +2626,21 @@ static void gore_test_update(void)
 			gore_blood_requested[_gore_blood_burst] ? (real)gore_blood_emitted[_gore_blood_burst] / gore_blood_requested[_gore_blood_burst] : 0.f,
 			gore_blood_emitted[_gore_blood_splat], gore_blood_requested[_gore_blood_splat],
 			gore_blood_requested[_gore_blood_splat] ? (real)gore_blood_emitted[_gore_blood_splat] / gore_blood_requested[_gore_blood_splat] : 0.f);
+	}
+	/* (every 5 s after the test's hit: the pieces and chunks still there,
+	for comparing how long each kind lasts) */
+	if (gore_test_gib_time != NONE && game_time_get() > gore_test_gib_time && ((game_time_get() - gore_test_gib_time) % 150) == 0)
+	{
+		short index;
+		short counts[2][2] = { { 0, 0 }, { 0, 0 } }; /* [garbage][chunk] */
+
+		for (index = 0; index < GORE_MAXIMUM_PIECES; index++)
+		{
+			if (gore_pieces[index].object_index != NONE)
+				counts[gore_pieces[index].garbage ? 1 : 0][gore_pieces[index].chunk ? 1 : 0]++;
+		}
+		error(_error_silent, "gore: test t+%ld s: copies %d pieces + %d chunks, stock bits %d pieces + %d chunks",
+			(game_time_get() - gore_test_gib_time) / 30, counts[0][0], counts[0][1], counts[1][0], counts[1][1]);
 	}
 	if (seconds <= 0.f || gore_test_done >= sweep_count ||
 		game_time_get() < (long)((seconds + (real)config_real("debug.gore_test_interval") * gore_test_done) * 30.f))
@@ -2827,6 +2858,42 @@ static void gore_test_update(void)
 			error(_error_silent, "gore: test: a sniper bullet on the head (material %d, node %d) of %s",
 				head_material, head_node, tag_get_name(object_get(best)->definition_index));
 			object_cause_damage(&damage, best, head_node, NONE, head_material, &normal);
+			return;
+		}
+		if (config_boolean("debug.gore_test_shell"))
+		{
+			/* a scorpion shell's blast on the unit's centre (a direct hit:
+			the hunter's tank gib), through the stock damage path */
+			long blast = tag_loaded('jpt!', "vehicles\\scorpion\\shell explosion");
+			struct object_datum *target = object_get(best);
+			real_point3d point = target->object.bounding_sphere_center;
+
+			if (blast == NONE)
+			{
+				error(_error_silent, "gore: test: no scorpion shell explosion on this map");
+				return;
+			}
+			damage_data_new(&damage, blast);
+			damage.origin = point;
+			damage.epicenter = point;
+			vector_from_points3d(&player->object.position, &point, &damage.direction);
+			damage.direction.k = 0.f;
+			normalize3d(&damage.direction);
+			scenario_location_from_point(&damage.location, &point);
+			{
+				/* (the player spared: the blast is the test's, not a fight) */
+				boolean spared = TEST_FLAG(player->object.damage_flags, _object_cannot_take_damage_bit);
+
+				SET_FLAG(player->object.damage_flags, _object_cannot_take_damage_bit, TRUE);
+				area_of_effect_cause_damage(&damage, NONE);
+				/* (and after: a fight about the test's remains would revert
+				the game to its checkpoint, and take them) */
+				(void)spared;
+			}
+			error(_error_silent, "gore: test: a scorpion shell's blast on %s: it is %s",
+				tag_get_name(target->definition_index),
+				object_try_and_get_and_verify_type(best, _object_mask_biped) ?
+					(TEST_FLAG(object_get(best)->object.damage_flags, _object_dead_bit) ? "dead" : "alive") : "gone");
 			return;
 		}
 		if (vehicle_speed > 0.f)
@@ -3479,8 +3546,11 @@ static boolean gore_hunter_tank_gib(long unit_index, struct damage_data const *d
 		gore_last_direction = hit->direction;
 		gore_last_direction_valid = TRUE;
 		hit->unit_index = NONE; /* spent */
-		/* large body, hard shell: the launch caps at 3 */
-		*force_out = 2.8f;
+		/* large body, hard shell, heavy pieces: thrown as a rocket throws a
+		marine's, not at the launch's cap (2.8 threw them some 34 m/s, out
+		of sight, over edges and out of the world, where they went as far
+		from the players within 11 s) */
+		*force_out = 1.2f;
 		return TRUE;
 	}
 	if (config_boolean("game.gore_log"))
