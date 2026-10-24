@@ -48,6 +48,7 @@ kills them whole; each bleed logs its numbers when it is done.
 #include "cseries/errors.h"
 #include "effects/decals.h"
 #include "game/game.h"
+#include "game/game_engine.h" /* game_engine_running (without it: an implicit int, garbage in its upper bytes) */
 #include "game/players.h"
 #include "main/main.h"
 #include "math/real_math.h"
@@ -55,6 +56,8 @@ kills them whole; each bleed logs its numbers when it is done.
 #include "objects/object_definitions.h"
 #include "objects/objects.h"
 #include "physics/collisions.h"
+#include "physics/physics.h"
+#include "physics/physics_definitions.h"
 #include "render/render.h"
 #include "scenario/scenario.h"
 #include "tag_files/tag_files.h"
@@ -3656,6 +3659,747 @@ static void footprints_reset(void)
 		gore_footprint_test_units[index] = NONE;
 }
 
+/* ---------- bloody vehicle tracks
+
+A wheeled vehicle (a Warthog's kind: the jeep type) or a tank (the
+Scorpion's) that runs over a corpse or through blood (whatever leaves
+bloody footprints) lays its tracks in that blood's colour, along each
+side's wheel or tread line, behind its rearmost wheel on that side:
+a tyre's band, a tread's wide band of cleats. Each mark is fainter
+than the last, gone some 22 m (tyres) or 30 m (treads) after the blood
+(16 and 20 in multiplayer, in fewer, longer marks);
+running over blood again wets it again. Hover vehicles, aircraft, boats
+and turrets leave none. The wheels are the vehicle physics' mass points
+with forward friction or driven. Local cosmetics like the footprints (bleed quads,
+the gore level's, the gore duration's life); fewer at once in
+multiplayer. game.gore_vehicle_tracks. */
+
+#define GORE_TRACK_MAXIMUM_VEHICLES 8
+#define GORE_TRACK_MAXIMUM_MARKS 160
+#define GORE_TRACK_MAXIMUM_MARKS_MP 48
+#define GORE_TRACK_MAXIMUM_POINTS 12 /* wheel mass points a side */
+/* the vehicle definition's type (vehicles.c: the jeep, the tank) */
+#define GORE_TRACK_VEHICLE_TYPE_OFFSET 0x2F4
+
+enum
+{
+	_track_kind_none = 0,
+	_track_kind_tyre,
+	_track_kind_tread
+};
+
+struct gore_track_side
+{
+	long blood_definition_index; /* NONE: dry */
+	real left; /* wu still to mark */
+	real total;
+	real_point3d last; /* where the last mark ended */
+	boolean have_last;
+	short marks; /* (the tread's cleats alternate) */
+};
+
+/* a vehicle definition's wheels (looked up once a map) */
+struct gore_track_wheels
+{
+	long definition_index; /* NONE: free */
+	short kind;
+	short point_counts[2];
+	short points[2][GORE_TRACK_MAXIMUM_POINTS]; /* mass point indices: left, right */
+	short rear[2]; /* the side's rearmost one */
+};
+
+struct gore_track_vehicle
+{
+	long vehicle_index; /* NONE: free */
+	long definition_index;
+	struct gore_track_wheels const *wheels;
+	long time;
+	struct gore_track_side sides[2];
+};
+
+#define GORE_TRACK_MAXIMUM_DEFINITIONS 32
+#define GORE_TRACK_MAXIMUM_CORPSES 64
+
+struct gore_track_corpse
+{
+	real_point3d position;
+	long definition_index;
+};
+
+static struct gore_track_wheels gore_track_definitions[GORE_TRACK_MAXIMUM_DEFINITIONS];
+static struct gore_track_corpse gore_track_corpses[GORE_TRACK_MAXIMUM_CORPSES];
+static short gore_track_corpse_count;
+static struct gore_track_vehicle gore_track_vehicles[GORE_TRACK_MAXIMUM_VEHICLES];
+static struct gore_footprint gore_track_marks[GORE_TRACK_MAXIMUM_MARKS];
+static short gore_track_next;
+static long gore_track_marks_made;
+
+static boolean tracks_enabled(void)
+{
+	return config_boolean("game.gore_vehicle_tracks") && gore_bleed_level_scale() > 0.f;
+}
+
+static short track_kind(long definition_index)
+{
+	byte const *definition = (byte const *)tag_get('vehi', definition_index);
+	short type;
+
+	if (!definition)
+		return _track_kind_none;
+	type = *(short const *)(definition + GORE_TRACK_VEHICLE_TYPE_OFFSET);
+	if (type == 0) /* _vehicle_type_human_tank */
+		return _track_kind_tread;
+	if (type == 1) /* _vehicle_type_human_jeep */
+		return _track_kind_tyre;
+	return _track_kind_none;
+}
+
+/* the vehicle's wheels: its physics' mass points with forward friction (a
+tyre's) or driven (a tread's), left (+y) and right */
+static boolean track_wheels(struct gore_track_wheels *track, long definition_index)
+{
+	struct object_definition *definition = object_definition_get(definition_index);
+	struct physics_definition const *physics;
+	short index;
+
+	track->point_counts[0] = track->point_counts[1] = 0;
+	track->rear[0] = track->rear[1] = NONE;
+	if (definition->object.physics.index == NONE)
+		return FALSE;
+	physics = physics_definition_get(definition->object.physics.index);
+	for (index = 0; index < physics->mass_points.count; index++)
+	{
+		struct mass_point_definition const *point = TAG_BLOCK_GET_ELEMENT(&physics->mass_points, index,
+			struct mass_point_definition);
+		short side = point->position.y >= 0.f ? 0 : 1;
+
+		/* (a tyre's friction is forward; a tread's points are driven) */
+		if ((point->friction_type != 1 /* _friction_type_forward */ && point->powered_mass_point_index < 0) ||
+			fabsf(point->position.y) < 0.05f ||
+			track->point_counts[side] >= GORE_TRACK_MAXIMUM_POINTS)
+			continue;
+		track->points[side][track->point_counts[side]++] = index;
+		if (track->rear[side] == NONE || point->position.x <
+			TAG_BLOCK_GET_ELEMENT(&physics->mass_points, track->rear[side], struct mass_point_definition)->position.x)
+			track->rear[side] = index;
+	}
+	if (bleed_log() && getenv("HALO_GORE_TRACK_POINTS"))
+	{
+		for (index = 0; index < physics->mass_points.count; index++)
+		{
+			struct mass_point_definition const *point = TAG_BLOCK_GET_ELEMENT(&physics->mass_points, index,
+				struct mass_point_definition);
+
+			error(_error_silent, "gore track:   point %d %s friction %d powered %d flags %lx at %.2f %.2f %.2f radius %.3f",
+				index, point->name, point->friction_type, point->powered_mass_point_index, point->flags,
+				point->position.x, point->position.y, point->position.z, point->radius);
+		}
+	}
+	if (bleed_log())
+	{
+		error(_error_silent, "gore track: %s, %s, %d left and %d right wheel points", tag_get_name(definition_index),
+			track->kind == _track_kind_tread ? "treads" : "tyres", track->point_counts[0], track->point_counts[1]);
+		for (index = 0; index < 2; index++)
+		{
+			if (track->rear[index] != NONE)
+			{
+				struct mass_point_definition const *point = TAG_BLOCK_GET_ELEMENT(&physics->mass_points,
+					track->rear[index], struct mass_point_definition);
+
+				error(_error_silent, "gore track:   %s rear: %s at %.2f %.2f %.2f radius %.3f", index ? "right" : "left",
+					point->name, point->position.x, point->position.y, point->position.z, point->radius);
+			}
+		}
+	}
+	return track->rear[0] != NONE && track->rear[1] != NONE;
+}
+
+/* the definition's wheels, from the cache (NULL: it leaves no tracks) */
+static struct gore_track_wheels const *track_wheels_get(long definition_index)
+{
+	struct gore_track_wheels *wheels = NULL;
+	short index;
+
+	for (index = 0; index < GORE_TRACK_MAXIMUM_DEFINITIONS; index++)
+	{
+		if (gore_track_definitions[index].definition_index == definition_index)
+		{
+			wheels = &gore_track_definitions[index];
+			return wheels->kind != _track_kind_none ? wheels : NULL;
+		}
+		if (!wheels && gore_track_definitions[index].definition_index == NONE)
+			wheels = &gore_track_definitions[index];
+	}
+	if (!wheels)
+		return NULL;
+	csmemset(wheels, 0, sizeof(*wheels));
+	wheels->definition_index = definition_index;
+	wheels->kind = track_kind(definition_index);
+	if (wheels->kind != _track_kind_none && !track_wheels(wheels, definition_index))
+		wheels->kind = _track_kind_none;
+	return wheels->kind != _track_kind_none ? wheels : NULL;
+}
+
+/* a wheel point where it meets the ground (in the world) */
+static boolean track_contact(struct physics_instance const *instance, short mass_point_index, real_point3d *contact,
+	struct collision_result *collision)
+{
+	struct mass_point_definition const *point = TAG_BLOCK_GET_ELEMENT(&instance->physics->mass_points,
+		mass_point_index, struct mass_point_definition);
+	real_point3d world;
+
+	matrix4x3_transform_point(&instance->world_matrix, &point->position, &world);
+	if (!bleed_ground(&world, 0.15f, point->radius + 0.25f, collision))
+		return FALSE;
+	*contact = collision->point;
+	return TRUE;
+}
+
+/* the blood under a wheel: a pool's or a splat's (the footprints'), or a
+corpse it runs over (its own) */
+static long track_blood_at(real_point3d const *point)
+{
+	long blood = footprint_blood_at(point);
+	short index;
+
+	if (blood != NONE)
+		return blood;
+	for (index = 0; index < gore_track_corpse_count; index++)
+	{
+		struct gore_track_corpse const *corpse = &gore_track_corpses[index];
+		real dx = point->x - corpse->position.x;
+		real dy = point->y - corpse->position.y;
+
+		/* (a body lying there: about a metre and a half of it) */
+		if (dx * dx + dy * dy < 0.3f * 0.3f && fabsf(point->z - corpse->position.z) < 0.5f)
+			return corpse->definition_index;
+	}
+	return NONE;
+}
+
+/* one mark from the side's last point to here, the way it went */
+static void track_mark(struct gore_track_vehicle *track, short side_index, real_point3d const *to,
+	struct collision_result const *collision)
+{
+	struct gore_track_side *side = &track->sides[side_index];
+	long maximum = game_engine_running() ? GORE_TRACK_MAXIMUM_MARKS_MP : GORE_TRACK_MAXIMUM_MARKS;
+	struct gore_footprint *mark;
+	real_vector3d forward;
+	real_vector3d across;
+	real_point3d middle;
+	real length;
+	real strength;
+	short cluster_index = bleed_cluster(collision);
+
+	if (cluster_index == NONE || dot_product3d(&collision->plane.n, global_up3d) < 0.6f ||
+		!footprint_look_set(side->blood_definition_index))
+		return;
+	vector_from_points3d(&side->last, to, &forward);
+	length = magnitude3d(&forward);
+	bleed_project(&forward, &collision->plane.n);
+	bleed_normalize(&forward, global_forward3d);
+	cross_product3d(&collision->plane.n, &forward, &across);
+	middle.x = (side->last.x + to->x) * 0.5f;
+	middle.y = (side->last.y + to->y) * 0.5f;
+	middle.z = (side->last.z + to->z) * 0.5f;
+	point_from_line3d(&middle, &collision->plane.n, GORE_BLEED_LIFT * 1.6f, &middle);
+	mark = &gore_track_marks[gore_track_next];
+	gore_track_next = (short)((gore_track_next + 1) % maximum);
+	footprint_free(mark);
+	/* the first marks strong, then each fainter (gone at the end) */
+	strength = side->total > 0.f ? side->left / side->total : 0.f;
+	strength = 0.12f + 0.88f * powf(PIN(strength, 0.f, 1.f), 1.2f);
+	if (track->wheels->kind == _track_kind_tyre)
+	{
+		/* a tyre's band (0.4 m), well over the step so that it runs on */
+		footprint_blob(mark, &middle, &collision->plane.n, &forward, length * 0.8f, 0.2f / WU * 1.6f, strength,
+			cluster_index);
+	}
+	else
+	{
+		/* a tread (0.9 m): its cleats, three across, staggered mark to mark */
+		short cleat;
+		real stagger = (side->marks & 1) ? 0.25f : -0.25f;
+
+		for (cleat = -1; cleat <= 1; cleat++)
+		{
+			real_point3d center;
+
+			point_from_line3d(&middle, &across, (real)cleat * 0.3f / WU, &center);
+			point_from_line3d(&center, &forward, (cleat == 0 ? stagger : -stagger) * length, &center);
+			footprint_blob(mark, &center, &collision->plane.n, &forward, length * 0.42f, 0.14f / WU * 1.5f, strength,
+				cluster_index);
+		}
+	}
+	side->marks++;
+	gore_track_marks_made++;
+	if (bleed_log())
+		error(_error_silent, "gore track: %s %s %s, %.1f m to go, strength %.2f, %d quads at %.2f %.2f %.2f",
+			tag_get_name(track->definition_index), side_index ? "right" : "left",
+			track->wheels->kind == _track_kind_tread ? "tread" : "tyre", side->left * WU, strength, mark->quad_count,
+			middle.x, middle.y, middle.z);
+}
+
+/* the vehicle's tracks: its own, else a free one (or the one longest dry)
+if make */
+static struct gore_track_vehicle *track_vehicle_get(long vehicle_index, long definition_index,
+	struct gore_track_wheels const *wheels, boolean make)
+{
+	struct gore_track_vehicle *free_track = NULL;
+	struct gore_track_vehicle *oldest = NULL;
+	short index;
+
+	for (index = 0; index < GORE_TRACK_MAXIMUM_VEHICLES; index++)
+	{
+		struct gore_track_vehicle *track = &gore_track_vehicles[index];
+
+		if (track->vehicle_index == vehicle_index && track->definition_index == definition_index)
+			return track;
+		if (track->vehicle_index == NONE)
+		{
+			if (!free_track)
+				free_track = track;
+		}
+		else if (track->sides[0].blood_definition_index == NONE && track->sides[1].blood_definition_index == NONE &&
+			(!oldest || track->time < oldest->time))
+			oldest = track;
+	}
+	if (!make)
+		return NULL;
+	if (!free_track)
+		free_track = oldest;
+	if (!free_track)
+		return NULL;
+	csmemset(free_track, 0, sizeof(*free_track));
+	free_track->vehicle_index = vehicle_index;
+	free_track->definition_index = definition_index;
+	free_track->wheels = wheels;
+	free_track->sides[0].blood_definition_index = free_track->sides[1].blood_definition_index = NONE;
+	return free_track;
+}
+
+/* the blood under any wheel of the side, NONE */
+static long track_side_blood(struct physics_instance const *instance, struct gore_track_wheels const *wheels,
+	short side_index)
+{
+	short point;
+
+	for (point = 0; point < wheels->point_counts[side_index]; point++)
+	{
+		real_point3d wheel;
+		struct collision_result ground;
+		long blood;
+
+		if (track_contact(instance, wheels->points[side_index][point], &wheel, &ground) &&
+			(blood = track_blood_at(&wheel)) != NONE)
+			return blood;
+	}
+	return NONE;
+}
+
+static void track_update(struct gore_track_vehicle *track, struct physics_instance const *instance,
+	long const *bloods)
+{
+	short side_index;
+	boolean tread = track->wheels->kind == _track_kind_tread;
+	/* (in multiplayer longer marks, and fewer metres of them: two sides'
+	worth within its fewer marks, GORE_TRACK_MAXIMUM_MARKS_MP) */
+	boolean multiplayer = game_engine_running();
+	real step = (tread ? (multiplayer ? 0.9f : 0.75f) : (multiplayer ? 0.8f : 0.4f)) / WU;
+	real wet = (tread ? (multiplayer ? 20.f : 30.f) : (multiplayer ? 16.f : 22.f)) / WU;
+
+	for (side_index = 0; side_index < 2; side_index++)
+	{
+		struct gore_track_side *side = &track->sides[side_index];
+		struct collision_result collision;
+		real_point3d contact;
+		real_vector3d moved;
+		real distance;
+		/* (any wheel of the side in blood wets the side) */
+		long blood = bloods[side_index];
+
+		if (!track_contact(instance, track->wheels->rear[side_index], &contact, &collision))
+		{
+			/* (off the ground: the marks go on where it lands) */
+			side->have_last = FALSE;
+			continue;
+		}
+		if (blood != NONE)
+		{
+			if (side->blood_definition_index != blood || side->left < side->total * 0.9f)
+			{
+				if (bleed_log())
+					error(_error_silent, "gore track: %s %s side runs through %s blood", tag_get_name(track->definition_index),
+						side_index ? "right" : "left", tag_get_name(blood));
+			}
+			side->blood_definition_index = blood;
+			side->left = side->total = wet;
+		}
+		if (side->blood_definition_index == NONE)
+		{
+			side->have_last = FALSE;
+			continue;
+		}
+		if (!side->have_last)
+		{
+			side->last = contact;
+			side->have_last = TRUE;
+			continue;
+		}
+		vector_from_points3d(&side->last, &contact, &moved);
+		distance = magnitude3d(&moved);
+		if (distance > 8.f / WU)
+		{
+			/* (teleported, respawned) */
+			side->last = contact;
+			continue;
+		}
+		if (distance < step)
+			continue;
+		track_mark(track, side_index, &contact, &collision);
+		side->last = contact;
+		side->left -= distance;
+		if (side->left <= 0.f)
+		{
+			side->blood_definition_index = NONE;
+			side->have_last = FALSE;
+		}
+	}
+}
+
+static void tracks_update(void)
+{
+	struct object_iterator iterator;
+	struct object_datum *object;
+	short index;
+
+	if (!tracks_enabled())
+		return;
+	for (index = 0; index < GORE_TRACK_MAXIMUM_VEHICLES; index++)
+	{
+		struct gore_track_vehicle *track = &gore_track_vehicles[index];
+
+		if (track->vehicle_index != NONE && !object_try_and_get_and_verify_type(track->vehicle_index, _object_mask_vehicle))
+			track->vehicle_index = NONE;
+	}
+	/* the bodies to run over, once a tick */
+	gore_track_corpse_count = 0;
+	object_iterator_new(&iterator, _object_mask_biped, 0);
+	while ((object = object_iterator_next(&iterator)) != NULL && gore_track_corpse_count < GORE_TRACK_MAXIMUM_CORPSES)
+	{
+		if (!TEST_FLAG(object->object.damage_flags, _object_dead_bit) || object->object.parent_object_index != NONE)
+			continue;
+		gore_track_corpses[gore_track_corpse_count].position = object->object.position;
+		gore_track_corpses[gore_track_corpse_count].definition_index = object->definition_index;
+		gore_track_corpse_count++;
+	}
+	object_iterator_new(&iterator, _object_mask_vehicle, 0);
+	while ((object = object_iterator_next(&iterator)) != NULL)
+	{
+		struct gore_track_wheels const *wheels;
+		struct gore_track_vehicle *track;
+		struct physics_instance instance;
+		long bloods[2];
+
+		if (object->object.parent_object_index != NONE)
+			continue;
+		wheels = track_wheels_get(object->definition_index);
+		if (!wheels)
+			continue;
+		track = track_vehicle_get(iterator.index, object->definition_index, wheels, FALSE);
+		/* (a vehicle standing still, dry, has nothing to do) */
+		if (!track && magnitude3d(&object->object.translational_velocity) < 0.002f)
+			continue;
+		if (!physics_instance_new(&instance, iterator.index))
+			continue;
+		bloods[0] = track_side_blood(&instance, wheels, 0);
+		bloods[1] = track_side_blood(&instance, wheels, 1);
+		if (!track)
+		{
+			if (bloods[0] == NONE && bloods[1] == NONE)
+				continue;
+			track = track_vehicle_get(iterator.index, object->definition_index, wheels, TRUE);
+			if (!track)
+				continue;
+		}
+		track->time = game_time_get();
+		track_update(track, &instance, bloods);
+		/* (dry again: the slot for another) */
+		if (track->sides[0].blood_definition_index == NONE && track->sides[1].blood_definition_index == NONE)
+			track->vehicle_index = NONE;
+	}
+}
+
+/* debug.gore_track_test (seconds): a corpse (debug.gore_track_test_blood's
+biped, "marine" if none) on open ground ahead of the player, then a
+debug.gore_track_test_vehicle (its tag name's part: "warthog" if none)
+driven over it and on at 8 m/s (HALO_GORE_TRACK_TEST_SPEED), the player
+aside, looking */
+static short gore_track_test_state;
+static long gore_track_test_time;
+static long gore_track_test_vehicle = NONE;
+static real_point3d gore_track_test_start;
+static real_vector3d gore_track_test_way;
+static real_point3d gore_track_test_place;
+static real_vector3d gore_track_test_facing;
+static real gore_track_test_height;
+
+static long track_test_tag(tag group, char const *name)
+{
+	struct tag_iterator tags;
+	long definition_index;
+
+	tag_iterator_new(&tags, group);
+	while ((definition_index = tag_iterator_next(&tags)) != NONE)
+	{
+		if (strstr(tag_get_name(definition_index), name))
+			return definition_index;
+	}
+	return NONE;
+}
+
+static void track_test_update(void)
+{
+	real seconds = (real)config_real("debug.gore_track_test");
+	long player_index;
+	struct object_datum *player;
+
+	if (seconds <= 0.f)
+		return;
+	player_index = bleed_test_player();
+	if (player_index == NONE)
+		return;
+	player = object_get(player_index);
+	if (gore_track_test_state == 1)
+	{
+		long age = game_time_get() - gore_track_test_time;
+		char const *speed_text = getenv("HALO_GORE_TRACK_TEST_SPEED");
+		real speed = (speed_text ? (real)atof(speed_text) : 8.f) / 30.f / WU;
+		struct object_datum *vehicle = object_try_and_get_and_verify_type(gore_track_test_vehicle, _object_mask_vehicle);
+		real_vector3d forward = gore_track_test_facing;
+
+		forward.k = 0.f;
+		bleed_normalize(&forward, global_forward3d);
+		object_set_position(player_index, &gore_track_test_place, &forward, global_up3d);
+		player->object.translational_velocity = *global_zero_vector3d;
+		player_control_set_facing(0, &gore_track_test_facing);
+		if (vehicle)
+		{
+			/* (settled on its wheels for two seconds, then driven: its
+			height kept, its way held) */
+			if (age < 60)
+			{
+				struct collision_result ground;
+
+				if (age == 59 && bleed_ground(&vehicle->object.position, 0.5f, 3.f, &ground))
+				{
+					gore_track_test_height = vehicle->object.position.z - ground.point.z;
+					error(_error_silent, "gore track test: %s settled %.3f wu above the ground",
+						tag_get_name(vehicle->definition_index), gore_track_test_height);
+				}
+			}
+			else if (age < 60 + (long)(40.f / WU / speed))
+			{
+				real_point3d at;
+				struct collision_result ground;
+
+				point_from_line3d(&gore_track_test_start, &gore_track_test_way, (real)(age - 60) * speed, &at);
+				if (bleed_ground(&at, 1.f, 3.f, &ground))
+					at.z = ground.point.z + gore_track_test_height;
+				object_set_position(gore_track_test_vehicle, &at, &gore_track_test_way, global_up3d);
+				scale_vector3d(&gore_track_test_way, speed, &vehicle->object.translational_velocity);
+				vehicle->object.angular_velocity = *global_zero_vector3d;
+			}
+		}
+		if (age % 60 == 0)
+		{
+			short mark_index;
+			short live = 0, exists = 0, total = 0;
+
+			for (mark_index = 0; mark_index < GORE_TRACK_MAXIMUM_MARKS; mark_index++)
+			{
+				struct gore_footprint const *mark = &gore_track_marks[mark_index];
+				short q;
+
+				for (q = 0; q < mark->quad_count; q++)
+				{
+					struct gore_bleed_quad const *quad = &gore_bleed_quads[mark->quads[q]];
+
+					total++;
+					if (quad->decal_index != NONE && quad->serial == mark->serials[q])
+					{
+						live++;
+						if (decal_quad_exists(quad->decal_index))
+							exists++;
+					}
+				}
+			}
+			error(_error_silent, "gore track test: t+%ld, %ld track marks; their quads %d, live %d, decals %d", age,
+				gore_track_marks_made, total, live, exists);
+		}
+		return;
+	}
+	if (gore_track_test_state != 0 || game_time_get() < (long)(seconds * 30.f))
+		return;
+	gore_track_test_state = 2;
+	{
+		struct unit_datum *player_unit = (struct unit_datum *)player;
+		char const *vehicle_name = config_string("debug.gore_track_test_vehicle");
+		char const *blood_name = config_string("debug.gore_track_test_blood");
+		real_vector3d forward = player_unit->unit.looking_vector;
+		real_vector3d side;
+		real_point3d eye = player->object.position;
+		struct collision_result collision;
+		long vehicle_definition = track_test_tag('vehi', vehicle_name && *vehicle_name ? vehicle_name : "warthog");
+		long blood_definition = track_test_tag('bipd', blood_name && *blood_name ? blood_name : "marine");
+		short tries;
+		boolean have = FALSE;
+
+		{
+			struct tag_iterator tags;
+			long definition_index;
+
+			tag_iterator_new(&tags, 'vehi');
+			while ((definition_index = tag_iterator_next(&tags)) != NONE)
+				error(_error_silent, "gore track test: the map has %s", tag_get_name(definition_index));
+		}
+		if (vehicle_definition == NONE || blood_definition == NONE)
+		{
+			error(_error_silent, "gore track test: the map has no vehicle \"%s\" or biped \"%s\": no test",
+				vehicle_name, blood_name);
+			return;
+		}
+		eye.z += 0.6f;
+		forward.k = 0.f;
+		bleed_normalize(&forward, global_forward3d);
+		/* (a straight drive over open ground: 15 wu of it, near level) */
+		for (tries = 0; tries < 16 && !have; tries++)
+		{
+			real_vector3d way = forward;
+			real_point3d start;
+			short step;
+			boolean ok = TRUE;
+
+			bleed_rotate_about(&way, global_up3d, (real)tries * 0.3927f);
+			point_from_line3d(&eye, &way, 2.f, &start);
+			if (!bleed_ground(&start, 2.f, 10.f, &collision))
+				continue;
+			start = collision.point;
+			for (step = 1; step <= 15 && ok; step++)
+			{
+				real_point3d probe;
+				struct collision_result ground;
+				real_vector3d ray;
+
+				point_from_line3d(&start, &way, (real)step, &probe);
+				ok = bleed_ground(&probe, 1.f, 1.5f, &ground) && fabsf(ground.point.z - start.z) < 1.2f;
+				if (ok)
+				{
+					real_point3d from = start;
+
+					from.z += 0.6f;
+					vector_from_points3d(&from, &probe, &ray);
+					ray.k = 0.f;
+					ok = !collision_test_vector(_collision_test_environment_flags, &from, &ray, player_index, &ground);
+				}
+			}
+			if (!ok)
+				continue;
+			gore_track_test_start = start;
+			gore_track_test_way = way;
+			have = TRUE;
+		}
+		if (!have)
+		{
+			error(_error_silent, "gore track test: no open ground about the player: no test");
+			return;
+		}
+		cross_product3d(global_up3d, &gore_track_test_way, &side);
+		{
+			struct object_placement_data placement;
+			real_point3d body_at[2];
+			short body;
+
+			struct gore_track_wheels const *wheels = track_wheels_get(vehicle_definition);
+			real offsets[2] = { 0.3f, -0.3f };
+
+			/* corpses where each side's wheels run, 4 wu on */
+			if (wheels)
+			{
+				struct physics_definition const *physics = physics_definition_get(
+					object_definition_get(vehicle_definition)->object.physics.index);
+
+				for (body = 0; body < 2; body++)
+					offsets[body] = TAG_BLOCK_GET_ELEMENT(&physics->mass_points, wheels->rear[body],
+						struct mass_point_definition)->position.y;
+			}
+			for (body = 0; body < 2; body++)
+			{
+				struct object_placement_data corpse;
+				long corpse_index;
+
+				point_from_line3d(&gore_track_test_start, &gore_track_test_way, 4.f, &body_at[body]);
+				/* (side: to the left of the way, as +y is the vehicle's) */
+				point_from_line3d(&body_at[body], &side, offsets[body], &body_at[body]);
+				if (bleed_ground(&body_at[body], 1.f, 2.f, &collision))
+					body_at[body] = collision.point;
+				object_placement_data_new(&corpse, blood_definition, NONE);
+				corpse.position = body_at[body];
+				corpse.position.z += 0.1f;
+				corpse.forward = side;
+				corpse.up = *global_up3d;
+				corpse_index = object_new(&corpse);
+				if (corpse_index != NONE)
+					unit_kill(corpse_index);
+			}
+			object_placement_data_new(&placement, vehicle_definition, NONE);
+			placement.position = gore_track_test_start;
+			placement.position.z += 0.5f;
+			placement.forward = gore_track_test_way;
+			placement.up = *global_up3d;
+			gore_track_test_vehicle = object_new(&placement);
+			error(_error_silent, "gore track test: a %s drives over %s corpses at %.2f %.2f %.2f (level %s)",
+				tag_get_name(vehicle_definition), tag_get_name(blood_definition), body_at[0].x, body_at[0].y, body_at[0].z,
+				config_string("game.gore_level"));
+		}
+		/* (the player off to the side, above, looking at the drive) */
+		{
+			real_point3d look;
+			real height = getenv("HALO_GORE_TRACK_TEST_HEIGHT") ? (real)atof(getenv("HALO_GORE_TRACK_TEST_HEIGHT")) : 2.2f;
+			real back = getenv("HALO_GORE_TRACK_TEST_BACK") ? (real)atof(getenv("HALO_GORE_TRACK_TEST_BACK")) : 3.5f;
+
+			point_from_line3d(&gore_track_test_start, &gore_track_test_way, 6.5f, &look);
+			point_from_line3d(&look, &side, back, &gore_track_test_place);
+			point_from_line3d(&gore_track_test_place, &gore_track_test_way, -1.5f, &gore_track_test_place);
+			if (bleed_ground(&gore_track_test_place, 2.f, 6.f, &collision))
+				gore_track_test_place = collision.point;
+			gore_track_test_place.z += height;
+			gore_track_test_facing.i = look.x - gore_track_test_place.x;
+			gore_track_test_facing.j = look.y - gore_track_test_place.y;
+			gore_track_test_facing.k = look.z - (gore_track_test_place.z + 0.62f);
+			bleed_normalize(&gore_track_test_facing, global_forward3d);
+		}
+		gore_track_test_time = game_time_get();
+		gore_track_test_state = 1;
+	}
+}
+
+static void tracks_reset(void)
+{
+	short index;
+
+	for (index = 0; index < GORE_TRACK_MAXIMUM_VEHICLES; index++)
+		gore_track_vehicles[index].vehicle_index = NONE;
+	for (index = 0; index < GORE_TRACK_MAXIMUM_DEFINITIONS; index++)
+		gore_track_definitions[index].definition_index = NONE;
+	gore_track_corpse_count = 0;
+	for (index = 0; index < GORE_TRACK_MAXIMUM_MARKS; index++)
+		gore_track_marks[index].quad_count = 0;
+	gore_track_next = 0;
+	gore_track_test_state = 0;
+	gore_track_test_vehicle = NONE;
+}
+
 void gore_bleed_reset(void)
 {
 	short index;
@@ -3683,6 +4427,7 @@ void gore_bleed_reset(void)
 	gore_bleed_test_rounds_passed = 0;
 	gore_impact_test_state = 0;
 	footprints_reset();
+	tracks_reset();
 	gore_impact_test_unit = NONE;
 	gore_impact_test_tries = 0;
 	gore_bleed_quads_made = gore_bleed_quads_failed = gore_bleed_quads_remade = 0;
@@ -3756,6 +4501,8 @@ void gore_bleed_update(void)
 	}
 	footprint_test_update();
 	footprints_update();
+	track_test_update();
+	tracks_update();
 	if ((game_time_get() % 15) == 0)
 		bleed_dry();
 	bleed_check_quads();
