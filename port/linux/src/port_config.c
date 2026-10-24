@@ -973,6 +973,10 @@ static const struct config_setting config_settings[] =
 		"Read vertex attributes narrower than a 32-bit word (the models' node indices\n"
 		"and weights) as the words they sit in, decoded in the vertex shader: -1 with\n"
 		"OpenGL ES (some drivers, the Shield TV's, misread them), 1 always, 0 never." },
+	{ "debug.gpu_geometry_cache", _config_integer, "-1", "HALO_GPU_GEOMETRY_CACHE", _environment_value, _platform_all,
+		"Vertices and indices kept in GL buffers (1) or streamed each draw (0); -1: streamed on Android but with NVIDIA's driver (the Shield TV), kept elsewhere. Try the other if a level's geometry stretches into spikes or goes missing. From the next start." },
+	{ "debug.gpu_base_vertex", _config_integer, "-1", "HALO_GPU_BASE_VERTEX", _environment_value, _platform_all,
+		"OpenGL ES: streamed indexed draws with a base vertex (1 and -1), or with their indices rebased (0) for a driver that gets a negative base vertex wrong." },
 	{ "debug.gpu_dump_shaders", _config_string, "\"\"", "HALO_GPU_DUMP_SHADERS", _environment_value, _platform_all,
 		"A folder to write the generated GLSL to; empty none." },
 	{ "debug.gpu_debug_expression", _config_string, "\"\"", "HALO_GPU_DEBUG_EXPR", _environment_value, _platform_all,
