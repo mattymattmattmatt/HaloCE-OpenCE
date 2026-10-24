@@ -342,10 +342,15 @@ void stack_walk_with_context(
 
 		for (frame_number = levels_dumped - 1; frame_number >= levels_to_ignore; frame_number--)
 		{
-#ifdef HALO_ARM64_GUEST
+#if defined(HALO_ARM64_GUEST)
 			/* the call site (the BL before the return address), for
 			llvm-symbolizer --obj=build/android/halo_guest.elf */
 			unsigned long routine_address = routine_addresses[frame_number] - 4;
+#elif defined(HALO_ARM32_GUEST)
+			/* the call site (the Thumb BL before the return address, without
+			the return address's Thumb bit), for llvm-symbolizer
+			--obj=build/android/armv7/halo_guest.elf */
+			unsigned long routine_address = (routine_addresses[frame_number] & ~1UL) - 4;
 #else
 			unsigned long routine_address = routine_addresses[frame_number] + *(long *)(routine_addresses[frame_number] - sizeof(long));
 #endif
@@ -739,6 +744,8 @@ static unsigned long walk_up(
 		return address, 8 bytes each (the upper halves are zero) */
 		routine_address = ((unsigned long *)walk_up_current_frame)[2];
 #else
+		/* (x86's: the caller's frame pointer, then the return address; and
+		a Thumb-2 frame record's, r7 then lr: HALO_ARM32_GUEST) */
 		routine_address = ((unsigned long *)walk_up_current_frame)[1];
 #endif
 		walk_up_current_frame = ((unsigned long *)walk_up_current_frame)[0];

@@ -30,7 +30,12 @@ void __guest_thread_initialize_main(void);
 
 extern char **__environ;
 
+#ifdef HALO_ARM32_GUEST
+/* (an ELF target: the section as guest_arm.ld names it) */
+__attribute__((section(".guest_header"), used))
+#else
 __attribute__((section("__TEXT,__guest_header"), used))
+#endif
 const struct halo_guest_header __guest_header =
 {
 	HALO_GUEST_MAGIC,
