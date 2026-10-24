@@ -389,7 +389,7 @@ static long rasterizer_decals_draw_order(
 		decal_draw_keys[count] = rasterizer_decal_blend_function_commutes(framebuffer_blend_function) &&
 			local_layer != _decal_layer_alpha_tested ?
 			((unsigned long)(framebuffer_blend_function & 0xF) << 28) |
-				((unsigned long)(definition->shader.map.index & 0xFFFFF) << 8) |
+				((unsigned long)(decal_bitmap_group_get(decal_index, definition->shader.map.index) & 0xFFFFF) << 8) |
 				(decal->bitmap_index & 0xFF) :
 			0xFFFFFFFF;
 		count++;
@@ -775,6 +775,7 @@ void _rasterizer_decals_draw(
 		unsigned long vertex_data_offset;
 		pixel32 color;
 		unsigned long intensity;
+		long map_index; /* port: (decal_quad_set_bitmap: a quad's own bitmap) */
 
 		if (local_framebuffer_blend_function != framebuffer_blend_function)
 		{
@@ -843,11 +844,13 @@ void _rasterizer_decals_draw(
 				rasterizer_frame_statistics.decal_shader_change_count++;
 		}
 
-		if (rasterizer_decal_cached_bitmap_group_index != shader->map.index ||
+		map_index = decal_bitmap_group_get(decal_index, shader->map.index);
+
+		if (rasterizer_decal_cached_bitmap_group_index != map_index ||
 			rasterizer_decal_cached_bitmap_index != (char)decal->bitmap_index)
 		{
 			rasterizer_decals_draw_batch(); /* port: (decal_batch) */
-			rasterizer_decal_cached_bitmap_group_index = shader->map.index;
+			rasterizer_decal_cached_bitmap_group_index = map_index;
 			rasterizer_decal_cached_bitmap_index = (char)decal->bitmap_index;
 			rasterizer_set_texture(
 				0,
