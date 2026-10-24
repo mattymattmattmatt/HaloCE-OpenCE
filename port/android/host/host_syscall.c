@@ -50,12 +50,6 @@ struct guest_iovec
 
 #define GUEST(type, value) ((type)(uintptr_t)(uint32_t)(value))
 
-#ifdef __arm__
-/* the 32-bit app's host (armeabi-v7a): 64-bit file offsets */
-#define pwritev pwritev64
-#define preadv preadv64
-#endif
-
 static int timespec_in(uint64_t address, struct timespec *result)
 {
 	const struct guest_timespec *value = GUEST(const struct guest_timespec *, address);
@@ -188,9 +182,6 @@ static long guest_futex(uint64_t address, int operation, uint32_t value, uint64_
 
 /* ---------- dispatch */
 
-#ifdef __arm__
-#include "host_syscall_arm.h"
-#else
 long long host_syscall(long long number, long long a, long long b, long long c,
 	long long d, long long e, long long f)
 {
@@ -383,4 +374,3 @@ long long host_syscall(long long number, long long a, long long b, long long c,
 		return -ENOSYS;
 	}
 }
-#endif

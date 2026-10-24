@@ -75,14 +75,6 @@ extern struct host_guest_image host_image;
 /* maps the image from the ELF file in memory; returns 0 on success */
 int host_load_image(const void *elf, size_t size);
 
-#ifdef __arm__
-/* emulates the misaligned access that raised SIGBUS in the 32-bit guest;
-returns 1 if done, the context then resuming after the instruction
-(host_alignment.c) */
-int host_alignment_fixup(void *context);
-uint64_t host_alignment_fixups(void);
-#endif
-
 /* ---------- entering guest code (host_thread.c) */
 
 /* calls the guest function at address with up to four 32-bit arguments on

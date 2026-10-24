@@ -877,42 +877,6 @@ static void mark_written(uint64_t page)
 
 static struct sigaction previous_segv, previous_bus, previous_ill;
 
-#ifdef __arm__
-/* the 32-bit app's (armeabi-v7a): ARM registers, and the guest's Thumb-2
-frame records (r7, then lr) */
-static void report_crash(int signal_number, siginfo_t *information, void *context)
-{
-	ucontext_t *ucontext = context;
-	const struct sigcontext *registers = &ucontext->uc_mcontext;
-	uint32_t pc = registers->arm_pc, lr = registers->arm_lr;
-	const unsigned long *r = &registers->arm_r0;
-	int index;
-
-	host_logf(HOST_LOG_ERROR, "signal %d at address %p: pc %08x lr %08x sp %08lx cpsr %08lx", signal_number,
-		information->si_addr, pc, lr, registers->arm_sp, registers->arm_cpsr);
-	if (pc >= host_image.base && pc < host_image.end)
-		host_logf(HOST_LOG_ERROR, "  in the guest image: addr2line -e armv7/halo_guest.elf 0x%x 0x%x", pc, lr);
-	for (index = 0; index < 12; index += 4)
-		host_logf(HOST_LOG_ERROR, "  r%-2d %08lx %08lx %08lx %08lx", index, r[index], r[index + 1], r[index + 2],
-			r[index + 3]);
-	host_logf(HOST_LOG_ERROR, "  r12 %08lx", registers->arm_ip);
-	{
-		uint32_t fp = (uint32_t)registers->arm_r7;
-
-		for (index = 0; index < 24 && fp && (fp & 3) == 0; index++)
-		{
-			const uint32_t *frame = (const uint32_t *)(uintptr_t)fp;
-
-			if (!host_low_owns(fp, 8))
-				break;
-			host_logf(HOST_LOG_ERROR, "  frame %2d: return %08x", index, frame[1]);
-			if (frame[0] <= fp)
-				break;
-			fp = frame[0];
-		}
-	}
-}
-#else
 static void report_crash(int signal_number, siginfo_t *information, void *context)
 {
 	ucontext_t *ucontext = context;
@@ -949,7 +913,6 @@ static void report_crash(int signal_number, siginfo_t *information, void *contex
 		}
 	}
 }
-#endif
 
 static void chain(struct sigaction *previous, int signal_number, siginfo_t *information, void *context)
 {
@@ -989,35 +952,6 @@ static void segv_handler(int signal_number, siginfo_t *information, void *contex
 
 static void bus_handler(int signal_number, siginfo_t *information, void *context)
 {
-#ifdef __arm__
-	{
-		/* a misaligned access of the 32-bit guest (host_alignment.c); each
-		place is logged once, for the first few */
-		static uint32_t logged[32];
-		static int logged_count;
-		uint32_t pc = ((ucontext_t *)context)->uc_mcontext.arm_pc;
-
-		if (host_alignment_fixup(context))
-		{
-			int index;
-
-			for (index = 0; index < logged_count && logged[index] != pc; index++)
-				;
-			if (index == logged_count && logged_count < (int)(sizeof(logged) / sizeof(logged[0])))
-			{
-				logged[logged_count++] = pc;
-				host_logf(HOST_LOG_INFO, "misaligned access at %p emulated: pc %08x", information->si_addr, pc);
-			}
-			{
-				uint64_t count = host_alignment_fixups();
-
-				if (count >= 1024 && !(count & (count - 1)))
-					host_logf(HOST_LOG_INFO, "%llu misaligned accesses emulated", (unsigned long long)count);
-			}
-			return;
-		}
-	}
-#endif
 	report_crash(signal_number, information, context);
 	chain(&previous_bus, signal_number, information, context);
 }

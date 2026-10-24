@@ -29,10 +29,7 @@ android {
         versionName buildNumber > 0 ? "build " + buildNumber : "1.0"
         buildConfigField "int", "HALO_BUILD_NUMBER", "${buildNumber}"
         ndk {
-            // 64-bit devices load the arm64-v8a libraries (and halo_guest.elf);
-            // devices whose Android runs only 32-bit apps, armeabi-v7a (and
-            // halo_guest_armv7.elf): port/android/README.md
-            abiFilters "arm64-v8a", "armeabi-v7a"
+            abiFilters "arm64-v8a"
         }
     }
 

@@ -55,33 +55,6 @@ void host_debug_thread_exited(void)
 	pthread_mutex_unlock(&threads_lock);
 }
 
-#ifdef __arm__
-/* the 32-bit app's (armeabi-v7a): the guest's Thumb-2 frame records, r7
-then lr */
-static void sample_handler(int signal_number, siginfo_t *information, void *context)
-{
-	const ucontext_t *ucontext = context;
-	const struct sigcontext *registers = &ucontext->uc_mcontext;
-	char line[512];
-	int length, depth;
-	uint32_t fp = (uint32_t)registers->arm_r7;
-
-	(void)signal_number;
-	(void)information;
-	length = snprintf(line, sizeof(line), "sample tid %d: pc %lx lr %lx", gettid(), registers->arm_pc,
-		registers->arm_lr);
-	for (depth = 0; depth < 12 && fp && !(fp & 3) && host_low_owns(fp, 8); depth++)
-	{
-		const uint32_t *frame = (const uint32_t *)(uintptr_t)fp;
-
-		length += snprintf(line + length, sizeof(line) - length, " %x", frame[1]);
-		if (frame[0] <= fp)
-			break;
-		fp = frame[0];
-	}
-	host_logf(HOST_LOG_INFO, "%s", line);
-}
-#else
 static void sample_handler(int signal_number, siginfo_t *information, void *context)
 {
 	const ucontext_t *ucontext = context;
@@ -105,7 +78,6 @@ static void sample_handler(int signal_number, siginfo_t *information, void *cont
 	}
 	host_logf(HOST_LOG_INFO, "%s", line);
 }
-#endif
 
 static void *sampler(void *context)
 {

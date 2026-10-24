@@ -30,7 +30,7 @@ void win32_window_borderless_apply(SDL_Window *window);
 #if !defined(_WIN32) && !defined(HALO_ANDROID)
 #include <signal.h>
 #endif
-#if defined(__linux__) && !defined(HALO_ANDROID_GUEST) && !defined(HALO_ANDROID)
+#if defined(__linux__) && !defined(HALO_ARM64_GUEST) && !defined(HALO_ANDROID)
 #include <dlfcn.h>
 #include <unistd.h>
 #endif
@@ -177,7 +177,7 @@ static void data_check_maps(void)
 }
 #endif
 
-#if defined(__linux__) && !defined(HALO_ANDROID_GUEST) && !defined(HALO_ANDROID)
+#if defined(__linux__) && !defined(HALO_ARM64_GUEST) && !defined(HALO_ANDROID)
 /* NVIDIA's driver draws into a Wayland window through its egl-wayland
 library, which distributions ship 64-bit only (Arch has no lib32 package
 of it). In this 32-bit game, OpenGL on Wayland (EGL) then falls back to
@@ -222,7 +222,7 @@ BOOL platform_sdl_initialize(void)
 	if (p2p_hand_off_invite())
 		exit(EXIT_SUCCESS);
 	SDL_SetHint(SDL_HINT_APP_NAME, "Halo");
-#if defined(__linux__) && !defined(HALO_ANDROID_GUEST) && !defined(HALO_ANDROID)
+#if defined(__linux__) && !defined(HALO_ARM64_GUEST) && !defined(HALO_ANDROID)
 	platform_choose_video_driver();
 #endif
 #ifdef HALO_ANDROID
@@ -2246,7 +2246,7 @@ void platform_pump_events(void)
 			break;
 #endif
 		case SDL_EVENT_GAMEPAD_ADDED:
-#ifdef HALO_ANDROID_GUEST
+#ifdef HALO_ARM64_GUEST
 			/* (the guest reaches SDL only through host_imports.list, which
 			has no SDL_GetGamepadName) */
 			SDL_OpenGamepad(event.gdevice.which);

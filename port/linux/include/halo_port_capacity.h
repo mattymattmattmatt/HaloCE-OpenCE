@@ -55,7 +55,7 @@ measurement). The desktop builds' cache is 256 MB, half their 512 MB memory
 window (port/linux/src/platform.h), whose pages are backed as they are used.
 Android's window is 128 MB, as the web build's, and its cache the Xbox's. */
 
-#if defined(HALO_ANDROID_GUEST) || defined(HALO_WEB)
+#if defined(HALO_ARM64_GUEST) || defined(HALO_WEB)
 #define HALO_PORT_TEXTURE_CACHE_PAGE_COUNT 0x580 /* (0x580) */
 #else
 #define HALO_PORT_TEXTURE_CACHE_PAGE_COUNT 0x4000 /* (0x580) */
@@ -72,7 +72,7 @@ campaign map's dialogue and music did, "SOUND CACHE BLOWN" in debug.txt).
 The desktop builds' cache is 16 MB; Android's and the web build's windows keep
 the Xbox's. */
 
-#if defined(HALO_ANDROID_GUEST) || defined(HALO_WEB)
+#if defined(HALO_ARM64_GUEST) || defined(HALO_WEB)
 #define HALO_PORT_SOUND_CACHE_SIZE 0x400000 /* (0x400000) */
 #else
 #define HALO_PORT_SOUND_CACHE_SIZE 0x1000000 /* (0x400000) */
@@ -90,7 +90,7 @@ outside the game state, and nothing of them reaches the network, so
 machines with other limits still play the same game. Android's and the web
 build's keep the Xbox's. (The transparent geometry groups: below.) */
 
-#if defined(HALO_ANDROID_GUEST) || defined(HALO_WEB)
+#if defined(HALO_ARM64_GUEST) || defined(HALO_WEB)
 #define HALO_PORT_MAXIMUM_RENDERED_PARTICLE_GROUPS 512 /* (512) */
 #define HALO_PORT_MAXIMUM_RENDERED_LIGHTS 128 /* (128) */
 #else

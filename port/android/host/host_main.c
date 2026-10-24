@@ -392,12 +392,7 @@ static void *game_main(void *unused)
 	}
 	snprintf(path, sizeof(path), "%s/config.toml", data_root);
 
-#ifdef __arm__
-	/* the 32-bit app's (armeabi-v7a) build of the guest */
-	image = SDL_LoadFile("halo_guest_armv7.elf", &image_size);
-#else
 	image = SDL_LoadFile("halo_guest.elf", &image_size);
-#endif
 	if (!image)
 		host_fatal("cannot read the game image from the APK: %s", SDL_GetError());
 	if (host_load_image(image, image_size) != 0)
