@@ -228,7 +228,7 @@ These settings are only for Android:
 | `input.touch_controls` | The touch controls in a game. `"auto"` (the default): shown on a touchscreen while no controller is connected. `"on"`: also shown with a controller. `"off"`: never shown. A device without a touchscreen never shows them. The menus take taps in any case. |
 | `display.screen_width` | The number of columns of the 480-line picture. `0` (the default): the shape of the display (1068 on a 20:9 phone). `640`: the 4:3 shape of the Xbox. |
 | `debug.sample_seconds` | Refer to "Find problems". |
-| `debug.memory_watch` | `true` (the default): the app notices the game's writes to cached textures by page protection. `false`: it compares page contents once a frame instead, which is slower. Geometry uses the streaming path in either mode. Refer to "Limits". |
+| `debug.memory_watch` | `true` (the default): the app notices the game's writes to cached textures by page protection. `false`: it compares page contents once a frame instead, which is slower. Geometry uses the streaming path in either mode (but refer to "Geometry uploads"). Refer to "Limits". |
 
 ## Internet play
 
@@ -465,18 +465,26 @@ assembly of the port is necessary:
 
 Android streams vertex and index data from the current CPU bytes instead
 of reusing the persistent geometry mirror or its cached index extents.
-This is automatic; no console command or configuration change is needed.
 Affected players reported that bypassing the cache resolved stretched or
 missing geometry, with some also reporting better performance. The exact
 cache failure mechanism remains unconfirmed.
 
-The Android-only guard in `mirror_range` uses the existing streaming
-fallback. Streamed upload methods, frame fences, shaders, texture caching
-and CPU write tracking are unchanged. Desktop and web retain their cache.
-Xbox and Custom Edition maps keep their existing loaders and resource
-paths. `tools/test_android_mirror_uploads.py` checks the bypass with large
-and reused ranges, frame-counter rollover and desktop/web cache controls;
-it does not substitute for device gameplay validation.
+NVIDIA's driver (the Shield TV) is the exception: there the levels drew
+right from the mirror, and streamed, their structure and scenery stretch
+into spikes to one point, so it keeps the mirror. The setting
+`debug.gpu_geometry_cache` (Video Setup > EXTRA EFFECTS > GEOMETRY:
+AUTO, STREAMED or CACHED, from the next start) chooses either way on any
+device. `debug.gpu_base_vertex = 0` draws the streamed indexed draws with
+rebased indices instead of a base vertex, as on OpenGL ES 3.0.
+
+A frame that streams more than its buffer holds goes on in spare buffers
+of its frame of the ring instead of orphaning the one its earlier draws
+read (`stream_spare_get`).
+
+`tools/test_android_mirror_uploads.py` checks the bypass with large and
+reused ranges, frame-counter rollover and desktop/web cache controls;
+`tools/test_android_stream_spares.py` checks the spares. Neither
+substitutes for device gameplay validation.
 
 ## Find problems
 

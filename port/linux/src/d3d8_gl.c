@@ -682,6 +682,11 @@ struct gl_device
 	unsigned long stream_offset;
 	GLuint index_buffer;
 	unsigned long index_offset;
+#if defined(HALO_GLES) && !defined(HALO_WEB)
+	/* the room in this frame's stream and index buffers (stream_spare_get) */
+	unsigned long stream_room;
+	unsigned long index_room;
+#endif
 #ifdef HALO_WEB
 	/* (web_chunk_get) the room in the stream and index buffers, the draws
 	made so far, and the count at each buffer's latest write */
@@ -775,6 +780,11 @@ static struct
 	unsigned long target_changes;
 	/* vertex and index bytes drawn from the mirror, and streamed */
 	unsigned long mirrored_bytes, streamed_bytes;
+	/* stream or index buffers filled within a frame, and the largest
+	frame's streamed bytes */
+	unsigned long stream_overflows, index_overflows, most_streamed, streamed_index_bytes, most_streamed_indices;
+	/* (streamed bytes counted when this frame began) */
+	unsigned long frame_first_streamed, frame_first_streamed_indices;
 	/* the textures uploaded, and the most draws and the longest time (ms)
 	of one frame: the averages hide a frame that stalls */
 	unsigned long texture_uploads, texture_upload_bytes;
@@ -822,6 +832,12 @@ static struct
 	/* debug.gpu_word_attributes: the attributes narrower than a word read
 	as their words (vertex_words_enabled) */
 	BOOL word_attributes;
+	/* debug.gpu_geometry_cache: vertices and indices drawn from the mirror
+	(mirror_range) rather than streamed each draw */
+	BOOL geometry_cache;
+	/* debug.gpu_base_vertex: streamed indexed draws with a base vertex
+	(else rebased indices; OpenGL ES) */
+	BOOL streamed_base_vertex;
 } debug_settings;
 
 /* ---------- GL state cache
@@ -1950,6 +1966,10 @@ static void gl_initialize(void)
 		}
 		device.stream_buffer = device.stream_buffers[0];
 		device.index_buffer = device.index_buffers[0];
+#ifndef HALO_WEB
+		device.stream_room = STREAM_BUFFER_SIZE;
+		device.index_room = INDEX_BUFFER_SIZE;
+#endif
 	}
 #endif
 #ifndef HALO_GLES
@@ -2023,6 +2043,31 @@ static void gl_initialize(void)
 #endif
 		if (debug_settings.word_attributes)
 			platform_log("GPU: attributes narrower than a word are read as words");
+	}
+	{
+		/* Some Android drivers corrupt the mirror's geometry (stretched and
+		missing models), so there every vertex and index is streamed each
+		draw, but with NVIDIA's (debug.gpu_geometry_cache) */
+		long cache = config_integer("debug.gpu_geometry_cache");
+		long base_vertex = config_integer("debug.gpu_base_vertex");
+		const char *vendor = (const char *)glGetString(GL_VENDOR);
+
+		if (cache < 0)
+		{
+#ifdef HALO_ANDROID
+			/* NVIDIA's driver (the Shield TV) drew the levels right from
+			the mirror; streamed, their structure and scenery stretch into
+			spikes to one point */
+			cache = vendor && strstr(vendor, "NVIDIA") ? 1 : 0;
+#else
+			cache = 1;
+#endif
+		}
+		debug_settings.geometry_cache = cache != 0;
+		debug_settings.streamed_base_vertex = base_vertex != 0;
+		platform_log("GPU: geometry %s, streamed indexed draws %s (GL vendor %s)", debug_settings.geometry_cache ?
+			"cached in GL buffers (the mirror)" : "streamed each draw",
+			debug_settings.streamed_base_vertex ? "with a base vertex" : "rebased", vendor ? vendor : "unknown");
 	}
 	{
 		GLint renderbuffer_size = 0;
@@ -4935,11 +4980,11 @@ static BOOL mirror_range(unsigned long address, unsigned long size, GLuint *buff
 	unsigned long segment, first, last, page, oldest = ~0UL, newest = 0;
 	BOOL present = TRUE;
 
-#ifdef HALO_ANDROID
-	/* Persistent geometry caching causes corruption on affected Android
-	devices. Use current vertex/index bytes through the streaming path. */
-	return FALSE;
-#endif
+	/* (debug.gpu_geometry_cache: off on Android but with NVIDIA's driver:
+	persistent geometry caching corrupts geometry on some devices; draws
+	then stream their current vertex and index bytes) */
+	if (!debug_settings.geometry_cache)
+		return FALSE;
 	if (!size || address < PLATFORM_CONTIGUOUS_BASE || start + size > PLATFORM_CONTIGUOUS_SIZE)
 		return FALSE;
 	segment = start / MIRROR_SEGMENT_SIZE;
@@ -5111,6 +5156,55 @@ static void web_chunks_begin_frame(void)
 is full. A draw reserves room for all of its streams at once: orphaning
 between two of them would leave the attributes already pointed at the
 buffer reading its new, empty storage. */
+#if defined(HALO_GLES) && !defined(HALO_WEB)
+/* A frame that streams more than its buffer holds goes on in another buffer
+of its frame of the ring, not in the same one orphaned. The writes are
+unsynchronized (host_gl_buffer_write): into a buffer orphaned while the
+frame's earlier draws still read it, they count on the driver's renaming of
+its storage under those draws. A spare no draw of the frame has read needs
+none, and the GPU is done with the frame that last used it: the spares of a
+frame are reused STREAM_BUFFER_RING frames on, as its own buffer. Past
+STREAM_SPARE_BUFFERS, the last one is orphaned as before. */
+#define STREAM_SPARE_BUFFERS 6
+
+static struct stream_spare
+{
+	GLuint buffer;
+	unsigned long capacity;
+} stream_spares[2][STREAM_BUFFER_RING][STREAM_SPARE_BUFFERS];
+static unsigned long stream_spares_used[2];
+
+/* another buffer of this frame, bound, with room for at least size bytes,
+and its room; 0 when they are all used */
+static GLuint stream_spare_get(int indices, unsigned long size, unsigned long *room)
+{
+	GLenum target = indices ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER;
+	unsigned long need = indices ? INDEX_BUFFER_SIZE : STREAM_BUFFER_SIZE;
+	struct stream_spare *spare;
+
+	if (stream_spares_used[indices] == STREAM_SPARE_BUFFERS)
+		return 0;
+	spare = &stream_spares[indices][device.buffer_ring][stream_spares_used[indices]++];
+	if (size > need)
+		need = (size + 0xFFFFF) & ~0xFFFFFUL;
+	if (!spare->buffer)
+		glGenBuffers(1, &spare->buffer);
+	if (indices)
+		state_element_array_buffer(spare->buffer);
+	else
+		state_array_buffer(spare->buffer);
+	if (spare->capacity < need)
+	{
+		/* (no draw of this frame reads it yet, and the GPU is done with the
+		frame that last did) */
+		glBufferData(target, (GLsizeiptr)need, NULL, GL_STREAM_DRAW);
+		spare->capacity = need;
+	}
+	*room = spare->capacity;
+	return spare->buffer;
+}
+#endif
+
 static void stream_reserve(unsigned long size)
 {
 #ifdef HALO_WEB
@@ -5121,9 +5215,30 @@ static void stream_reserve(unsigned long size)
 		device.stream_buffer = web_chunk_get(0, size, &device.stream_capacity);
 		device.stream_offset = 0;
 	}
+#elif defined(HALO_GLES)
+	if (device.stream_offset + size > device.stream_room)
+	{
+		GLuint spare = stream_spare_get(0, size, &device.stream_room);
+
+		stats.stream_overflows++;
+		if (spare)
+			device.stream_buffer = spare;
+		else
+		{
+			/* (every spare used: the last orphaned, as on the desktop) */
+			if (size > device.stream_room)
+				device.stream_room = (size + 0xFFFFF) & ~0xFFFFFUL;
+			state_array_buffer(device.stream_buffer);
+			glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)device.stream_room, NULL, GL_STREAM_DRAW);
+			if (stream_spares[0][device.buffer_ring][STREAM_SPARE_BUFFERS - 1].buffer == device.stream_buffer)
+				stream_spares[0][device.buffer_ring][STREAM_SPARE_BUFFERS - 1].capacity = device.stream_room;
+		}
+		device.stream_offset = 0;
+	}
 #else
 	if (device.stream_offset + size > STREAM_BUFFER_SIZE)
 	{
+		stats.stream_overflows++;
 		/* orphan the buffer and start again */
 		state_array_buffer(device.stream_buffer);
 		glBufferData(GL_ARRAY_BUFFER, STREAM_BUFFER_SIZE, NULL, GL_STREAM_DRAW);
@@ -5226,15 +5341,38 @@ static unsigned long index_upload(const void *data, unsigned long size)
 		device.index_offset = 0;
 	}
 	state_element_array_buffer(device.index_buffer);
+#elif defined(HALO_GLES)
+	/* (as stream_reserve) */
+	if (device.index_offset + size > device.index_room)
+	{
+		GLuint spare = stream_spare_get(1, size, &device.index_room);
+
+		stats.index_overflows++;
+		if (spare)
+			device.index_buffer = spare;
+		else
+		{
+			if (size > device.index_room)
+				device.index_room = (size + 0xFFFFF) & ~0xFFFFFUL;
+			state_element_array_buffer(device.index_buffer);
+			glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)device.index_room, NULL, GL_STREAM_DRAW);
+			if (stream_spares[1][device.buffer_ring][STREAM_SPARE_BUFFERS - 1].buffer == device.index_buffer)
+				stream_spares[1][device.buffer_ring][STREAM_SPARE_BUFFERS - 1].capacity = device.index_room;
+		}
+		device.index_offset = 0;
+	}
+	state_element_array_buffer(device.index_buffer);
 #else
 	state_element_array_buffer(device.index_buffer);
 	if (device.index_offset + size > INDEX_BUFFER_SIZE)
 	{
+		stats.index_overflows++;
 		glBufferData(GL_ELEMENT_ARRAY_BUFFER, INDEX_BUFFER_SIZE, NULL, GL_STREAM_DRAW);
 		device.index_offset = 0;
 	}
 #endif
 	offset = device.index_offset;
+	stats.streamed_index_bytes += length;
 #ifdef HALO_GLES
 	host_gl_buffer_write(GL_ELEMENT_ARRAY_BUFFER, (unsigned int)offset, (unsigned int)length, data);
 #else
@@ -5949,16 +6087,30 @@ void WINAPI D3DDevice_DrawIndexedVertices(D3DPRIMITIVETYPE primitive_type, UINT 
 		source = indices;
 	}
 #ifdef HALO_GLES
-	if (!xgpu_capabilities.base_vertex)
+	/* debug.gpu_base_vertex 0: the indices, copied anyway, rebased and the
+	draw made without a base vertex, as on OpenGL ES 3.0, for a driver that
+	gets a draw with a negative base vertex wrong */
+	if (!xgpu_capabilities.base_vertex || !debug_settings.streamed_base_vertex)
 	{
-		/* the indices are copied anyway: rebase them */
-		WORD *rebased = malloc(count * sizeof(WORD) + 2);
+		static WORD *rebased;
+		static unsigned long rebased_capacity;
 
+		if (rebased_capacity < count)
+		{
+			WORD *grown = realloc(rebased, count * sizeof(WORD) + 2);
+
+			if (!grown)
+			{
+				free(indices);
+				return;
+			}
+			rebased = grown;
+			rebased_capacity = count;
+		}
 		for (index = 0; index < count; index++)
 			rebased[index] = (WORD)(source[index] - minimum);
 		glDrawElements(primitive_mode(primitive_type), (GLsizei)count, GL_UNSIGNED_SHORT,
 			(const void *)index_upload(rebased, count * sizeof(WORD)));
-		free(rebased);
 		free(indices);
 		return;
 	}
@@ -6994,6 +7146,10 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		device.index_offset = 0;
 #ifdef HALO_WEB
 		web_chunks_begin_frame();
+#else
+		device.stream_room = STREAM_BUFFER_SIZE;
+		device.index_room = INDEX_BUFFER_SIZE;
+		stream_spares_used[0] = stream_spares_used[1] = 0;
 #endif
 #else
 		device.stream_offset = STREAM_BUFFER_SIZE; /* orphan next frame */
@@ -7020,16 +7176,23 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		if (stats.draws - stats.frame_first_draw > stats.most_draws)
 			stats.most_draws = stats.draws - stats.frame_first_draw;
 		stats.frame_first_draw = stats.draws;
+		if (stats.streamed_bytes - stats.frame_first_streamed > stats.most_streamed)
+			stats.most_streamed = stats.streamed_bytes - stats.frame_first_streamed;
+		stats.frame_first_streamed = stats.streamed_bytes;
+		if (stats.streamed_index_bytes - stats.frame_first_streamed_indices > stats.most_streamed_indices)
+			stats.most_streamed_indices = stats.streamed_index_bytes - stats.frame_first_streamed_indices;
+		stats.frame_first_streamed_indices = stats.streamed_index_bytes;
 	}
 	if (debug_settings.statistics && device.frame % 60 == 0)
 	{
 		platform_log("frame %lu: %lu draws, %lu immediate, %lu clears, %lu target changes; skipped %lu no program, %lu no target, %lu link; "
-			"%lu KB mirrored, %lu KB streamed; in 60 frames, %lu textures uploaded (%lu KB), at most %lu draws "
-			"and %lu ms in a frame",
+			"%lu KB mirrored, %lu KB streamed; in 60 frames, %lu textures uploaded (%lu KB), at most %lu draws, "
+			"%lu KB streamed (%lu KB of indices) and %lu ms in a frame, %lu stream and %lu index buffers filled",
 			device.frame, stats.draws / stats.presents, stats.immediate_draws / stats.presents, stats.clears / stats.presents,
 			stats.target_changes / stats.presents, stats.skipped_no_program, stats.skipped_no_target, stats.skipped_link,
 			stats.mirrored_bytes / stats.presents / 1024, stats.streamed_bytes / stats.presents / 1024,
-			stats.texture_uploads, stats.texture_upload_bytes / 1024, stats.most_draws, stats.slowest_frame);
+			stats.texture_uploads, stats.texture_upload_bytes / 1024, stats.most_draws, stats.most_streamed / 1024,
+			stats.most_streamed_indices / 1024, stats.slowest_frame, stats.stream_overflows, stats.index_overflows);
 		memset(&stats, 0, sizeof(stats));
 	}
 	platform_pump_events();

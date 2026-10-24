@@ -29,7 +29,7 @@ def mirror_uploads(tmp_path_factory):
     directory = tmp_path_factory.mktemp("android-mirror-regression")
     target = ["--target=i686-pc-windows-msvc", "-fuse-ld=lld"] if os.name == "nt" else ["-m32"]
     binaries = {}
-    for variant, defines in (("android", ["-DHALO_ANDROID=1"]), ("android-cached", ["-DHALO_ANDROID=1"]),
+    for variant, defines in (("android", ["-DHALO_ANDROID=1"]), ("android-cached", ["-DHALO_ANDROID=1", "-DTEST_GEOMETRY_CACHE=1"]),
                              ("gles", []), ("web", ["-DHALO_WEB=1"]),
                              ("desktop", ["-DTEST_DESKTOP=1"]), ("unguarded", [])):
         work = directory / variant
@@ -37,12 +37,6 @@ def mirror_uploads(tmp_path_factory):
         selected = mutated(mirror,
                            "unused && device.frame - mirror.subdata_frame[segment] >= STREAM_BUFFER_RING",
                            "unused") if variant == "unguarded" else mirror
-        if variant == "android-cached":
-            selected = mutated(selected,
-                               "/* Persistent geometry caching causes corruption on affected Android\n"
-                               "\tdevices. Use current vertex/index bytes through the streaming path. */\n"
-                               "\treturn FALSE;",
-                               "/* Control: leave the cache enabled. */")
         (work / "mirror.inc").write_text(selected)
         (work / "rotation.inc").write_text(rotation)
         executable = work / ("test.exe" if os.name == "nt" else "test")
