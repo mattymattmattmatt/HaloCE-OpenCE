@@ -492,6 +492,21 @@ armeabi-v7a code. The build makes the same game a second time for them:
   (`-mllvm -arm-assume-misaligned-load-store`); the rest (mostly a float
   at a 2-aligned address, in the scripts' stack) is performed by the SIGBUS
   handler (`host/host_alignment.c`), which logs each place once.
+- A 32-bit app shares its address space with what the zygote mapped before
+  forking it (ART's spaces, the WebView loader's reservation, libraries
+  coming down from the top), so the fixed ranges can be taken. Only the
+  tag cache and game state must be where the game's data puts them
+  (0x803A6000-0x82FC0000). The host reserves the rest of the window around
+  any other mapping in it, and names those holes to the guest
+  (`HALO_WINDOW_HOLES`), whose contiguous allocator never hands them out
+  (`port/linux/src/xbox_memory.c`). The image is linked with
+  `--emit-relocs --pic-veneer`, and `tools/android_rebase.py` keeps a table
+  of the places that hold its addresses (section `.halo_rebase`): when
+  0x88000000 is taken, the host loads it at another free place (0x68000000
+  first, below ART's boot image) and adjusts them (`host/host_loader.c`).
+  The WebView reservation is taken back like ART's large object space. If
+  the fixed part itself is taken, the start-up dialog lists the mappings
+  in the way (also in `memory_map.txt`), for a report.
 
 Android installs the library of the device's preferred ABI: a 64-bit device
 uses the arm64-v8a code, unchanged by the 32-bit build.
