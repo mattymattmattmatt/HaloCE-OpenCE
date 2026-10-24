@@ -876,6 +876,8 @@ static const struct config_setting config_settings[] =
 		"With debug.gore_test: instead, a sniper rifle bullet's damage on the unit's head (the map needs the sniper rifle)." },
 	{ "debug.gore_test_projectile", _config_boolean, "false", "HALO_GORE_TEST_PROJECTILE", _environment_value, _platform_all,
 		"With gore_test_distance: drop a live frag grenade there instead." },
+	{ "debug.gore_test_shell", _config_boolean, "false", "HALO_GORE_TEST_SHELL", _environment_value, _platform_all,
+		"With debug.gore_test: instead, a scorpion shell's blast on the unit's centre (a hunter's tank gib; the map needs the scorpion)." },
 	{ "debug.telnet_console", _config_boolean, "false", "HALO_TELNET_CONSOLE", _environment_set_is_true, _platform_all,
 		"Listen on 127.0.0.1 (port telnet_console_port) for a script console that\n"
 		"runs what it is sent as the game's console does, with no password; false\n"
