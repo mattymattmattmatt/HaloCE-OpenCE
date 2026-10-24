@@ -123,6 +123,7 @@ struct game_options;
 #include "gore.h"
 #include "manual_respawn.h" /* port: port/linux/game/manual_respawn.c */
 #include "hud_toggle.h" /* port: port/linux/game/hud_toggle.c */
+#include "game_modes.h" /* port: port/linux/game/game_modes.c */
 #include "ai/ai.h"
 #include "bink/bink_playback.h"
 #include "bungie_net/network/transport.h"
@@ -500,7 +501,11 @@ void game_set_game_variant_options(
 	struct game_variant_options const *options)
 {
 	if (options)
+	{
 		game_variant_options_global = *options;
+		/* port: OpenCE's options in range (another machine's: game_modes.c) */
+		game_modes_options_sanitize(&game_variant_options_global);
+	}
 	else
 		game_variant_options_default(&game_variant_global, &game_variant_options_global);
 
