@@ -707,23 +707,16 @@ def _generate_android_abi_objects(n: Writer, sln: Any, config: Dict[str, Any], n
         )
     else:
         linker_script = PORT_DIR / "guest" / "guest_arm.ld"
-        # (with the table of the places that hold its addresses, so that the
-        # host can move it when its range is taken: tools/android_rebase.py)
         n.rule(
             name=f"{p}_guest_link",
             command=(f"$android_ndk_bin/ld.lld -m armelf_linux_eabi -static -nostdlib -T {linker_script} "
-                     f"--emit-relocs --pic-veneer -Map $out.map -o $out.linked @$out.rsp {libguestc} "
-                     f"$$(${p}_host_cc -print-libgcc-file-name) && "
-                     f"{sys.executable} tools/android_rebase.py $out.linked $out.rebase > /dev/null && "
-                     "$android_ndk_bin/llvm-objcopy --wildcard --remove-section=.rel.* "
-                     "--add-section .halo_rebase=$out.rebase --set-section-flags .halo_rebase=noload,readonly "
-                     "$out.linked $out && rm -f $out.linked"),
+                     f"-Map $out.map -o $out @$out.rsp {libguestc} "
+                     f"$$(${p}_host_cc -print-libgcc-file-name)"),
             description=f"{p.upper()} LINK $out",
             rspfile="$out.rsp",
             rspfile_content="$in_newline",
         )
-    n.build(outputs=image, rule=f"{p}_guest_link", inputs=objects,
-            implicit=[libguestc, linker_script] + ([] if arm64 else [Path("tools/android_rebase.py")]))
+    n.build(outputs=image, rule=f"{p}_guest_link", inputs=objects, implicit=[libguestc, linker_script])
 
     # ---------- SDL3
 

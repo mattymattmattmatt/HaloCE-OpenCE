@@ -126,18 +126,6 @@ spaces (its heap, bitmaps and card tables) are live, and unmapping them
 would corrupt it where failing to start is at least clear. */
 #define ART_LARGE_OBJECT_SPACE "[anon:dalvik-free list large object space]"
 
-#ifdef __arm__
-/* The 32-bit app (armeabi-v7a) shares its whole address space with what the
-zygote mapped before forking it, ART's spaces below and libraries, fonts and
-the like coming down from the top, so the fixed ranges can be taken there by
-more than ART's large object space (which a 32-bit ART does not have: its
-large objects are mappings of their own). One more is safe to take: the
-WebView loader's reservation, address space set aside in every app for
-loading WebView's library, never used by the game's process, which shows no
-web page. */
-#define WEBVIEW_RESERVATION "[anon:libwebview reservation]"
-#endif
-
 /* what range_usage found */
 enum
 {
@@ -404,11 +392,7 @@ static int reclaim_art_overlap(uint64_t address, uint64_t size)
 		name[strcspn(name, "\n")] = '\0';
 		from = lo > address ? lo : address;
 		to = hi < address + size ? hi : address + size;
-		if (strcmp(name, ART_LARGE_OBJECT_SPACE)
-#ifdef __arm__
-			&& strcmp(name, WEBVIEW_RESERVATION)
-#endif
-			)
+		if (strcmp(name, ART_LARGE_OBJECT_SPACE))
 		{
 			finding(HOST_LOG_ERROR, "a fixed guest range is overlapped by %08llx-%08llx (%s), which is not ART's large object space; left alone",
 				lo, hi, name[0] ? name : "unnamed");
@@ -558,254 +542,6 @@ image (HALO_GUEST_IMAGE_RESERVE), reserved as early as the process allows
 static int fixed_reserved;
 static int fixed_error;
 
-#ifdef __arm__
-/* ---------- the 32-bit app's ranges (armeabi-v7a)
-
-Some of the window must be where the game's data puts it: the tag cache at
-0x803A6000, linked there by the maps (physical_memory_map.c), and the game
-state at 0x81A00000, whose saved copies hold its addresses
-(halo_port_capacity.h). The rest of the window only hands out memory
-top-down (the texture and sound caches, Direct3D resources), so a mapping
-of the zygote's in it is left there as a hole that the guest never hands
-out (HALO_WINDOW_HOLES, read by port/linux/src/xbox_memory.c), as long as
-enough of the window is free around it. And the image is moved when its
-range is taken (host_memory_place_image, host_loader.c). */
-#define WINDOW_FIXED_START 0x803A6000u
-#define WINDOW_FIXED_END 0x82FC0000u
-/* what the window must have free outside the fixed part, and in one run
-(the texture cache's 22 MB) */
-#define WINDOW_FREE_MINIMUM 0x03000000u
-#define WINDOW_RUN_MINIMUM 0x01800000u
-#define MAXIMUM_HOLES 24
-/* where the image may go when its own range is taken, in order: the room
-ART leaves between its heap and its boot image (0x70000000) in a 32-bit
-app, then any free gap */
-static const uint32_t image_fallbacks[] = {
-	0x68000000u, 0x60000000u, 0x58000000u, 0x50000000u, 0x48000000u, 0x8c000000u, 0x90000000u,
-};
-
-struct hole
-{
-	uint32_t start, end;
-};
-
-static struct hole holes[MAXIMUM_HOLES];
-static int hole_count;
-static char holes_text[MAXIMUM_HOLES * 18 + 1];
-static uint32_t image_reserved_base, image_reserved_size;
-
-static int window_hole_overlaps(uint64_t address, uint64_t size)
-{
-	int index;
-
-	for (index = 0; index < hole_count; index++)
-	{
-		if (address < holes[index].end && address + size > holes[index].start)
-			return 1;
-	}
-	return 0;
-}
-
-/* the mappings over from..to, merged and page-aligned, as the holes; 0 if
-there are more than the table holds */
-static int collect_holes(uint32_t from, uint32_t to)
-{
-	FILE *maps = fopen("/proc/self/maps", "r");
-	char line[512];
-
-	hole_count = 0;
-	if (!maps)
-		return 0;
-	while (fgets(line, sizeof(line), maps))
-	{
-		unsigned long long lo, hi;
-		uint32_t start, end;
-
-		if (sscanf(line, "%llx-%llx", &lo, &hi) != 2 || hi <= from || lo >= to)
-			continue;
-		start = lo > from ? (uint32_t)lo : from;
-		end = hi < to ? (uint32_t)hi : to;
-		if (hole_count && holes[hole_count - 1].end >= start)
-		{
-			if (end > holes[hole_count - 1].end)
-				holes[hole_count - 1].end = end;
-			continue;
-		}
-		if (hole_count == MAXIMUM_HOLES)
-		{
-			fclose(maps);
-			return 0;
-		}
-		holes[hole_count].start = start;
-		holes[hole_count].end = end;
-		hole_count++;
-	}
-	fclose(maps);
-	return 1;
-}
-
-/* calls each(start, end) for the parts of address..address+size that are
-not holes */
-static void window_segments(uint64_t address, uint64_t size, void (*each)(uint64_t start, uint64_t end, void *context),
-	void *context)
-{
-	uint64_t cursor = address, end = address + size;
-	int index;
-
-	for (index = 0; index < hole_count && cursor < end; index++)
-	{
-		if (holes[index].end <= cursor || holes[index].start >= end)
-			continue;
-		if (holes[index].start > cursor)
-			each(cursor, holes[index].start, context);
-		cursor = holes[index].end;
-	}
-	if (cursor < end)
-		each(cursor, end, context);
-}
-
-struct segment_reservation
-{
-	int failed;
-	uint32_t free_bytes, longest_run;
-};
-
-static void reserve_segment(uint64_t start, uint64_t end, void *context)
-{
-	struct segment_reservation *reservation = context;
-	uint64_t outside = end - start;
-
-	if (reservation->failed)
-		return;
-	if (reserve(start, end - start, 0) != 0)
-	{
-		finding(HOST_LOG_ERROR, "cannot reserve %08llx-%08llx of the window (%s)", (unsigned long long)start,
-			(unsigned long long)end, strerror(errno));
-		reservation->failed = 1;
-		return;
-	}
-	/* (what of it the fixed part does not take) */
-	if (start < WINDOW_FIXED_END && end > WINDOW_FIXED_START)
-	{
-		uint64_t below = start < WINDOW_FIXED_START ? WINDOW_FIXED_START - start : 0;
-		uint64_t above = end > WINDOW_FIXED_END ? end - WINDOW_FIXED_END : 0;
-
-		outside = below > above ? below : above;
-		reservation->free_bytes += (uint32_t)(below + above);
-	}
-	else
-	{
-		reservation->free_bytes += (uint32_t)outside;
-	}
-	if (outside > reservation->longest_run)
-		reservation->longest_run = (uint32_t)outside;
-}
-
-static void release_segment(uint64_t start, uint64_t end, void *context)
-{
-	(void)context;
-	munmap((void *)(uintptr_t)start, end - start);
-}
-
-/* the window around the mappings in it (after reclaim_art_overlap took what
-it could); 0 on success */
-static int reserve_window_around(void)
-{
-	struct segment_reservation reservation = { 0, 0, 0 };
-	size_t used = 0;
-	int index;
-
-	if (!collect_holes(HALO_GUEST_WINDOW_BASE, HALO_GUEST_WINDOW_BASE + HALO_GUEST_WINDOW_SIZE))
-	{
-		finding(HOST_LOG_ERROR, "more than %d mappings are in the window", MAXIMUM_HOLES);
-		hole_count = 0;
-		return -1;
-	}
-	for (index = 0; index < hole_count; index++)
-	{
-		if (holes[index].start < WINDOW_FIXED_END && holes[index].end > WINDOW_FIXED_START)
-		{
-			finding(HOST_LOG_ERROR, "%08x-%08x is taken, inside %08x-%08x, which the game's maps and saved games "
-				"need at that address (the tag cache and game state)", holes[index].start, holes[index].end,
-				WINDOW_FIXED_START, WINDOW_FIXED_END);
-			hole_count = 0;
-			return -1;
-		}
-	}
-	window_segments(HALO_GUEST_WINDOW_BASE, HALO_GUEST_WINDOW_SIZE, reserve_segment, &reservation);
-	if (!reservation.failed &&
-		(reservation.free_bytes < WINDOW_FREE_MINIMUM || reservation.longest_run < WINDOW_RUN_MINIMUM))
-	{
-		finding(HOST_LOG_ERROR, "the window has only %u MB free outside its fixed part (%u MB in one run); "
-			"the game needs %u MB (%u MB in one run)", reservation.free_bytes >> 20, reservation.longest_run >> 20,
-			WINDOW_FREE_MINIMUM >> 20, WINDOW_RUN_MINIMUM >> 20);
-		reservation.failed = 1;
-	}
-	if (reservation.failed)
-	{
-		window_segments(HALO_GUEST_WINDOW_BASE, HALO_GUEST_WINDOW_SIZE, release_segment, NULL);
-		hole_count = 0;
-		return -1;
-	}
-	holes_text[0] = '\0';
-	for (index = 0; index < hole_count; index++)
-	{
-		used += (size_t)snprintf(holes_text + used, sizeof(holes_text) - used, "%s%08x-%08x", index ? "," : "",
-			holes[index].start, holes[index].end);
-		finding(HOST_LOG_WARN, "window hole %08x-%08x (taken by another mapping): the game leaves it alone",
-			holes[index].start, holes[index].end);
-	}
-	host_logf(HOST_LOG_INFO, "reserved the window around %d mappings (%u MB free outside its fixed part)", hole_count,
-		reservation.free_bytes >> 20);
-	return 0;
-}
-
-const char *host_memory_window_holes(void)
-{
-	return holes_text;
-}
-
-const char *host_memory_findings(void)
-{
-	return findings;
-}
-
-/* when: the attempt, as the report names it (the reasons below it are
-those of that attempt). The window (around what is in it if need be), and
-the image's own range if it is free: if not, the image goes elsewhere. */
-static int reserve_fixed(const char *when)
-{
-	size_t used = strlen(findings);
-
-	if (fixed_reserved)
-		return 0;
-	snprintf(findings + used, sizeof(findings) - used, "%s:\n", when);
-	if (reserve(HALO_GUEST_WINDOW_BASE, HALO_GUEST_WINDOW_SIZE, 1) != 0)
-	{
-		int error = errno;
-
-		finding(HOST_LOG_WARN, "cannot reserve all of the Xbox memory window at %08llx (%s)",
-			(unsigned long long)HALO_GUEST_WINDOW_BASE, strerror(error));
-		if (error != EEXIST || reserve_window_around() != 0)
-		{
-			fixed_error = error ? error : EEXIST;
-			return -1;
-		}
-	}
-	if (reserve(HALO_GUEST_IMAGE_BASE, HALO_GUEST_IMAGE_RESERVE, 1) == 0)
-	{
-		image_reserved_base = HALO_GUEST_IMAGE_BASE;
-		image_reserved_size = HALO_GUEST_IMAGE_RESERVE;
-	}
-	else
-	{
-		finding(HOST_LOG_WARN, "the image's range at %08llx is taken (%s): the image goes elsewhere",
-			(unsigned long long)HALO_GUEST_IMAGE_BASE, strerror(errno));
-	}
-	fixed_reserved = 1;
-	return 0;
-}
-#else
 /* when: the attempt, as the report names it (the reasons below it are
 those of that attempt) */
 static int reserve_fixed(const char *when)
@@ -833,8 +569,6 @@ static int reserve_fixed(const char *when)
 	fixed_reserved = 1;
 	return 0;
 }
-
-#endif
 
 int host_memory_fixed_unavailable(void)
 {
@@ -902,67 +636,6 @@ void host_memory_reserve_early(void)
 		host_logf(HOST_LOG_INFO, "reserved the Xbox memory window and the image range at start-up");
 }
 
-#ifdef __arm__
-/* the 32-bit image's place: its own range if it was free, else the first
-free one of image_fallbacks, else any free gap, 64 KB aligned (the host
-moves the image by a multiple of that: tools/android_rebase.py); 0 if
-none */
-uint32_t host_memory_place_image(uint32_t link_base, uint32_t size)
-{
-	uint64_t length = (size + 0xffffULL) & ~0xffffULL;
-	uint64_t base = 0;
-	size_t index;
-
-	if (reserve_fixed("when the image loaded") != 0)
-	{
-		errno = fixed_error;
-		return 0;
-	}
-	if (image_reserved_size && image_reserved_base == link_base && length <= image_reserved_size)
-	{
-		base = link_base;
-	}
-	else
-	{
-		if (image_reserved_size)
-		{
-			munmap((void *)(uintptr_t)image_reserved_base, image_reserved_size);
-			image_reserved_size = 0;
-		}
-		if (reserve(link_base, length, 1) == 0)
-			base = link_base;
-		for (index = 0; !base && index < sizeof(image_fallbacks) / sizeof(image_fallbacks[0]); index++)
-		{
-			if (reserve(image_fallbacks[index], length, 0) == 0)
-				base = image_fallbacks[index];
-		}
-		if (!base)
-		{
-			uint64_t gap = find_gap(length + 0x10000, LOW_START);
-
-			gap = (gap + 0xffff) & ~0xffffULL;
-			if (gap && reserve(gap, length, 0) == 0)
-				base = gap;
-		}
-		if (!base)
-		{
-			finding(HOST_LOG_ERROR, "no free range of %llu MB for the image", (unsigned long long)(length >> 20));
-			fixed_error = ENOMEM;
-			return 0;
-		}
-		image_reserved_base = (uint32_t)base;
-		image_reserved_size = (uint32_t)length;
-	}
-	if (base != link_base)
-		host_logf(HOST_LOG_WARN, "the guest image goes at %08llx (linked at %08x, whose range is taken)",
-			(unsigned long long)base, link_base);
-	window_base = HALO_GUEST_WINDOW_BASE;
-	window_end = window_base + HALO_GUEST_WINDOW_SIZE;
-	image_base = base;
-	image_end = base + round_up(size);
-	return (uint32_t)base;
-}
-#else
 int host_memory_initialize(uint32_t base, uint32_t size)
 {
 	if (base != HALO_GUEST_IMAGE_BASE || size > HALO_GUEST_IMAGE_RESERVE)
@@ -981,8 +654,6 @@ int host_memory_initialize(uint32_t base, uint32_t size)
 	image_end = base + round_up(size);
 	return 0;
 }
-
-#endif
 
 /* ---------- page pools */
 
@@ -1083,11 +754,7 @@ int host_low_owns(uintptr_t address, size_t size)
 	int result;
 
 	if (in_range(address, size, window_base, window_end) || in_range(address, size, image_base, image_end))
-#ifdef __arm__
-		return !window_hole_overlaps(address, size);
-#else
 		return 1;
-#endif
 	pthread_mutex_lock(&memory_lock);
 	result = pool_of(address, size) != NULL;
 	pthread_mutex_unlock(&memory_lock);
@@ -1095,22 +762,6 @@ int host_low_owns(uintptr_t address, size_t size)
 }
 
 /* ---------- the guest's memory system calls */
-
-#ifdef __arm__
-struct segment_mapping
-{
-	int protection, flags, error;
-};
-
-static void map_segment(uint64_t start, uint64_t end, void *context)
-{
-	struct segment_mapping *mapping = context;
-
-	if (mmap((void *)(uintptr_t)start, end - start, mapping->protection, mapping->flags | MAP_ANONYMOUS | MAP_FIXED, -1,
-			0) == MAP_FAILED && !mapping->error)
-		mapping->error = errno;
-}
-#endif
 
 long host_guest_mmap(uint64_t address, uint64_t size, int protection, int flags, int fd, int64_t offset)
 {
@@ -1125,18 +776,6 @@ long host_guest_mmap(uint64_t address, uint64_t size, int protection, int flags,
 
 		if (address + length > LOW_LIMIT)
 			return -ENOMEM;
-#ifdef __arm__
-		/* (the window around its holes: only what is the guest's) */
-		if (window_hole_overlaps(address, length) && in_range(address, length, window_base, window_end))
-		{
-			struct segment_mapping mapping = { protection, (fixed_flags & ~MAP_SHARED) | MAP_PRIVATE, 0 };
-
-			if (fd >= 0)
-				return -EINVAL;
-			window_segments(address, length, map_segment, &mapping);
-			return mapping.error ? -mapping.error : (long)(uintptr_t)address;
-		}
-#endif
 		/* inside a range the host reserved for the guest, a "no replace"
 		request replaces the reservation */
 		if (!host_low_owns(address, length))
@@ -1171,15 +810,6 @@ long host_guest_munmap(uint64_t address, uint64_t size)
 		return -EINVAL;
 	if (in_range(address, length, window_base, window_end))
 	{
-#ifdef __arm__
-		if (window_hole_overlaps(address, length))
-		{
-			struct segment_mapping mapping = { PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, 0 };
-
-			window_segments(address, length, map_segment, &mapping);
-			return 0;
-		}
-#endif
 		mmap((void *)address, length, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1, 0);
 		return 0;
 	}
@@ -1260,10 +890,8 @@ static void report_crash(int signal_number, siginfo_t *information, void *contex
 
 	host_logf(HOST_LOG_ERROR, "signal %d at address %p: pc %08x lr %08x sp %08lx cpsr %08lx", signal_number,
 		information->si_addr, pc, lr, registers->arm_sp, registers->arm_cpsr);
-	/* (the addresses as linked, where the image was moved) */
 	if (pc >= host_image.base && pc < host_image.end)
-		host_logf(HOST_LOG_ERROR, "  in the guest image (at %08x): addr2line -e armv7/halo_guest.elf 0x%x 0x%x",
-			host_image.base, pc - host_image.base + host_image.link_base, lr - host_image.base + host_image.link_base);
+		host_logf(HOST_LOG_ERROR, "  in the guest image: addr2line -e armv7/halo_guest.elf 0x%x 0x%x", pc, lr);
 	for (index = 0; index < 12; index += 4)
 		host_logf(HOST_LOG_ERROR, "  r%-2d %08lx %08lx %08lx %08lx", index, r[index], r[index + 1], r[index + 2],
 			r[index + 3]);
