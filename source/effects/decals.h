@@ -90,6 +90,11 @@ void decal_quad_set_color(long decal_index, real_rgb_color const *color, real al
 short decal_definition_sequence_count(long decal_definition_index);
 short decal_definition_blend_function(long decal_definition_index);
 void decal_quad_set_blend_function(long decal_index, short framebuffer_blend_function);
+/* port: a quad drawn with another bitmap (its group's bitmap, these texture
+coordinates within it, 0 to 1) in place of its definition's; the bitmap group
+a decal is drawn with */
+boolean decal_quad_set_bitmap(long decal_index, long bitmap_group_index, short bitmap_index, real_point2d const uv[4]);
+long decal_bitmap_group_get(long decal_index, long definition_bitmap_group_index);
 void decal_quads_delete_unmarked(byte const *marked); /* (marked: by absolute index, HALO_PORT_MAXIMUM_DECALS) */
 boolean decal_quad_exists(long decal_index);
 void decal_definitions_report(void);

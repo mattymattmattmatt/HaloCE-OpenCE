@@ -258,6 +258,10 @@ struct gore_bleed_quad
 	short blend; /* its own blend function (decal_quad_set_blend_function), NONE: the definition's */
 	real_point3d corners[4];
 	real_point2d uv[4];
+	/* its own bitmap (decal_quad_set_bitmap, uv within it), NONE: the
+	definition's */
+	long bitmap_group_index;
+	short bitmap_index;
 };
 
 struct gore_bleed_stain
@@ -588,6 +592,8 @@ static short bleed_quad_new(long definition_index, short sequence, short cluster
 	quad->color = *color;
 	quad->strength = 1.f;
 	quad->blend = NONE;
+	quad->bitmap_group_index = NONE;
+	quad->bitmap_index = 0;
 	csmemcpy(quad->corners, ordered, sizeof(ordered));
 	csmemcpy(quad->uv, ordered_uv, sizeof(ordered_uv));
 	return index;
@@ -1765,6 +1771,8 @@ static void bleed_check_quads(void)
 				quad->corners, quad->uv, &quad->color, 1.f);
 			if (quad->decal_index != NONE && quad->blend != NONE)
 				decal_quad_set_blend_function(quad->decal_index, quad->blend);
+			if (quad->decal_index != NONE && quad->bitmap_group_index != NONE)
+				decal_quad_set_bitmap(quad->decal_index, quad->bitmap_group_index, quad->bitmap_index, quad->uv);
 			if (quad->decal_index != NONE && quad->strength < 1.f)
 				decal_quad_set_color(quad->decal_index, &quad->color, quad->strength);
 			gore_bleed_quads_remade++;
@@ -3665,7 +3673,8 @@ A wheeled vehicle (a Warthog's kind: the jeep type) or a tank (the
 Scorpion's) that runs over a corpse or through blood (whatever leaves
 bloody footprints) lays its tracks in that blood's colour, along each
 side's wheel or tread line, behind its rearmost wheel on that side:
-a tyre's band, a tread's wide band of cleats. Each mark is fainter
+a tyre's band, a tread's own plates (the Scorpion's tread bitmap, end
+to end; without it, a band of cleats). Each mark is fainter
 than the last, gone some 22 m (tyres) or 30 m (treads) after the blood
 (16 and 20 in multiplayer, in fewer, longer marks);
 running over blood again wets it again. Hover vehicles, aircraft, boats
@@ -3695,7 +3704,8 @@ struct gore_track_side
 	real total;
 	real_point3d last; /* where the last mark ended */
 	boolean have_last;
-	short marks; /* (the tread's cleats alternate) */
+	short marks;
+	real phase; /* the tread's plates: where along its bitmap the next begins (0 to 1) */
 };
 
 /* a vehicle definition's wheels (looked up once a map) */
@@ -3733,6 +3743,139 @@ static struct gore_track_vehicle gore_track_vehicles[GORE_TRACK_MAXIMUM_VEHICLES
 static struct gore_footprint gore_track_marks[GORE_TRACK_MAXIMUM_MARKS];
 static short gore_track_next;
 static long gore_track_marks_made;
+/* the tank's tread bitmap (its plates), NONE: none in the map; -2: not yet
+looked for */
+static long gore_track_tread_bitmap = -2;
+
+/* The Scorpion's tread bitmap (vehicles\scorpion\bitmaps\scorpion_treads,
+128 by 256): its top half is six plates side by side, each spanning the
+track's width (top to bottom) with a chunky block at either end and a
+rounded pad between; the plates run along u. A tread mark is that strip
+laid along the way, so the tread's own plates are left in the blood. */
+#define GORE_TRACK_TREAD_BITMAP "vehicles\\scorpion\\bitmaps\\scorpion_treads"
+#define GORE_TRACK_TREAD_PLATES 6.f /* in the bitmap's u */
+#define GORE_TRACK_TREAD_V0 0.004f
+#define GORE_TRACK_TREAD_V1 0.49f
+#define GORE_TRACK_TREAD_WIDTH 1.3f /* m, the track's */
+#define GORE_TRACK_TREAD_PITCH 0.42f /* m, a plate's */
+
+static long track_tread_bitmap(void)
+{
+	if (gore_track_tread_bitmap == -2)
+	{
+		gore_track_tread_bitmap = tag_loaded('bitm', GORE_TRACK_TREAD_BITMAP);
+		if (bleed_log())
+			error(_error_silent, "gore track: the tread bitmap %s", gore_track_tread_bitmap != NONE ? "found" : "is not in this map");
+	}
+	return gore_track_tread_bitmap;
+}
+
+static real track_tuning(char const *name, real value)
+{
+	char const *text = getenv(name);
+
+	return text ? (real)atof(text) : value;
+}
+
+/* one quad of tread plates, from a to b, the bitmap's u0 to u1 along it,
+in each blood layer (the dark one, then the colour's: drawn with blend
+functions under which the bitmap's black gaps leave the ground be) */
+static void track_tread_quad(struct gore_footprint *mark, long bitmap, real_point3d const *a, real_point3d const *b,
+	real_vector3d const *across, real half_width, real u0, real u1, real strength, short cluster_index,
+	real_vector3d const *normal)
+{
+	struct gore_bleed *bleed = &gore_footprint_look;
+	real_point3d corners[4];
+	real_point2d uv[4];
+	short blends[3];
+	short blend_count = 0;
+	short layer;
+
+	point_from_line3d(a, across, -half_width, &corners[0]);
+	point_from_line3d(b, across, -half_width, &corners[1]);
+	point_from_line3d(b, across, half_width, &corners[2]);
+	point_from_line3d(a, across, half_width, &corners[3]);
+	uv[0].x = u0; uv[0].y = GORE_TRACK_TREAD_V0;
+	uv[1].x = u1; uv[1].y = GORE_TRACK_TREAD_V0;
+	uv[2].x = u1; uv[2].y = GORE_TRACK_TREAD_V1;
+	uv[3].x = u0; uv[3].y = GORE_TRACK_TREAD_V1;
+	if (bleed_extra_layers(bleed) > 0)
+	{
+		/* (the dark layer twice: the bitmap's plates are only half bright) */
+		blends[blend_count++] = 4;
+		blends[blend_count++] = 4;
+		if (bleed_extra_layers(bleed) > 1)
+			blends[blend_count++] = bleed->tint_blend ? (short)(bleed->tint_blend - 1) : 6;
+	}
+	for (layer = 0; layer < MAX(blend_count, 1) && mark->quad_count < GORE_FOOTPRINT_MAXIMUM_QUADS; layer++)
+	{
+		short quad;
+		struct gore_bleed_quad *made;
+
+		if (blend_count > 0)
+		{
+			quad = bleed_blend_quad_new(bleed, blends[layer], cluster_index, corners, uv, normal);
+		}
+		else
+		{
+			quad = bleed_quad_new(bleed->decal_definition_index, 0, cluster_index, corners, uv, &bleed->color, normal);
+			if (quad != NONE)
+			{
+				gore_bleed_quads[quad].blend = 6; /* (max) */
+				decal_quad_set_blend_function(gore_bleed_quads[quad].decal_index, 6);
+			}
+		}
+		if (quad == NONE)
+			continue;
+		made = &gore_bleed_quads[quad];
+		made->bitmap_group_index = bitmap;
+		made->bitmap_index = 0;
+		if (!decal_quad_set_bitmap(made->decal_index, bitmap, 0, made->uv))
+		{
+			bleed_quad_free(made);
+			continue;
+		}
+		made->strength *= strength;
+		decal_quad_set_color(made->decal_index, &made->color, made->strength);
+		mark->quads[mark->quad_count] = quad;
+		mark->serials[mark->quad_count] = made->serial;
+		mark->quad_count++;
+	}
+}
+
+/* a tread's plates from a to b, on from where the last left off in the
+bitmap (split where it wraps) */
+static void track_tread_plates(struct gore_footprint *mark, struct gore_track_side *side, long bitmap,
+	real_point3d const *a, real_point3d const *b, real_vector3d const *across, real strength, short cluster_index,
+	real_vector3d const *normal)
+{
+	real width = track_tuning("HALO_GORE_TRACK_TREAD_WIDTH", GORE_TRACK_TREAD_WIDTH) / WU;
+	real pitch = track_tuning("HALO_GORE_TRACK_TREAD_PITCH", GORE_TRACK_TREAD_PITCH) / WU;
+	real length = distance3d(a, b);
+	real u0 = side->phase;
+	real u1 = u0 + length / (pitch * GORE_TRACK_TREAD_PLATES);
+
+	if (length <= 0.f)
+		return;
+	if (u1 > 1.f)
+	{
+		real_point3d split;
+		real wrap = (1.f - u0) * pitch * GORE_TRACK_TREAD_PLATES / length;
+
+		split.x = a->x + (b->x - a->x) * wrap;
+		split.y = a->y + (b->y - a->y) * wrap;
+		split.z = a->z + (b->z - a->z) * wrap;
+		track_tread_quad(mark, bitmap, a, &split, across, width * 0.5f, u0, 1.f, strength, cluster_index, normal);
+		u1 -= 1.f;
+		track_tread_quad(mark, bitmap, &split, b, across, width * 0.5f, 0.f, MIN(u1, 1.f), strength, cluster_index, normal);
+		u1 = fmodf(u1, 1.f);
+	}
+	else
+	{
+		track_tread_quad(mark, bitmap, a, b, across, width * 0.5f, u0, u1, strength, cluster_index, normal);
+	}
+	side->phase = u1;
+}
 
 static boolean tracks_enabled(void)
 {
@@ -3915,9 +4058,20 @@ static void track_mark(struct gore_track_vehicle *track, short side_index, real_
 		footprint_blob(mark, &middle, &collision->plane.n, &forward, length * 0.8f, 0.2f / WU * 1.6f, strength,
 			cluster_index);
 	}
+	else if (track_tread_bitmap() != NONE)
+	{
+		/* a tread: its own plates, end to end */
+		real_point3d a, b;
+
+		point_from_line3d(&middle, &forward, -length * 0.5f, &a);
+		point_from_line3d(&middle, &forward, length * 0.5f, &b);
+		track_tread_plates(mark, side, track_tread_bitmap(), &a, &b, &across, strength, cluster_index,
+			&collision->plane.n);
+	}
 	else
 	{
-		/* a tread (0.9 m): its cleats, three across, staggered mark to mark */
+		/* a tread (0.9 m) without the Scorpion's bitmap: cleats, three
+		across, staggered mark to mark */
 		short cleat;
 		real stagger = (side->marks & 1) ? 0.25f : -0.25f;
 
@@ -4368,9 +4522,15 @@ static void track_test_update(void)
 			real height = getenv("HALO_GORE_TRACK_TEST_HEIGHT") ? (real)atof(getenv("HALO_GORE_TRACK_TEST_HEIGHT")) : 2.2f;
 			real back = getenv("HALO_GORE_TRACK_TEST_BACK") ? (real)atof(getenv("HALO_GORE_TRACK_TEST_BACK")) : 3.5f;
 
-			point_from_line3d(&gore_track_test_start, &gore_track_test_way, 6.5f, &look);
+			/* (HALO_GORE_TRACK_TEST_LOOK, _LOOK_SIDE, _LEAD: where it looks and
+			how far short of it it stands, for a close look from above) */
+			point_from_line3d(&gore_track_test_start, &gore_track_test_way, track_tuning("HALO_GORE_TRACK_TEST_LOOK", 6.5f), &look);
+			point_from_line3d(&look, &side, track_tuning("HALO_GORE_TRACK_TEST_LOOK_SIDE", 0.f), &look);
+			if (bleed_ground(&look, 2.f, 6.f, &collision))
+				look = collision.point;
 			point_from_line3d(&look, &side, back, &gore_track_test_place);
-			point_from_line3d(&gore_track_test_place, &gore_track_test_way, -1.5f, &gore_track_test_place);
+			point_from_line3d(&gore_track_test_place, &gore_track_test_way, -track_tuning("HALO_GORE_TRACK_TEST_LEAD", 1.5f),
+				&gore_track_test_place);
 			if (bleed_ground(&gore_track_test_place, 2.f, 6.f, &collision))
 				gore_track_test_place = collision.point;
 			gore_track_test_place.z += height;
@@ -4396,6 +4556,7 @@ static void tracks_reset(void)
 	for (index = 0; index < GORE_TRACK_MAXIMUM_MARKS; index++)
 		gore_track_marks[index].quad_count = 0;
 	gore_track_next = 0;
+	gore_track_tread_bitmap = -2;
 	gore_track_test_state = 0;
 	gore_track_test_vehicle = NONE;
 }

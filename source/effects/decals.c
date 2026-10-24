@@ -479,6 +479,14 @@ real decal_lifetime_minimum = 0.0f; /* port: see decals.h */
 long decal_refused_count = 0;
 static real decal_quad_texcoords[4][2];
 static short decal_quad_uv[MAXIMUM_DECALS_PER_MAP][4][2];
+/* port: a quad's own bitmap group in place of its definition's
+(decal_quad_set_bitmap), held with the decal's whole datum index so that
+another decal in its slot never takes it */
+static struct
+{
+	long decal_index;
+	long bitmap_group_index;
+} decal_quad_bitmaps[MAXIMUM_DECALS_PER_MAP];
 boolean decal_quad_set(long decal_index, real_point3d const corners[4]);
 static real_point2d decal_points2d_temp[2][12];
 static struct decal_globals *decal_globals;
@@ -2909,6 +2917,62 @@ short decal_definition_sequence_count(
 /* port: a quad drawn with another blend function than its definition's
 (the gore mod's corpse bleed: a splat's shape darkened with reverse
 subtract, then its colour with max); NONE: its definition's again */
+boolean decal_quad_set_bitmap(
+	long decal_index,
+	long bitmap_group_index,
+	short bitmap_index,
+	real_point2d const uv[4])
+{
+	struct decal_datum *decal = decal_index != NONE ? datum_try_and_get(global_decal_data, decal_index) : NULL;
+	struct bitmap_group *bitmap_group;
+	struct decal_quad *quad;
+	short absolute;
+	short corner;
+
+	if (!decal_is_quad(decal) || bitmap_group_index == NONE)
+	{
+		return FALSE;
+	}
+	bitmap_group = bitmap_group_get(bitmap_group_index);
+	if (!bitmap_group || bitmap_index < 0 || bitmap_index >= (short)bitmap_group->bitmaps.count ||
+		!_texture_cache_bitmap_get_hardware_format(
+			TAG_BLOCK_GET_ELEMENT(&bitmap_group->bitmaps, bitmap_index, struct bitmap_data), FALSE, TRUE))
+	{
+		return FALSE;
+	}
+	absolute = (short)(DATUM_INDEX_TO_ABSOLUTE_INDEX(decal_index) % MAXIMUM_DECALS_PER_MAP);
+	decal->bitmap_index = (byte)bitmap_index;
+	decal_quad_bitmaps[absolute].decal_index = decal_index;
+	decal_quad_bitmaps[absolute].bitmap_group_index = bitmap_group_index;
+	for (corner = 0; corner < 4; corner++)
+	{
+		decal_quad_uv[absolute][corner][0] = (short)PIN(uv[corner].x * 32768.0f, 0.0f, 32767.0f);
+		decal_quad_uv[absolute][corner][1] = (short)PIN(uv[corner].y * 32768.0f, 0.0f, 32767.0f);
+	}
+	quad = rasterizer_decal_vertices_lock((short)DATUM_INDEX_TO_ABSOLUTE_INDEX(decal_index), sizeof(struct decal_quad));
+	if (!quad)
+	{
+		return FALSE;
+	}
+	for (corner = 0; corner < 4; corner++)
+	{
+		quad->vertices[corner].texcoord[0] = decal_quad_uv[absolute][corner][0];
+		quad->vertices[corner].texcoord[1] = decal_quad_uv[absolute][corner][1];
+	}
+	rasterizer_decal_vertices_unlock();
+	return TRUE;
+}
+
+long decal_bitmap_group_get(
+	long decal_index,
+	long definition_bitmap_group_index)
+{
+	short absolute = (short)(DATUM_INDEX_TO_ABSOLUTE_INDEX(decal_index) % MAXIMUM_DECALS_PER_MAP);
+
+	return decal_quad_bitmaps[absolute].decal_index == decal_index ?
+		decal_quad_bitmaps[absolute].bitmap_group_index : definition_bitmap_group_index;
+}
+
 void decal_quad_set_blend_function(
 	long decal_index,
 	short framebuffer_blend_function)
