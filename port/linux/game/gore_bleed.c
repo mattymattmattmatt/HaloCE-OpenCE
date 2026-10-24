@@ -3673,8 +3673,9 @@ A wheeled vehicle (a Warthog's kind: the jeep type) or a tank (the
 Scorpion's) that runs over a corpse or through blood (whatever leaves
 bloody footprints) lays its tracks in that blood's colour, along each
 side's wheel or tread line, behind its rearmost wheel on that side:
-a tyre's band, a tread's own plates (the Scorpion's tread bitmap, end
-to end; without it, a band of cleats). Each mark is fainter
+the tyre's or the tread's own print (the Warthog's tyre bitmap's rows
+of blocks, the Scorpion's tread bitmap's plates, end to end; without
+them, a band, or a band of cleats). Each mark is fainter
 than the last, gone some 22 m (tyres) or 30 m (treads) after the blood
 (16 and 20 in multiplayer, in fewer, longer marks);
 running over blood again wets it again. Hover vehicles, aircraft, boats
@@ -3705,7 +3706,7 @@ struct gore_track_side
 	real_point3d last; /* where the last mark ended */
 	boolean have_last;
 	short marks;
-	real phase; /* the tread's plates: where along its bitmap the next begins (0 to 1) */
+	real phase; /* the print: where along its bitmap the next begins (0 to 1) */
 };
 
 /* a vehicle definition's wheels (looked up once a map) */
@@ -3743,31 +3744,60 @@ static struct gore_track_vehicle gore_track_vehicles[GORE_TRACK_MAXIMUM_VEHICLES
 static struct gore_footprint gore_track_marks[GORE_TRACK_MAXIMUM_MARKS];
 static short gore_track_next;
 static long gore_track_marks_made;
-/* the tank's tread bitmap (its plates), NONE: none in the map; -2: not yet
-looked for */
-static long gore_track_tread_bitmap = -2;
+/* A track's print: a strip of the vehicle's own tread bitmap, laid along
+the way so that its pattern runs on from mark to mark.
 
-/* The Scorpion's tread bitmap (vehicles\scorpion\bitmaps\scorpion_treads,
-128 by 256): its top half is six plates side by side, each spanning the
-track's width (top to bottom) with a chunky block at either end and a
-rounded pad between; the plates run along u. A tread mark is that strip
-laid along the way, so the tread's own plates are left in the blood. */
-#define GORE_TRACK_TREAD_BITMAP "vehicles\\scorpion\\bitmaps\\scorpion_treads"
-#define GORE_TRACK_TREAD_PLATES 6.f /* in the bitmap's u */
-#define GORE_TRACK_TREAD_V0 0.004f
-#define GORE_TRACK_TREAD_V1 0.49f
-#define GORE_TRACK_TREAD_WIDTH 1.3f /* m, the track's */
-#define GORE_TRACK_TREAD_PITCH 0.42f /* m, a plate's */
+The Scorpion's (vehicles\scorpion\bitmaps\scorpion_treads, 128 by 256):
+its top half is six plates side by side, each spanning the track's width
+(top to bottom) with a chunky block at either end and a rounded pad
+between; the plates run along u.
 
-static long track_tread_bitmap(void)
+The Warthog's (vehicles\warthog\bitmaps\warthog tires, 256 by 256): its
+right quarter is the tyre's tread, running down v, eight pairs of rows of
+blocks, each row a long block on one side and a short one on the other,
+alternating. */
+struct gore_track_print
 {
-	if (gore_track_tread_bitmap == -2)
+	char const *bitmap_name;
+	boolean along_u; /* the pattern runs along u (else v) */
+	real across0, across1; /* the strip across the way (the other coordinate) */
+	real repeats; /* the pattern's repeats over the coordinate along, 0 to 1 */
+	real width; /* m, the print's */
+	real pitch; /* m, a repeat's */
+	char const *width_tuning, *pitch_tuning;
+	short dark_layers; /* (more where its bitmap is darker) */
+};
+
+static struct gore_track_print const gore_track_prints[] =
+{
+	/* _track_kind_tyre: 0.45 m wide, a pair of rows of blocks every 0.26 m */
+	{ "vehicles\\warthog\\bitmaps\\warthog tires", FALSE, 0.748f, 0.996f, 8.f, 0.45f, 0.26f,
+		"HALO_GORE_TRACK_TYRE_WIDTH", "HALO_GORE_TRACK_TYRE_PITCH", 4 },
+	/* _track_kind_tread: 1.3 m wide, a plate every 0.42 m */
+	{ "vehicles\\scorpion\\bitmaps\\scorpion_treads", TRUE, 0.004f, 0.49f, 6.f, 1.3f, 0.42f,
+		"HALO_GORE_TRACK_TREAD_WIDTH", "HALO_GORE_TRACK_TREAD_PITCH", 2 },
+};
+
+/* each print's bitmap, NONE: not in this map; -2: not yet looked for */
+static long gore_track_print_bitmaps[NUMBEROF(gore_track_prints)] = { -2, -2 };
+
+static struct gore_track_print const *track_print(short kind)
+{
+	return kind == _track_kind_tyre ? &gore_track_prints[0] : kind == _track_kind_tread ? &gore_track_prints[1] : NULL;
+}
+
+static long track_print_bitmap(struct gore_track_print const *print)
+{
+	short index = (short)(print - gore_track_prints);
+
+	if (gore_track_print_bitmaps[index] == -2)
 	{
-		gore_track_tread_bitmap = tag_loaded('bitm', GORE_TRACK_TREAD_BITMAP);
+		gore_track_print_bitmaps[index] = tag_loaded('bitm', print->bitmap_name);
 		if (bleed_log())
-			error(_error_silent, "gore track: the tread bitmap %s", gore_track_tread_bitmap != NONE ? "found" : "is not in this map");
+			error(_error_silent, "gore track: %s %s", print->bitmap_name,
+				gore_track_print_bitmaps[index] != NONE ? "found" : "is not in this map");
 	}
-	return gore_track_tread_bitmap;
+	return gore_track_print_bitmaps[index];
 }
 
 static real track_tuning(char const *name, real value)
@@ -3777,33 +3807,43 @@ static real track_tuning(char const *name, real value)
 	return text ? (real)atof(text) : value;
 }
 
-/* one quad of tread plates, from a to b, the bitmap's u0 to u1 along it,
-in each blood layer (the dark one, then the colour's: drawn with blend
-functions under which the bitmap's black gaps leave the ground be) */
-static void track_tread_quad(struct gore_footprint *mark, long bitmap, real_point3d const *a, real_point3d const *b,
-	real_vector3d const *across, real half_width, real u0, real u1, real strength, short cluster_index,
-	real_vector3d const *normal)
+/* one quad of a print, from a to b, the pattern's t0 to t1 along it (0 to
+1 of the bitmap), in each blood layer (the dark one, then the colour's:
+drawn with blend functions under which the bitmap's black gaps leave the
+ground be) */
+static void track_print_quad(struct gore_footprint *mark, struct gore_track_print const *print, long bitmap,
+	real_point3d const *a, real_point3d const *b, real_vector3d const *across, real half_width, real t0, real t1,
+	real strength, short cluster_index, real_vector3d const *normal)
 {
 	struct gore_bleed *bleed = &gore_footprint_look;
 	real_point3d corners[4];
 	real_point2d uv[4];
-	short blends[3];
+	real along[4] = { t0, t1, t1, t0 };
+	real side[4];
+	short blends[5];
 	short blend_count = 0;
+	short corner;
 	short layer;
 
+	side[0] = side[1] = print->across0;
+	side[2] = side[3] = print->across1;
 	point_from_line3d(a, across, -half_width, &corners[0]);
 	point_from_line3d(b, across, -half_width, &corners[1]);
 	point_from_line3d(b, across, half_width, &corners[2]);
 	point_from_line3d(a, across, half_width, &corners[3]);
-	uv[0].x = u0; uv[0].y = GORE_TRACK_TREAD_V0;
-	uv[1].x = u1; uv[1].y = GORE_TRACK_TREAD_V0;
-	uv[2].x = u1; uv[2].y = GORE_TRACK_TREAD_V1;
-	uv[3].x = u0; uv[3].y = GORE_TRACK_TREAD_V1;
+	for (corner = 0; corner < 4; corner++)
+	{
+		uv[corner].x = print->along_u ? along[corner] : side[corner];
+		uv[corner].y = print->along_u ? side[corner] : along[corner];
+	}
 	if (bleed_extra_layers(bleed) > 0)
 	{
-		/* (the dark layer twice: the bitmap's plates are only half bright) */
-		blends[blend_count++] = 4;
-		blends[blend_count++] = 4;
+		/* (the dark layer more than once: the bitmaps are only half bright, the
+		Warthog's tyre's less) */
+		short dark = (short)PIN(track_tuning("HALO_GORE_TRACK_PRINT_DARK", (real)print->dark_layers), 1.f, 4.f);
+
+		while (dark-- > 0)
+			blends[blend_count++] = 4;
 		if (bleed_extra_layers(bleed) > 1)
 			blends[blend_count++] = bleed->tint_blend ? (short)(bleed->tint_blend - 1) : 6;
 	}
@@ -3843,36 +3883,37 @@ static void track_tread_quad(struct gore_footprint *mark, long bitmap, real_poin
 	}
 }
 
-/* a tread's plates from a to b, on from where the last left off in the
-bitmap (split where it wraps) */
-static void track_tread_plates(struct gore_footprint *mark, struct gore_track_side *side, long bitmap,
-	real_point3d const *a, real_point3d const *b, real_vector3d const *across, real strength, short cluster_index,
-	real_vector3d const *normal)
+/* a print from a to b, on from where the last left off in the bitmap
+(split where it wraps) */
+static void track_print_lay(struct gore_footprint *mark, struct gore_track_side *side,
+	struct gore_track_print const *print, long bitmap, real_point3d const *a, real_point3d const *b,
+	real_vector3d const *across, real strength, short cluster_index, real_vector3d const *normal)
 {
-	real width = track_tuning("HALO_GORE_TRACK_TREAD_WIDTH", GORE_TRACK_TREAD_WIDTH) / WU;
-	real pitch = track_tuning("HALO_GORE_TRACK_TREAD_PITCH", GORE_TRACK_TREAD_PITCH) / WU;
+	real width = track_tuning(print->width_tuning, print->width) / WU;
+	real span = track_tuning(print->pitch_tuning, print->pitch) / WU * print->repeats; /* (wu of the bitmap's 0 to 1) */
 	real length = distance3d(a, b);
 	real u0 = side->phase;
-	real u1 = u0 + length / (pitch * GORE_TRACK_TREAD_PLATES);
+	real u1 = u0 + length / span;
 
 	if (length <= 0.f)
 		return;
 	if (u1 > 1.f)
 	{
 		real_point3d split;
-		real wrap = (1.f - u0) * pitch * GORE_TRACK_TREAD_PLATES / length;
+		real wrap = (1.f - u0) * span / length;
 
 		split.x = a->x + (b->x - a->x) * wrap;
 		split.y = a->y + (b->y - a->y) * wrap;
 		split.z = a->z + (b->z - a->z) * wrap;
-		track_tread_quad(mark, bitmap, a, &split, across, width * 0.5f, u0, 1.f, strength, cluster_index, normal);
+		track_print_quad(mark, print, bitmap, a, &split, across, width * 0.5f, u0, 1.f, strength, cluster_index, normal);
 		u1 -= 1.f;
-		track_tread_quad(mark, bitmap, &split, b, across, width * 0.5f, 0.f, MIN(u1, 1.f), strength, cluster_index, normal);
+		track_print_quad(mark, print, bitmap, &split, b, across, width * 0.5f, 0.f, MIN(u1, 1.f), strength, cluster_index,
+			normal);
 		u1 = fmodf(u1, 1.f);
 	}
 	else
 	{
-		track_tread_quad(mark, bitmap, a, b, across, width * 0.5f, u0, u1, strength, cluster_index, normal);
+		track_print_quad(mark, print, bitmap, a, b, across, width * 0.5f, u0, u1, strength, cluster_index, normal);
 	}
 	side->phase = u1;
 }
@@ -4033,6 +4074,8 @@ static void track_mark(struct gore_track_vehicle *track, short side_index, real_
 	real length;
 	real strength;
 	short cluster_index = bleed_cluster(collision);
+	struct gore_track_print const *print = track_print(track->wheels->kind);
+	long print_bitmap = print ? track_print_bitmap(print) : NONE;
 
 	if (cluster_index == NONE || dot_product3d(&collision->plane.n, global_up3d) < 0.6f ||
 		!footprint_look_set(side->blood_definition_index))
@@ -4052,21 +4095,21 @@ static void track_mark(struct gore_track_vehicle *track, short side_index, real_
 	/* the first marks strong, then each fainter (gone at the end) */
 	strength = side->total > 0.f ? side->left / side->total : 0.f;
 	strength = 0.12f + 0.88f * powf(PIN(strength, 0.f, 1.f), 1.2f);
-	if (track->wheels->kind == _track_kind_tyre)
+	if (print && print_bitmap != NONE)
 	{
-		/* a tyre's band (0.4 m), well over the step so that it runs on */
-		footprint_blob(mark, &middle, &collision->plane.n, &forward, length * 0.8f, 0.2f / WU * 1.6f, strength,
-			cluster_index);
-	}
-	else if (track_tread_bitmap() != NONE)
-	{
-		/* a tread: its own plates, end to end */
+		/* the tyre's or the tread's own print, end to end */
 		real_point3d a, b;
 
 		point_from_line3d(&middle, &forward, -length * 0.5f, &a);
 		point_from_line3d(&middle, &forward, length * 0.5f, &b);
-		track_tread_plates(mark, side, track_tread_bitmap(), &a, &b, &across, strength, cluster_index,
-			&collision->plane.n);
+		track_print_lay(mark, side, print, print_bitmap, &a, &b, &across, strength, cluster_index, &collision->plane.n);
+	}
+	else if (track->wheels->kind == _track_kind_tyre)
+	{
+		/* a tyre's band (0.4 m) without the Warthog's bitmap, well over
+		the step so that it runs on */
+		footprint_blob(mark, &middle, &collision->plane.n, &forward, length * 0.8f, 0.2f / WU * 1.6f, strength,
+			cluster_index);
 	}
 	else
 	{
@@ -4159,7 +4202,8 @@ static void track_update(struct gore_track_vehicle *track, struct physics_instan
 	/* (in multiplayer longer marks, and fewer metres of them: two sides'
 	worth within its fewer marks, GORE_TRACK_MAXIMUM_MARKS_MP) */
 	boolean multiplayer = game_engine_running();
-	real step = (tread ? (multiplayer ? 0.9f : 0.75f) : (multiplayer ? 0.8f : 0.4f)) / WU;
+	/* (a tyre's print is four dark layers, in longer marks) */
+	real step = (tread ? (multiplayer ? 0.9f : 0.75f) : (multiplayer ? 0.9f : 0.7f)) / WU;
 	real wet = (tread ? (multiplayer ? 20.f : 30.f) : (multiplayer ? 16.f : 22.f)) / WU;
 
 	for (side_index = 0; side_index < 2; side_index++)
@@ -4556,7 +4600,8 @@ static void tracks_reset(void)
 	for (index = 0; index < GORE_TRACK_MAXIMUM_MARKS; index++)
 		gore_track_marks[index].quad_count = 0;
 	gore_track_next = 0;
-	gore_track_tread_bitmap = -2;
+	for (index = 0; index < (short)NUMBEROF(gore_track_print_bitmaps); index++)
+		gore_track_print_bitmaps[index] = -2;
 	gore_track_test_state = 0;
 	gore_track_test_vehicle = NONE;
 }
