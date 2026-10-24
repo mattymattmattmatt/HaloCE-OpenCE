@@ -1,3 +1,11 @@
+#ifndef __SIZEOF_INT128__
+/* (the 32-bit ARM guest's compiler, tools/android_build.py GUEST32_ABI_FLAGS,
+has no 128-bit integers; the AArch64 kernel's structures below, which use
+them, are not the guest's to use) */
+typedef struct { unsigned long long __low, __high; } __attribute__((aligned(16))) __guest_uint128;
+#define __uint128_t __guest_uint128
+#endif
+
 #if defined(_POSIX_SOURCE) || defined(_POSIX_C_SOURCE) \
  || defined(_XOPEN_SOURCE) || defined(_GNU_SOURCE) || defined(_BSD_SOURCE)
 
