@@ -835,9 +835,18 @@ static struct
 	/* debug.gpu_geometry_cache: vertices and indices drawn from the mirror
 	(mirror_range) rather than streamed each draw */
 	BOOL geometry_cache;
-	/* debug.gpu_base_vertex: streamed indexed draws with a base vertex
-	(else rebased indices; OpenGL ES) */
-	BOOL streamed_base_vertex;
+	/* OpenGL ES, for finding what a driver gets wrong (the GPU
+	Troubleshooting screen, tools/port_settings.py): */
+	/* debug.gpu_integer_attributes 0: the attributes read as integers
+	(packed normals, words) read as two 16-bit halves converted to float
+	and put back together in the vertex shader (nv2a_vertex_integer_fetch) */
+	BOOL integer_attributes;
+	/* debug.gpu_buffer_writes 1: vertices and indices written with
+	glBufferSubData rather than into an unsynchronized mapping */
+	BOOL buffer_subdata;
+	/* debug.gpu_wide_indices 1: indexed draws from 32-bit indices made for the
+	draw, rather than the game's 16-bit ones */
+	BOOL index_32;
 } debug_settings;
 
 /* ---------- GL state cache
@@ -1103,7 +1112,11 @@ static void state_attribute_stream(GLuint index, GLuint binding, GLuint buffer, 
 		return;
 	}
 	state_array_buffer(buffer);
-	if (integer)
+	/* (debug.gpu_integer_attributes 0: a word as two 16-bit halves, as
+	floats the vertex shader puts back together) */
+	if (integer && !debug_settings.integer_attributes && type == GL_UNSIGNED_INT && size == 1)
+		glVertexAttribPointer(index, 2, GL_UNSIGNED_SHORT, GL_FALSE, stride, (const void *)offset);
+	else if (integer)
 		glVertexAttribIPointer(index, size, type, stride, (const void *)offset);
 	else
 		glVertexAttribPointer(index, size, type, normalized, stride, (const void *)offset);
@@ -1148,7 +1161,10 @@ static struct vertex_array_entry *vertex_array_get(const struct vertex_layout *l
 		if (!(layout->enabled & (1UL << index)))
 			continue;
 		glEnableVertexAttribArray((GLuint)index);
-		if (format->integer)
+		/* (debug.gpu_integer_attributes 0: as state_attribute_stream) */
+		if (format->integer && !debug_settings.integer_attributes && format->type == GL_UNSIGNED_INT && format->size == 1)
+			glVertexAttribFormat((GLuint)index, 2, GL_UNSIGNED_SHORT, GL_FALSE, format->relative_offset);
+		else if (format->integer)
 			glVertexAttribIFormat((GLuint)index, format->size, format->type, format->relative_offset);
 		else
 			glVertexAttribFormat((GLuint)index, format->size, format->type, format->normalized, format->relative_offset);
@@ -2050,7 +2066,11 @@ static void gl_initialize(void)
 		draw, but with NVIDIA's (debug.gpu_geometry_cache) */
 		long cache = config_integer("debug.gpu_geometry_cache");
 		long base_vertex = config_integer("debug.gpu_base_vertex");
+		long integers = config_integer("debug.gpu_integer_attributes");
+		long writes = config_integer("debug.gpu_buffer_writes");
+		long indices = config_integer("debug.gpu_wide_indices");
 		const char *vendor = (const char *)glGetString(GL_VENDOR);
+		BOOL draws_base_vertex = TRUE;
 
 		if (cache < 0)
 		{
@@ -2064,10 +2084,26 @@ static void gl_initialize(void)
 #endif
 		}
 		debug_settings.geometry_cache = cache != 0;
-		debug_settings.streamed_base_vertex = base_vertex != 0;
-		platform_log("GPU: geometry %s, streamed indexed draws %s (GL vendor %s)", debug_settings.geometry_cache ?
-			"cached in GL buffers (the mirror)" : "streamed each draw",
-			debug_settings.streamed_base_vertex ? "with a base vertex" : "rebased", vendor ? vendor : "unknown");
+#ifdef HALO_GLES
+		/* (0: no draw with a base vertex at all, as on OpenGL ES 3.0: the
+		indexed draws streamed, their indices rebased) */
+		if (!base_vertex)
+			xgpu_capabilities.base_vertex = FALSE;
+		draws_base_vertex = xgpu_capabilities.base_vertex;
+#else
+		(void)base_vertex;
+#endif
+		debug_settings.integer_attributes = integers != 0;
+		debug_settings.buffer_subdata = writes > 0;
+		debug_settings.index_32 = indices > 0;
+		nv2a_vertex_integer_fetch = debug_settings.integer_attributes;
+		platform_log("GPU: geometry %s, indexed draws %s, %s indices, integer attributes %s, buffer writes %s "
+			"(GL vendor %s, renderer %s)", debug_settings.geometry_cache ? "cached in GL buffers (the mirror)" :
+			"streamed each draw", draws_base_vertex ? "with a base vertex" : "rebased",
+			debug_settings.index_32 ? "32-bit" : "16-bit",
+			debug_settings.integer_attributes ? "as integers" : "as 16-bit halves",
+			debug_settings.buffer_subdata ? "glBufferSubData" : "mapped", vendor ? vendor : "unknown",
+			glGetString(GL_RENDERER) ? (const char *)glGetString(GL_RENDERER) : "unknown");
 	}
 	{
 		GLint renderbuffer_size = 0;
@@ -3057,6 +3093,8 @@ static BOOL vertex_word_used(const struct vertex_shader_object *declaration, con
 as the integer zero */
 static unsigned long vertex_integer_mask(const struct vertex_shader_object *declaration)
 {
+	if (!nv2a_vertex_integer_fetch)
+		return 0;
 	return declaration->packed_mask | (debug_settings.word_attributes ? declaration->words.mask : 0);
 }
 
@@ -4961,7 +4999,7 @@ static BOOL mirror_refresh(unsigned long first, unsigned long last)
 		the GPU's timeline, over what was written into it meanwhile (a level
 		loaded after another drew some of the earlier level's vertices).
 		The GPU is done with a frame's work STREAM_BUFFER_RING frames on */
-		if (unused && device.frame - mirror.subdata_frame[segment] >= STREAM_BUFFER_RING)
+		if (unused && device.frame - mirror.subdata_frame[segment] >= STREAM_BUFFER_RING && !debug_settings.buffer_subdata)
 		{
 			host_gl_buffer_write(GL_COPY_WRITE_BUFFER,
 				(unsigned int)(address - PLATFORM_CONTIGUOUS_BASE - segment * MIRROR_SEGMENT_SIZE),
@@ -5259,6 +5297,21 @@ static void stream_reserve(unsigned long size)
 static unsigned long stream_upload(const void *data, unsigned long size);
 
 #ifdef HALO_GLES
+/* host_gl_buffer_write, or glBufferSubData (debug.gpu_buffer_writes 1) */
+static void gles_buffer_write(GLenum target, unsigned long offset, unsigned long size, const void *data)
+{
+#ifndef HALO_WEB
+	if (debug_settings.buffer_subdata)
+	{
+		glBufferSubData(target, (GLintptr)offset, (GLsizeiptr)size, data);
+		return;
+	}
+#endif
+	host_gl_buffer_write(target, (unsigned int)offset, (unsigned int)size, data);
+}
+#endif
+
+#ifdef HALO_GLES
 /* stream_upload, at a multiple of alignment into the buffer */
 static unsigned long stream_upload_aligned(const void *data, unsigned long size, unsigned long alignment)
 {
@@ -5279,7 +5332,7 @@ static unsigned long stream_upload(const void *data, unsigned long size)
 	offset = device.stream_offset;
 	state_array_buffer(device.stream_buffer);
 #ifdef HALO_GLES
-	host_gl_buffer_write(GL_ARRAY_BUFFER, (unsigned int)offset, (unsigned int)length, data);
+	gles_buffer_write(GL_ARRAY_BUFFER, offset, length, data);
 #else
 	buffer_upload(GL_ARRAY_BUFFER, offset, length, data);
 #endif
@@ -5383,7 +5436,7 @@ static unsigned long index_upload(const void *data, unsigned long size)
 	offset = device.index_offset;
 	stats.streamed_index_bytes += length;
 #ifdef HALO_GLES
-	host_gl_buffer_write(GL_ELEMENT_ARRAY_BUFFER, (unsigned int)offset, (unsigned int)length, data);
+	gles_buffer_write(GL_ELEMENT_ARRAY_BUFFER, offset, length, data);
 #else
 	buffer_upload(GL_ELEMENT_ARRAY_BUFFER, offset, length, data);
 #endif
@@ -6062,7 +6115,7 @@ void WINAPI D3DDevice_DrawIndexedVertices(D3DPRIMITIVETYPE primitive_type, UINT 
 	/* quads are drawn as triangles, from indices made for the draw */
 	mirrored = primitive_type != D3DPT_QUADLIST &&
 #ifdef HALO_GLES
-		xgpu_capabilities.base_vertex &&
+		xgpu_capabilities.base_vertex && !debug_settings.index_32 &&
 #endif
 		mirror_range((unsigned long)index_data, vertex_count * sizeof(WORD), &index_buffer, &index_offset, &generation);
 #ifdef HALO_WEB
@@ -6096,10 +6149,40 @@ void WINAPI D3DDevice_DrawIndexedVertices(D3DPRIMITIVETYPE primitive_type, UINT 
 		source = indices;
 	}
 #ifdef HALO_GLES
-	/* debug.gpu_base_vertex 0: the indices, copied anyway, rebased and the
-	draw made without a base vertex, as on OpenGL ES 3.0, for a driver that
-	gets a draw with a negative base vertex wrong */
-	if (!xgpu_capabilities.base_vertex || !debug_settings.streamed_base_vertex)
+	/* debug.gpu_wide_indices 1: the indices widened to 32 bits (rebased, with
+	no base vertex) */
+	if (debug_settings.index_32)
+	{
+		static GLuint *wide;
+		static unsigned long wide_capacity;
+		unsigned long first = xgpu_capabilities.base_vertex ? 0 : minimum;
+
+		if (wide_capacity < count)
+		{
+			GLuint *grown = realloc(wide, count * sizeof(GLuint));
+
+			if (!grown)
+			{
+				free(indices);
+				return;
+			}
+			wide = grown;
+			wide_capacity = count;
+		}
+		for (index = 0; index < count; index++)
+			wide[index] = (GLuint)(source[index] - first);
+		if (xgpu_capabilities.base_vertex)
+			glDrawElementsBaseVertex(primitive_mode(primitive_type), (GLsizei)count, GL_UNSIGNED_INT,
+				(const void *)index_upload(wide, count * sizeof(GLuint)), -(GLint)minimum);
+		else
+			glDrawElements(primitive_mode(primitive_type), (GLsizei)count, GL_UNSIGNED_INT,
+				(const void *)index_upload(wide, count * sizeof(GLuint)));
+		free(indices);
+		return;
+	}
+	/* without a base vertex (OpenGL ES 3.0, or debug.gpu_base_vertex 0): the
+	indices, copied anyway, rebased */
+	if (!xgpu_capabilities.base_vertex)
 	{
 		static WORD *rebased;
 		static unsigned long rebased_capacity;

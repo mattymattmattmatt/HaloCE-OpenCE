@@ -469,13 +469,25 @@ Affected players reported that bypassing the cache resolved stretched or
 missing geometry, with some also reporting better performance. The exact
 cache failure mechanism remains unconfirmed.
 
-NVIDIA's driver (the Shield TV) is the exception: there the levels drew
-right from the mirror, and streamed, their structure and scenery stretch
-into spikes to one point, so it keeps the mirror. The setting
-`debug.gpu_geometry_cache` (Video Setup > EXTRA EFFECTS > GEOMETRY:
-AUTO, STREAMED or CACHED, from the next start) chooses either way on any
-device. `debug.gpu_base_vertex = 0` draws the streamed indexed draws with
-rebased indices instead of a base vertex, as on OpenGL ES 3.0.
+With NVIDIA's driver (the Shield TV) AUTO keeps the mirror. The Shield TV
+draws level geometry, scenery and characters with vertices stretched out
+to one point, with either path; the cause is not yet known.
+
+Video Setup > GPU TROUBLESHOOTING (Android only) changes how the GPU is
+fed, one setting at a time, from the next start, to find what a driver
+gets wrong. AUTO is what the port does without them:
+
+| Row | Setting | Other values |
+| --- | --- | --- |
+| GEOMETRY | `debug.gpu_geometry_cache` | STREAMED (0), CACHED (1) |
+| BASE VERTEX | `debug.gpu_base_vertex` | OFF (0): no draw with a base vertex; indexed draws streamed with rebased indices, as on OpenGL ES 3.0 |
+| WORD ATTRIBUTES | `debug.gpu_word_attributes` | ON (1), OFF (0): the narrow attributes read directly, not as words |
+| INTEGER ATTRIBUTES | `debug.gpu_integer_attributes` | OFF (0): packed normals and words read as two 16-bit halves (floats) put back together in the vertex shader, no `glVertexAttribIPointer` |
+| BUFFER WRITES | `debug.gpu_buffer_writes` | SAFE (1): `glBufferSubData` instead of unsynchronized mappings |
+| 32-BIT INDICES | `debug.gpu_wide_indices` | ON (1): indexed draws from 32-bit indices streamed for the draw |
+
+The log's `GPU: geometry ...` line names the choices in effect, and the GL
+vendor and renderer.
 
 A frame that streams more than its buffer holds goes on in spare buffers
 of its frame of the ring instead of orphaning the one its earlier draws
