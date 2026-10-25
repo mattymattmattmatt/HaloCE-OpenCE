@@ -118,12 +118,6 @@ SCREENS = {
              "Keep the light of explosions, plasma and the sun\npast white, and roll it off instead of clipping.", None),
             ("HDR DISPLAY:", "display.hdr_output", ON_OFF,
              "With HDR, on an HDR display, show that light\nbrighter than white. From the next start.", "desktop"),
-            # (d3d8_gl.c: how the GPU gets the vertices; on a TV, with no
-            # file to edit, the way to try the other if a device draws a
-            # level in spikes or loses models; in HDR Display's place,
-            # which Android has not)
-            ("GEOMETRY:", "debug.gpu_geometry_cache", [("AUTO", "-1"), ("STREAMED", "0"), ("CACHED", "1")],
-             "If a level stretches into spikes or models go\nmissing, try another. From the next start.", "android"),
             # (the gore mod, port/linux/game/gore.c: a visual effect on
             # deaths, on Extra Effects with the other visual modifiers;
             # there is no gameplay settings screen in this port)
@@ -247,8 +241,7 @@ _graphics = {"display.high_res_hud", "display.hud_button_style", "display.high_r
 # (the visual modifiers: a screen of their own, Extra Effects)
 _extra_effects = {"display.shield_glow", "display.shield_glow_intensity",
                   "display.overshield_effect", "display.hdr", "display.hdr_output",
-                  "game.gore_level", "game.gore_duration", "game.gore_corpse_bleed", "game.manual_respawn",
-                  "debug.gpu_geometry_cache"}
+                  "game.gore_level", "game.gore_duration", "game.gore_corpse_bleed", "game.manual_respawn"}
 SCREENS["video_settings/graphics"] = {
     "screen": "graphics_settings_screen", "header": _video["header"], "spacing": 30,
     "same_place": ["anti_aliasing_android"],
@@ -256,7 +249,6 @@ SCREENS["video_settings/graphics"] = {
 }
 SCREENS["video_settings/extra_effects"] = {
     "screen": "extra_effects_settings_screen", "header": _video["header"], "spacing": 30,
-    "same_place": ["debug.gpu_geometry_cache"],
     "rows": [row for row in _video["rows"] if row[1] in _extra_effects],
 }
 _video["rows"] = [row for row in _video["rows"] if row[1] not in _graphics | _extra_effects]
