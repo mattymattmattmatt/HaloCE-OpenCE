@@ -89,7 +89,10 @@ int main(int argc, char **argv)
     ("", "", "samsungexynos9810", "", 3, 0, 0),
     ("UNISOC", "T820", "", "", 3, 0, 0),
     ("HiSilicon", "Kirin 9000", "", "", 3, 0, 0),
-    ("NVIDIA", "Tegra", "", "", 3, 0, 0),
+    ("NVIDIA", "Tegra", "", "", 4, 1, 1),
+    ("", "", "foster_e", "tegra", 4, 1, 1),
+    ("", "", "darcy", "tegra210", 4, 1, 1),
+    ("", "", "sif", "tegra", 4, 1, 1),
     ("Rockchip", "RK3588", "", "", 3, 0, 0),
     ("", "", "", "", 0, 1, 1),
     ("unknown", "unknown", "ranchu", "", 0, 1, 1),
@@ -110,7 +113,7 @@ def test_chip_policy(policy, manufacturer, model, hardware, platform, family, ge
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("family", [-1, 4, 100])
+@pytest.mark.parametrize("family", [-1, 5, 100])
 def test_invalid_host_result_keeps_fixes(tmp_path, family):
     guest = (ROOT / "port/android/guest/runtime/guest_render_policy.c").read_text()
     guest = "\n".join(line for line in guest.splitlines() if not line.startswith("#include"))

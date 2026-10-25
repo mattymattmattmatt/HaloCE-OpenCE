@@ -8,7 +8,9 @@ enum android_chip_family
 	_android_chip_unknown,
 	_android_chip_snapdragon,
 	_android_chip_mediatek,
-	_android_chip_other
+	_android_chip_other,
+	/* NVIDIA Tegra (the Shield TV): every fix, as an unknown chip */
+	_android_chip_nvidia
 };
 
 int android_chip_classify(const char *manufacturer, const char *model,

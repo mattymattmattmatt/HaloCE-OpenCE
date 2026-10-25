@@ -51,6 +51,18 @@ static int chip_number(const char *s, const char *prefix, int digits)
 		(chip_lower(*s) >= 'a' && chip_lower(*s) <= 'z');
 }
 
+/* s starts with prefix, whatever follows it (tegra210, foster_e) */
+static int chip_prefix(const char *s, const char *prefix)
+{
+	s = chip_trim(s);
+	while (*prefix)
+	{
+		if (chip_lower((unsigned char)*s++) != *prefix++)
+			return 0;
+	}
+	return 1;
+}
+
 static int chip_identity(const char *s)
 {
 	if (chip_word(s, "qualcomm") || chip_word(s, "qcom") ||
@@ -60,11 +72,15 @@ static int chip_identity(const char *s)
 		return _android_chip_snapdragon;
 	if (chip_word(s, "mediatek") || chip_number(s, "mt", 4))
 		return _android_chip_mediatek;
+	/* (the Shield TVs' boards: foster 2015, darcy and mdarcy 2017, sif 2019) */
+	if (chip_word(s, "nvidia") || chip_prefix(s, "tegra") || chip_prefix(s, "foster") ||
+		chip_word(s, "darcy") || chip_word(s, "mdarcy") || chip_word(s, "sif"))
+		return _android_chip_nvidia;
 	if (chip_word(s, "google") || chip_word(s, "tensor") ||
 		chip_word(s, "samsung") || chip_word(s, "exynos") ||
 		chip_word(s, "hisilicon") || chip_word(s, "kirin") ||
 		chip_word(s, "unisoc") || chip_word(s, "spreadtrum") ||
-		chip_word(s, "nvidia") || chip_word(s, "rockchip") ||
+		chip_word(s, "rockchip") ||
 		chip_word(s, "allwinner") || chip_word(s, "amlogic") ||
 		chip_word(s, "intel") || chip_word(s, "broadcom") ||
 		chip_number(s, "exynos", 4) || chip_number(s, "samsungexynos", 4) ||

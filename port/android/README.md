@@ -469,6 +469,7 @@ Android selects its rendering fixes once at startup from the chip identity:
 | --- | --- | --- |
 | Qualcomm Snapdragon | On | On |
 | MediaTek | Off | On |
+| NVIDIA Tegra (Shield TV: `nvidia`, `tegra...`, or its boards `foster`, `darcy`, `mdarcy`, `sif`) | On | On |
 | Other identified vendors, including Google Tensor and Samsung Exynos | Off | Off |
 | Unknown or conflicting identity | On | On |
 

@@ -8,9 +8,9 @@ int android_render_chip = _android_chip_unknown;
 void android_render_policy_initialize(void)
 {
 	android_render_chip = host_android_chip_family();
-	if (android_render_chip < _android_chip_unknown || android_render_chip > _android_chip_other)
+	if (android_render_chip < _android_chip_unknown || android_render_chip > _android_chip_nvidia)
 		android_render_chip = _android_chip_unknown;
 	android_geometry_fixes = android_render_chip == _android_chip_unknown ||
-		android_render_chip == _android_chip_snapdragon;
+		android_render_chip == _android_chip_snapdragon || android_render_chip == _android_chip_nvidia;
 	android_texture_fixes = android_render_chip != _android_chip_other;
 }
