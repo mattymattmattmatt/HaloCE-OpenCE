@@ -118,12 +118,6 @@ SCREENS = {
              "Keep the light of explosions, plasma and the sun\npast white, and roll it off instead of clipping.", None),
             ("HDR DISPLAY:", "display.hdr_output", ON_OFF,
              "With HDR, on an HDR display, show that light\nbrighter than white. From the next start.", "desktop"),
-            # (d3d8_gl.c: how the GPU gets the vertices; on a TV, with no
-            # file to edit, the way to try the other if a device draws a
-            # level in spikes or loses models; in HDR Display's place,
-            # which Android has not)
-            ("GEOMETRY:", "debug.gpu_geometry_cache", [("AUTO", "-1"), ("STREAMED", "0"), ("CACHED", "1")],
-             "If a level stretches into spikes or models go\nmissing, try another. From the next start.", "android"),
             # (the gore mod, port/linux/game/gore.c: a visual effect on
             # deaths, on Extra Effects with the other visual modifiers;
             # there is no gameplay settings screen in this port)
@@ -247,8 +241,7 @@ _graphics = {"display.high_res_hud", "display.hud_button_style", "display.high_r
 # (the visual modifiers: a screen of their own, Extra Effects)
 _extra_effects = {"display.shield_glow", "display.shield_glow_intensity",
                   "display.overshield_effect", "display.hdr", "display.hdr_output",
-                  "game.gore_level", "game.gore_duration", "game.gore_corpse_bleed", "game.manual_respawn",
-                  "debug.gpu_geometry_cache"}
+                  "game.gore_level", "game.gore_duration", "game.gore_corpse_bleed", "game.manual_respawn"}
 SCREENS["video_settings/graphics"] = {
     "screen": "graphics_settings_screen", "header": _video["header"], "spacing": 30,
     "same_place": ["anti_aliasing_android"],
@@ -256,8 +249,31 @@ SCREENS["video_settings/graphics"] = {
 }
 SCREENS["video_settings/extra_effects"] = {
     "screen": "extra_effects_settings_screen", "header": _video["header"], "spacing": 30,
-    "same_place": ["debug.gpu_geometry_cache"],
+    # (each platform's rows packed: no gap where the desktop's HDR Display
+    # is, which Android has not)
+    "platform_places": True,
     "rows": [row for row in _video["rows"] if row[1] in _extra_effects],
+}
+# (d3d8_gl.c: the ways the GPU gets the vertices, for finding what a
+# device's driver gets wrong; on a TV, with no file to edit, the way to try
+# them. Auto is what the port does without them)
+_DRIVER_HELP = " From the next start."
+SCREENS["video_settings/gpu_troubleshooting"] = {
+    "screen": "gpu_troubleshooting_settings_screen", "header": _video["header"], "spacing": 30,
+    "rows": [
+        ("GEOMETRY:", "debug.gpu_geometry_cache", [("AUTO", "-1"), ("STREAMED", "0"), ("CACHED", "1")],
+         "Streamed: vertices sent each draw. Cached:\nkept on the GPU." + _DRIVER_HELP, "android"),
+        ("BASE VERTEX:", "debug.gpu_base_vertex", [("AUTO", "-1"), ("OFF", "0")],
+         "Off: draws without a base vertex, as older\nGPUs do (vertices streamed)." + _DRIVER_HELP, "android"),
+        ("WORD ATTRIBUTES:", "debug.gpu_word_attributes", [("AUTO", "-1"), ("ON", "1"), ("OFF", "0")],
+         "Off: the models' small vertex values read\ndirectly, not as whole words." + _DRIVER_HELP, "android"),
+        ("INTEGER ATTRIBUTES:", "debug.gpu_integer_attributes", [("AUTO", "-1"), ("OFF", "0")],
+         "Off: normals and words read as floats, not\nintegers." + _DRIVER_HELP, "android"),
+        ("BUFFER WRITES:", "debug.gpu_buffer_writes", [("AUTO", "-1"), ("SAFE", "1")],
+         "Safe: vertices written with plain GL copies,\nnot mapped memory." + _DRIVER_HELP, "android"),
+        ("32-BIT INDICES:", "debug.gpu_wide_indices", [("AUTO", "-1"), ("ON", "1")],
+         "On: draws use 32-bit vertex numbers, not\n16-bit ones." + _DRIVER_HELP, "android"),
+    ],
 }
 _video["rows"] = [row for row in _video["rows"] if row[1] not in _graphics | _extra_effects]
 _video["categories"] = [
@@ -266,6 +282,10 @@ _video["categories"] = [
      "The field of view and the first-person\nweapon. Their defaults keep the stock view."),
     ("EXTRA EFFECTS:", "video_settings/extra_effects",
      "Modifiers the stock game does not have,\nsuch as the shield glow, gore and respawning."),
+    # (Android's: on a TV, with no file to edit, the way to try how the GPU
+    # is fed, if a device draws levels or models in spikes)
+    ("GPU TROUBLESHOOTING:", "video_settings/gpu_troubleshooting",
+     "If levels or models stretch into spikes, try\nthese one at a time. From the next start.", "android"),
 ]
 SCREENS["video_settings/fov_viewmodels"] = {
     "screen": "fov_viewmodel_settings_screen", "header": _video["header"], "spacing": 30,
