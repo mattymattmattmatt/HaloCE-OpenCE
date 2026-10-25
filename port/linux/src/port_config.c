@@ -1535,6 +1535,26 @@ static void config_report_unknown_key(int line, const char *name)
 	}
 }
 
+/* settings earlier builds wrote that are gone: left in the file, ignored
+without a word (the GPU switches tried for the Shield TV) */
+static const char *const config_retired_keys[] =
+{
+	"debug.gpu_word_attributes", "debug.gpu_geometry_cache", "debug.gpu_base_vertex",
+	"debug.gpu_integer_attributes", "debug.gpu_buffer_writes", "debug.gpu_wide_indices",
+};
+
+static int config_key_retired(const char *name)
+{
+	size_t index;
+
+	for (index = 0; index < sizeof(config_retired_keys) / sizeof(config_retired_keys[0]); index++)
+	{
+		if (!strcmp(config_retired_keys[index], name))
+			return 1;
+	}
+	return 0;
+}
+
 /* keys in the file that are no setting, likely misspelt */
 static void config_report_unknown_keys(toml_datum_t table)
 {
@@ -1556,7 +1576,7 @@ static void config_report_unknown_keys(toml_datum_t table)
 
 			snprintf(name, sizeof(name), "%s.%s", table.u.tab.key[section_index], section.u.tab.key[key_index]);
 			/* (game.gore: the older switch, read as game.gore_level) */
-			if (config_setting_index(name) < 0 && strcmp(name, "game.gore"))
+			if (config_setting_index(name) < 0 && strcmp(name, "game.gore") && !config_key_retired(name))
 				config_report_unknown_key(section.u.tab.value[key_index].lineno, name);
 		}
 	}
