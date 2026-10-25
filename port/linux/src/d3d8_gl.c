@@ -424,9 +424,6 @@ struct vertex_shader_object
 	struct vertex_element elements[XGPU_VERTEX_ATTRIBUTE_COUNT];
 	unsigned long element_count;
 	unsigned long packed_mask;
-	/* the attributes read as the 32-bit words they sit in, when
-	vertex_words_enabled (parse_declaration) */
-	struct nv2a_vertex_words words;
 	/* [0] streams per the declaration, [1] immediate mode (all floats) */
 	GLuint shader[2];
 	/* one of the game's model lighting programs (halo_vertex_shader_lighting),
@@ -682,11 +679,6 @@ struct gl_device
 	unsigned long stream_offset;
 	GLuint index_buffer;
 	unsigned long index_offset;
-#if defined(HALO_GLES) && !defined(HALO_WEB)
-	/* the room in this frame's stream and index buffers (stream_spare_get) */
-	unsigned long stream_room;
-	unsigned long index_room;
-#endif
 #ifdef HALO_WEB
 	/* (web_chunk_get) the room in the stream and index buffers, the draws
 	made so far, and the count at each buffer's latest write */
@@ -780,11 +772,6 @@ static struct
 	unsigned long target_changes;
 	/* vertex and index bytes drawn from the mirror, and streamed */
 	unsigned long mirrored_bytes, streamed_bytes;
-	/* stream or index buffers filled within a frame, and the largest
-	frame's streamed bytes */
-	unsigned long stream_overflows, index_overflows, most_streamed, streamed_index_bytes, most_streamed_indices;
-	/* (streamed bytes counted when this frame began) */
-	unsigned long frame_first_streamed, frame_first_streamed_indices;
 	/* the textures uploaded, and the most draws and the longest time (ms)
 	of one frame: the averages hide a frame that stalls */
 	unsigned long texture_uploads, texture_upload_bytes;
@@ -829,24 +816,6 @@ static struct
 	const char *skip_vertex_shaders;
 	const char *dump_shaders;
 	BOOL statistics;
-	/* debug.gpu_word_attributes: the attributes narrower than a word read
-	as their words (vertex_words_enabled) */
-	BOOL word_attributes;
-	/* debug.gpu_geometry_cache: vertices and indices drawn from the mirror
-	(mirror_range) rather than streamed each draw */
-	BOOL geometry_cache;
-	/* OpenGL ES, for finding what a driver gets wrong (the GPU
-	Troubleshooting screen, tools/port_settings.py): */
-	/* debug.gpu_integer_attributes 0: the attributes read as integers
-	(packed normals, words) read as two 16-bit halves converted to float
-	and put back together in the vertex shader (nv2a_vertex_integer_fetch) */
-	BOOL integer_attributes;
-	/* debug.gpu_buffer_writes 1: vertices and indices written with
-	glBufferSubData rather than into an unsynchronized mapping */
-	BOOL buffer_subdata;
-	/* debug.gpu_wide_indices 1: indexed draws from 32-bit indices made for the
-	draw, rather than the game's 16-bit ones */
-	BOOL index_32;
 } debug_settings;
 
 /* ---------- GL state cache
@@ -1112,11 +1081,7 @@ static void state_attribute_stream(GLuint index, GLuint binding, GLuint buffer, 
 		return;
 	}
 	state_array_buffer(buffer);
-	/* (debug.gpu_integer_attributes 0: a word as two 16-bit halves, as
-	floats the vertex shader puts back together) */
-	if (integer && !debug_settings.integer_attributes && type == GL_UNSIGNED_INT && size == 1)
-		glVertexAttribPointer(index, 2, GL_UNSIGNED_SHORT, GL_FALSE, stride, (const void *)offset);
-	else if (integer)
+	if (integer)
 		glVertexAttribIPointer(index, size, type, stride, (const void *)offset);
 	else
 		glVertexAttribPointer(index, size, type, normalized, stride, (const void *)offset);
@@ -1161,10 +1126,7 @@ static struct vertex_array_entry *vertex_array_get(const struct vertex_layout *l
 		if (!(layout->enabled & (1UL << index)))
 			continue;
 		glEnableVertexAttribArray((GLuint)index);
-		/* (debug.gpu_integer_attributes 0: as state_attribute_stream) */
-		if (format->integer && !debug_settings.integer_attributes && format->type == GL_UNSIGNED_INT && format->size == 1)
-			glVertexAttribFormat((GLuint)index, 2, GL_UNSIGNED_SHORT, GL_FALSE, format->relative_offset);
-		else if (format->integer)
+		if (format->integer)
 			glVertexAttribIFormat((GLuint)index, format->size, format->type, format->relative_offset);
 		else
 			glVertexAttribFormat((GLuint)index, format->size, format->type, format->normalized, format->relative_offset);
@@ -1982,10 +1944,6 @@ static void gl_initialize(void)
 		}
 		device.stream_buffer = device.stream_buffers[0];
 		device.index_buffer = device.index_buffers[0];
-#ifndef HALO_WEB
-		device.stream_room = STREAM_BUFFER_SIZE;
-		device.index_room = INDEX_BUFFER_SIZE;
-#endif
 	}
 #endif
 #ifndef HALO_GLES
@@ -2049,62 +2007,6 @@ static void gl_initialize(void)
 	debug_settings.dump_shaders = *config_string("debug.gpu_dump_shaders") ?
 		config_string("debug.gpu_dump_shaders") : NULL;
 	debug_settings.statistics = config_boolean("debug.gpu_stats");
-	{
-		long words = config_integer("debug.gpu_word_attributes");
-
-#ifdef HALO_GLES
-		debug_settings.word_attributes = words != 0;
-#else
-		debug_settings.word_attributes = words > 0;
-#endif
-		if (debug_settings.word_attributes)
-			platform_log("GPU: attributes narrower than a word are read as words");
-	}
-	{
-		/* Some Android drivers corrupt the mirror's geometry (stretched and
-		missing models), so there every vertex and index is streamed each
-		draw, but with NVIDIA's (debug.gpu_geometry_cache) */
-		long cache = config_integer("debug.gpu_geometry_cache");
-		long base_vertex = config_integer("debug.gpu_base_vertex");
-		long integers = config_integer("debug.gpu_integer_attributes");
-		long writes = config_integer("debug.gpu_buffer_writes");
-		long indices = config_integer("debug.gpu_wide_indices");
-		const char *vendor = (const char *)glGetString(GL_VENDOR);
-		BOOL draws_base_vertex = TRUE;
-
-		if (cache < 0)
-		{
-#ifdef HALO_ANDROID
-			/* NVIDIA's driver (the Shield TV) drew the levels right from
-			the mirror; streamed, their structure and scenery stretch into
-			spikes to one point */
-			cache = vendor && strstr(vendor, "NVIDIA") ? 1 : 0;
-#else
-			cache = 1;
-#endif
-		}
-		debug_settings.geometry_cache = cache != 0;
-#ifdef HALO_GLES
-		/* (0: no draw with a base vertex at all, as on OpenGL ES 3.0: the
-		indexed draws streamed, their indices rebased) */
-		if (!base_vertex)
-			xgpu_capabilities.base_vertex = FALSE;
-		draws_base_vertex = xgpu_capabilities.base_vertex;
-#else
-		(void)base_vertex;
-#endif
-		debug_settings.integer_attributes = integers != 0;
-		debug_settings.buffer_subdata = writes > 0;
-		debug_settings.index_32 = indices > 0;
-		nv2a_vertex_integer_fetch = debug_settings.integer_attributes;
-		platform_log("GPU: geometry %s, indexed draws %s, %s indices, integer attributes %s, buffer writes %s "
-			"(GL vendor %s, renderer %s)", debug_settings.geometry_cache ? "cached in GL buffers (the mirror)" :
-			"streamed each draw", draws_base_vertex ? "with a base vertex" : "rebased",
-			debug_settings.index_32 ? "32-bit" : "16-bit",
-			debug_settings.integer_attributes ? "as integers" : "as 16-bit halves",
-			debug_settings.buffer_subdata ? "glBufferSubData" : "mapped", vendor ? vendor : "unknown",
-			glGetString(GL_RENDERER) ? (const char *)glGetString(GL_RENDERER) : "unknown");
-	}
 	{
 		GLint renderbuffer_size = 0;
 
@@ -3039,65 +2941,6 @@ static unsigned long vertex_type_bytes(unsigned long type)
 	}
 }
 
-/* Attributes narrower than a 32-bit word, or off a word's boundary, read as
-the word they sit in and decoded by the vertex shader (nv2a_vertex_words).
-Every model's vertex has two of them: its two node indices (PBYTE2 at
-byte 28) and the first node's weight (NORMSHORT1 at byte 30), the only
-attributes of the game's that are not whole words. On the NVIDIA driver of
-the Shield TV (Tegra X1) every model's arms and body stretch into long
-spikes while the level, all of whose attributes are whole words, draws as
-it should: the vertices are put between their two nodes by a weight far
-outside 0..1, as when the weight is read from the wrong bytes or without
-its normalization. A whole word at a word's boundary every driver fetches
-alike. On by default with OpenGL ES (debug.gpu_word_attributes). */
-static void vertex_word_element(struct vertex_shader_object *object, const struct vertex_element *element)
-{
-	unsigned long kind, components, size, shift = element->offset & 3;
-
-	switch (element->type)
-	{
-	case D3DVSDT_PBYTE1: kind = _nv2a_word_unsigned_normalized_byte; components = 1; size = 1; break;
-	case D3DVSDT_PBYTE2: kind = _nv2a_word_unsigned_normalized_byte; components = 2; size = 1; break;
-	case D3DVSDT_PBYTE3: kind = _nv2a_word_unsigned_normalized_byte; components = 3; size = 1; break;
-	case D3DVSDT_SHORT1: kind = _nv2a_word_short; components = 1; size = 2; break;
-	case D3DVSDT_NORMSHORT1: kind = _nv2a_word_normalized_short; components = 1; size = 2; break;
-	default: return;
-	}
-	/* (a short off its own boundary, or one past the word, stays as it is) */
-	if ((element->offset & (size - 1)) || shift + components * size > 4)
-		return;
-	object->words.mask |= 1UL << element->reg;
-	object->words.kind[element->reg] = (unsigned char)kind;
-	object->words.components[element->reg] = (unsigned char)components;
-	object->words.shift[element->reg] = (unsigned char)shift;
-}
-
-/* whether the element is read as its word, at its word's boundary */
-static BOOL vertex_word_used(const struct vertex_shader_object *declaration, const struct vertex_element *element,
-	unsigned long stride, unsigned long stream_offset)
-{
-	static BOOL warned;
-
-	if (!debug_settings.word_attributes || !(declaration->words.mask & (1UL << element->reg)))
-		return FALSE;
-	if (((stride | stream_offset) & 3) && !warned)
-	{
-		warned = TRUE;
-		platform_log("GPU: a stream of stride %lu at %lu is not in words; its small attributes are read unaligned",
-			stride, stream_offset);
-	}
-	return TRUE;
-}
-
-/* the attributes the shader reads as integers, which a disabled one reads
-as the integer zero */
-static unsigned long vertex_integer_mask(const struct vertex_shader_object *declaration)
-{
-	if (!nv2a_vertex_integer_fetch)
-		return 0;
-	return declaration->packed_mask | (debug_settings.word_attributes ? declaration->words.mask : 0);
-}
-
 static void parse_declaration(struct vertex_shader_object *object, const DWORD *declaration)
 {
 	unsigned long stream = 0;
@@ -3133,8 +2976,6 @@ static void parse_declaration(struct vertex_shader_object *object, const DWORD *
 				offsets[stream] += element->bytes;
 				if (element->type == D3DVSDT_NORMPACKED3)
 					object->packed_mask |= 1UL << element->reg;
-				else
-					vertex_word_element(object, element);
 			}
 			break;
 		case D3DVSD_TOKEN_CONSTMEM:
@@ -3366,9 +3207,7 @@ static GLuint vertex_shader_get(struct vertex_shader_object *program, BOOL immed
 	if (!*shader && !(program->shaders_tried & tried))
 	{
 		char *source = nv2a_vertex_shader_to_glsl(program->instructions, program->instruction_count,
-			immediate ? 0 : device.vertex_shader->packed_mask,
-			immediate || !debug_settings.word_attributes ? NULL : &device.vertex_shader->words,
-			lit ? &program->lighting : NULL);
+			immediate ? 0 : device.vertex_shader->packed_mask, lit ? &program->lighting : NULL);
 
 		program->shaders_tried |= tried;
 		*shader = xgpu_compile_shader(GL_VERTEX_SHADER, source, "vertex");
@@ -4999,7 +4838,7 @@ static BOOL mirror_refresh(unsigned long first, unsigned long last)
 		the GPU's timeline, over what was written into it meanwhile (a level
 		loaded after another drew some of the earlier level's vertices).
 		The GPU is done with a frame's work STREAM_BUFFER_RING frames on */
-		if (unused && device.frame - mirror.subdata_frame[segment] >= STREAM_BUFFER_RING && !debug_settings.buffer_subdata)
+		if (unused && device.frame - mirror.subdata_frame[segment] >= STREAM_BUFFER_RING)
 		{
 			host_gl_buffer_write(GL_COPY_WRITE_BUFFER,
 				(unsigned int)(address - PLATFORM_CONTIGUOUS_BASE - segment * MIRROR_SEGMENT_SIZE),
@@ -5027,11 +4866,11 @@ static BOOL mirror_range(unsigned long address, unsigned long size, GLuint *buff
 	unsigned long segment, first, last, page, oldest = ~0UL, newest = 0;
 	BOOL present = TRUE;
 
-	/* (debug.gpu_geometry_cache: off on Android but with NVIDIA's driver:
-	persistent geometry caching corrupts geometry on some devices; draws
-	then stream their current vertex and index bytes) */
-	if (!debug_settings.geometry_cache)
-		return FALSE;
+#ifdef HALO_ANDROID
+	/* Persistent geometry caching causes corruption on affected Android
+	devices. Use current vertex/index bytes through the streaming path. */
+	return FALSE;
+#endif
 	if (!size || address < PLATFORM_CONTIGUOUS_BASE || start + size > PLATFORM_CONTIGUOUS_SIZE)
 		return FALSE;
 	segment = start / MIRROR_SEGMENT_SIZE;
@@ -5203,55 +5042,6 @@ static void web_chunks_begin_frame(void)
 is full. A draw reserves room for all of its streams at once: orphaning
 between two of them would leave the attributes already pointed at the
 buffer reading its new, empty storage. */
-#if defined(HALO_GLES) && !defined(HALO_WEB)
-/* A frame that streams more than its buffer holds goes on in another buffer
-of its frame of the ring, not in the same one orphaned. The writes are
-unsynchronized (host_gl_buffer_write): into a buffer orphaned while the
-frame's earlier draws still read it, they count on the driver's renaming of
-its storage under those draws. A spare no draw of the frame has read needs
-none, and the GPU is done with the frame that last used it: the spares of a
-frame are reused STREAM_BUFFER_RING frames on, as its own buffer. Past
-STREAM_SPARE_BUFFERS, the last one is orphaned as before. */
-#define STREAM_SPARE_BUFFERS 6
-
-static struct stream_spare
-{
-	GLuint buffer;
-	unsigned long capacity;
-} stream_spares[2][STREAM_BUFFER_RING][STREAM_SPARE_BUFFERS];
-static unsigned long stream_spares_used[2];
-
-/* another buffer of this frame, bound, with room for at least size bytes,
-and its room; 0 when they are all used */
-static GLuint stream_spare_get(int indices, unsigned long size, unsigned long *room)
-{
-	GLenum target = indices ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER;
-	unsigned long need = indices ? INDEX_BUFFER_SIZE : STREAM_BUFFER_SIZE;
-	struct stream_spare *spare;
-
-	if (stream_spares_used[indices] == STREAM_SPARE_BUFFERS)
-		return 0;
-	spare = &stream_spares[indices][device.buffer_ring][stream_spares_used[indices]++];
-	if (size > need)
-		need = (size + 0xFFFFF) & ~0xFFFFFUL;
-	if (!spare->buffer)
-		glGenBuffers(1, &spare->buffer);
-	if (indices)
-		state_element_array_buffer(spare->buffer);
-	else
-		state_array_buffer(spare->buffer);
-	if (spare->capacity < need)
-	{
-		/* (no draw of this frame reads it yet, and the GPU is done with the
-		frame that last did) */
-		glBufferData(target, (GLsizeiptr)need, NULL, GL_STREAM_DRAW);
-		spare->capacity = need;
-	}
-	*room = spare->capacity;
-	return spare->buffer;
-}
-#endif
-
 static void stream_reserve(unsigned long size)
 {
 #ifdef HALO_WEB
@@ -5262,30 +5052,9 @@ static void stream_reserve(unsigned long size)
 		device.stream_buffer = web_chunk_get(0, size, &device.stream_capacity);
 		device.stream_offset = 0;
 	}
-#elif defined(HALO_GLES)
-	if (device.stream_offset + size > device.stream_room)
-	{
-		GLuint spare = stream_spare_get(0, size, &device.stream_room);
-
-		stats.stream_overflows++;
-		if (spare)
-			device.stream_buffer = spare;
-		else
-		{
-			/* (every spare used: the last orphaned, as on the desktop) */
-			if (size > device.stream_room)
-				device.stream_room = (size + 0xFFFFF) & ~0xFFFFFUL;
-			state_array_buffer(device.stream_buffer);
-			glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)device.stream_room, NULL, GL_STREAM_DRAW);
-			if (stream_spares[0][device.buffer_ring][STREAM_SPARE_BUFFERS - 1].buffer == device.stream_buffer)
-				stream_spares[0][device.buffer_ring][STREAM_SPARE_BUFFERS - 1].capacity = device.stream_room;
-		}
-		device.stream_offset = 0;
-	}
 #else
 	if (device.stream_offset + size > STREAM_BUFFER_SIZE)
 	{
-		stats.stream_overflows++;
 		/* orphan the buffer and start again */
 		state_array_buffer(device.stream_buffer);
 		glBufferData(GL_ARRAY_BUFFER, STREAM_BUFFER_SIZE, NULL, GL_STREAM_DRAW);
@@ -5295,21 +5064,6 @@ static void stream_reserve(unsigned long size)
 }
 
 static unsigned long stream_upload(const void *data, unsigned long size);
-
-#ifdef HALO_GLES
-/* host_gl_buffer_write, or glBufferSubData (debug.gpu_buffer_writes 1) */
-static void gles_buffer_write(GLenum target, unsigned long offset, unsigned long size, const void *data)
-{
-#ifndef HALO_WEB
-	if (debug_settings.buffer_subdata)
-	{
-		glBufferSubData(target, (GLintptr)offset, (GLsizeiptr)size, data);
-		return;
-	}
-#endif
-	host_gl_buffer_write(target, (unsigned int)offset, (unsigned int)size, data);
-}
-#endif
 
 #ifdef HALO_GLES
 /* stream_upload, at a multiple of alignment into the buffer */
@@ -5332,7 +5086,7 @@ static unsigned long stream_upload(const void *data, unsigned long size)
 	offset = device.stream_offset;
 	state_array_buffer(device.stream_buffer);
 #ifdef HALO_GLES
-	gles_buffer_write(GL_ARRAY_BUFFER, offset, length, data);
+	host_gl_buffer_write(GL_ARRAY_BUFFER, (unsigned int)offset, (unsigned int)length, data);
 #else
 	buffer_upload(GL_ARRAY_BUFFER, offset, length, data);
 #endif
@@ -5403,40 +5157,17 @@ static unsigned long index_upload(const void *data, unsigned long size)
 		device.index_offset = 0;
 	}
 	state_element_array_buffer(device.index_buffer);
-#elif defined(HALO_GLES)
-	/* (as stream_reserve) */
-	if (device.index_offset + size > device.index_room)
-	{
-		GLuint spare = stream_spare_get(1, size, &device.index_room);
-
-		stats.index_overflows++;
-		if (spare)
-			device.index_buffer = spare;
-		else
-		{
-			if (size > device.index_room)
-				device.index_room = (size + 0xFFFFF) & ~0xFFFFFUL;
-			state_element_array_buffer(device.index_buffer);
-			glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)device.index_room, NULL, GL_STREAM_DRAW);
-			if (stream_spares[1][device.buffer_ring][STREAM_SPARE_BUFFERS - 1].buffer == device.index_buffer)
-				stream_spares[1][device.buffer_ring][STREAM_SPARE_BUFFERS - 1].capacity = device.index_room;
-		}
-		device.index_offset = 0;
-	}
-	state_element_array_buffer(device.index_buffer);
 #else
 	state_element_array_buffer(device.index_buffer);
 	if (device.index_offset + size > INDEX_BUFFER_SIZE)
 	{
-		stats.index_overflows++;
 		glBufferData(GL_ELEMENT_ARRAY_BUFFER, INDEX_BUFFER_SIZE, NULL, GL_STREAM_DRAW);
 		device.index_offset = 0;
 	}
 #endif
 	offset = device.index_offset;
-	stats.streamed_index_bytes += length;
 #ifdef HALO_GLES
-	gles_buffer_write(GL_ELEMENT_ARRAY_BUFFER, offset, length, data);
+	host_gl_buffer_write(GL_ELEMENT_ARRAY_BUFFER, (unsigned int)offset, (unsigned int)length, data);
 #else
 	buffer_upload(GL_ELEMENT_ARRAY_BUFFER, offset, length, data);
 #endif
@@ -5675,11 +5406,6 @@ static BOOL vertex_array_cache_use(const struct vertex_shader_object *declaratio
 				glVertexAttribIPointer(element->reg, 1, GL_UNSIGNED_INT, (GLsizei)device.streams[stream].stride,
 					(const void *)(offsets[stream] + element->offset));
 			}
-			else if (vertex_word_used(declaration, element, device.streams[stream].stride, offsets[stream]))
-			{
-				glVertexAttribIPointer(element->reg, 1, GL_UNSIGNED_INT, (GLsizei)device.streams[stream].stride,
-					(const void *)(offsets[stream] + (element->offset & ~3UL)));
-			}
 			else
 			{
 				attribute_format(element, &size, &type, &normalized);
@@ -5755,7 +5481,7 @@ static void setup_streams(unsigned long first, unsigned long count)
 			for (index = 0; index < XGPU_VERTEX_ATTRIBUTE_COUNT; index++)
 			{
 				if (!enabled[index])
-					state_attribute_constant(index, vertex_integer_mask(declaration) & (1UL << index) ? NULL : device.attributes[index]);
+					state_attribute_constant(index, declaration->packed_mask & (1UL << index) ? NULL : device.attributes[index]);
 			}
 			return;
 		}
@@ -5793,11 +5519,6 @@ static void setup_streams(unsigned long first, unsigned long count)
 			state_attribute_stream(element->reg, (GLuint)stream, stream_buffers[stream], 1, GL_UNSIGNED_INT, GL_FALSE,
 				TRUE, (GLsizei)stride, stream_offsets[stream], element->offset);
 		}
-		else if (vertex_word_used(declaration, element, stride, stream_offsets[stream]))
-		{
-			state_attribute_stream(element->reg, (GLuint)stream, stream_buffers[stream], 1, GL_UNSIGNED_INT, GL_FALSE,
-				TRUE, (GLsizei)stride, stream_offsets[stream], element->offset & ~3UL);
-		}
 		else
 		{
 			attribute_format(element, &size, &type, &normalized);
@@ -5808,11 +5529,6 @@ static void setup_streams(unsigned long first, unsigned long count)
 		if (element->type == D3DVSDT_NORMPACKED3)
 		{
 			layout_attribute(&layout, element->reg, (GLuint)stream, 1, GL_UNSIGNED_INT, GL_FALSE, TRUE, element->offset);
-		}
-		else if (vertex_word_used(declaration, element, stride, stream_offsets[stream]))
-		{
-			layout_attribute(&layout, element->reg, (GLuint)stream, 1, GL_UNSIGNED_INT, GL_FALSE, TRUE,
-				element->offset & ~3UL);
 		}
 		else
 		{
@@ -5842,7 +5558,7 @@ static void setup_streams(unsigned long first, unsigned long count)
 	for (index = 0; index < XGPU_VERTEX_ATTRIBUTE_COUNT; index++)
 	{
 		if (!enabled[index])
-			state_attribute_value(index, vertex_integer_mask(declaration) & (1UL << index) ? NULL : device.attributes[index]);
+			state_attribute_value(index, declaration->packed_mask & (1UL << index) ? NULL : device.attributes[index]);
 	}
 }
 
@@ -6115,7 +5831,7 @@ void WINAPI D3DDevice_DrawIndexedVertices(D3DPRIMITIVETYPE primitive_type, UINT 
 	/* quads are drawn as triangles, from indices made for the draw */
 	mirrored = primitive_type != D3DPT_QUADLIST &&
 #ifdef HALO_GLES
-		xgpu_capabilities.base_vertex && !debug_settings.index_32 &&
+		xgpu_capabilities.base_vertex &&
 #endif
 		mirror_range((unsigned long)index_data, vertex_count * sizeof(WORD), &index_buffer, &index_offset, &generation);
 #ifdef HALO_WEB
@@ -6149,60 +5865,16 @@ void WINAPI D3DDevice_DrawIndexedVertices(D3DPRIMITIVETYPE primitive_type, UINT 
 		source = indices;
 	}
 #ifdef HALO_GLES
-	/* debug.gpu_wide_indices 1: the indices widened to 32 bits (rebased, with
-	no base vertex) */
-	if (debug_settings.index_32)
-	{
-		static GLuint *wide;
-		static unsigned long wide_capacity;
-		unsigned long first = xgpu_capabilities.base_vertex ? 0 : minimum;
-
-		if (wide_capacity < count)
-		{
-			GLuint *grown = realloc(wide, count * sizeof(GLuint));
-
-			if (!grown)
-			{
-				free(indices);
-				return;
-			}
-			wide = grown;
-			wide_capacity = count;
-		}
-		for (index = 0; index < count; index++)
-			wide[index] = (GLuint)(source[index] - first);
-		if (xgpu_capabilities.base_vertex)
-			glDrawElementsBaseVertex(primitive_mode(primitive_type), (GLsizei)count, GL_UNSIGNED_INT,
-				(const void *)index_upload(wide, count * sizeof(GLuint)), -(GLint)minimum);
-		else
-			glDrawElements(primitive_mode(primitive_type), (GLsizei)count, GL_UNSIGNED_INT,
-				(const void *)index_upload(wide, count * sizeof(GLuint)));
-		free(indices);
-		return;
-	}
-	/* without a base vertex (OpenGL ES 3.0, or debug.gpu_base_vertex 0): the
-	indices, copied anyway, rebased */
 	if (!xgpu_capabilities.base_vertex)
 	{
-		static WORD *rebased;
-		static unsigned long rebased_capacity;
+		/* the indices are copied anyway: rebase them */
+		WORD *rebased = malloc(count * sizeof(WORD) + 2);
 
-		if (rebased_capacity < count)
-		{
-			WORD *grown = realloc(rebased, count * sizeof(WORD) + 2);
-
-			if (!grown)
-			{
-				free(indices);
-				return;
-			}
-			rebased = grown;
-			rebased_capacity = count;
-		}
 		for (index = 0; index < count; index++)
 			rebased[index] = (WORD)(source[index] - minimum);
 		glDrawElements(primitive_mode(primitive_type), (GLsizei)count, GL_UNSIGNED_SHORT,
 			(const void *)index_upload(rebased, count * sizeof(WORD)));
+		free(rebased);
 		free(indices);
 		return;
 	}
@@ -7238,10 +6910,6 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		device.index_offset = 0;
 #ifdef HALO_WEB
 		web_chunks_begin_frame();
-#else
-		device.stream_room = STREAM_BUFFER_SIZE;
-		device.index_room = INDEX_BUFFER_SIZE;
-		stream_spares_used[0] = stream_spares_used[1] = 0;
 #endif
 #else
 		device.stream_offset = STREAM_BUFFER_SIZE; /* orphan next frame */
@@ -7268,23 +6936,16 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		if (stats.draws - stats.frame_first_draw > stats.most_draws)
 			stats.most_draws = stats.draws - stats.frame_first_draw;
 		stats.frame_first_draw = stats.draws;
-		if (stats.streamed_bytes - stats.frame_first_streamed > stats.most_streamed)
-			stats.most_streamed = stats.streamed_bytes - stats.frame_first_streamed;
-		stats.frame_first_streamed = stats.streamed_bytes;
-		if (stats.streamed_index_bytes - stats.frame_first_streamed_indices > stats.most_streamed_indices)
-			stats.most_streamed_indices = stats.streamed_index_bytes - stats.frame_first_streamed_indices;
-		stats.frame_first_streamed_indices = stats.streamed_index_bytes;
 	}
 	if (debug_settings.statistics && device.frame % 60 == 0)
 	{
 		platform_log("frame %lu: %lu draws, %lu immediate, %lu clears, %lu target changes; skipped %lu no program, %lu no target, %lu link; "
-			"%lu KB mirrored, %lu KB streamed; in 60 frames, %lu textures uploaded (%lu KB), at most %lu draws, "
-			"%lu KB streamed (%lu KB of indices) and %lu ms in a frame, %lu stream and %lu index buffers filled",
+			"%lu KB mirrored, %lu KB streamed; in 60 frames, %lu textures uploaded (%lu KB), at most %lu draws "
+			"and %lu ms in a frame",
 			device.frame, stats.draws / stats.presents, stats.immediate_draws / stats.presents, stats.clears / stats.presents,
 			stats.target_changes / stats.presents, stats.skipped_no_program, stats.skipped_no_target, stats.skipped_link,
 			stats.mirrored_bytes / stats.presents / 1024, stats.streamed_bytes / stats.presents / 1024,
-			stats.texture_uploads, stats.texture_upload_bytes / 1024, stats.most_draws, stats.most_streamed / 1024,
-			stats.most_streamed_indices / 1024, stats.slowest_frame, stats.stream_overflows, stats.index_overflows);
+			stats.texture_uploads, stats.texture_upload_bytes / 1024, stats.most_draws, stats.slowest_frame);
 		memset(&stats, 0, sizeof(stats));
 	}
 	platform_pump_events();

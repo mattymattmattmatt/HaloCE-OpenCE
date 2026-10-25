@@ -97,42 +97,14 @@ diffuse color as nv2a_psh.c does for each pixel; FALSE if it does not */
 BOOL nv2a_vertex_shader_lighting(const DWORD *instructions, unsigned long instruction_count,
 	struct nv2a_vertex_lighting *lighting);
 
-/* Attributes narrower than a 32-bit word, or not on a word's boundary (the
-models' node indices, two bytes at 28, and node weight, a short at 30), read
-as the whole word they sit in and decoded in the shader: drivers differ in
-how they fetch such small attributes (d3d8_gl.c vertex_words_enabled). For
-each attribute whose bit is set in mask, its kind, its component count (1
-to 3) and its first byte in the word. */
-enum
-{
-	_nv2a_word_unsigned_normalized_byte,
-	_nv2a_word_short,
-	_nv2a_word_normalized_short
-};
-
-struct nv2a_vertex_words
-{
-	unsigned long mask;
-	unsigned char kind[XGPU_VERTEX_ATTRIBUTE_COUNT];
-	unsigned char components[XGPU_VERTEX_ATTRIBUTE_COUNT];
-	unsigned char shift[XGPU_VERTEX_ATTRIBUTE_COUNT];
-};
-
 /* GLSL for an NV2A vertex program (the instruction words after the program
 header). Attributes whose bit is set in packed_attribute_mask are fed as
-NORMPACKED3 32-bit integers and unpacked in the shader; those of words
-(else NULL) as the words they sit in. With lighting (else
+NORMPACKED3 32-bit integers and unpacked in the shader. With lighting (else
 NULL), the normal and world position go to the pixel shader too, which
 lights the diffuse color for each pixel (nv2a_pixel_shader_key
 per_pixel_lighting). Returns a malloc'd string. */
 char *nv2a_vertex_shader_to_glsl(const DWORD *instructions, unsigned long instruction_count,
-	unsigned long packed_attribute_mask, const struct nv2a_vertex_words *words,
-	const struct nv2a_vertex_lighting *lighting);
-/* nonzero (the default): those packed and word attributes are declared as
-uint inputs (glVertexAttribIPointer); zero: as vec4 inputs holding the
-word's two 16-bit halves (glVertexAttribPointer, GL_UNSIGNED_SHORT x2),
-put back together in the shader (debug.gpu_integer_attributes) */
-extern int nv2a_vertex_integer_fetch;
+	unsigned long packed_attribute_mask, const struct nv2a_vertex_lighting *lighting);
 /* the fixed-function pipeline's vertex shader (the loading screen's draws):
 positions already in clip space. Returns a malloc'd string. */
 char *nv2a_fixed_function_glsl(void);

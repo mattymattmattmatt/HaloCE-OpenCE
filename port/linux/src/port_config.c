@@ -969,20 +969,6 @@ static const struct config_setting config_settings[] =
 		"With gpu_trace_frame, also the vertex shader constants." },
 	{ "debug.gpu_skip_vertex_shaders", _config_string, "\"\"", "HALO_GPU_SKIP_VS", _environment_value, _platform_all,
 		"Comma-separated ids of vertex shaders not to draw with." },
-	{ "debug.gpu_word_attributes", _config_integer, "-1", "HALO_GPU_WORD_ATTRIBUTES", _environment_value, _platform_all,
-		"Read vertex attributes narrower than a 32-bit word (the models' node indices\n"
-		"and weights) as the words they sit in, decoded in the vertex shader: -1 with\n"
-		"OpenGL ES (some drivers, the Shield TV's, misread them), 1 always, 0 never." },
-	{ "debug.gpu_geometry_cache", _config_integer, "-1", "HALO_GPU_GEOMETRY_CACHE", _environment_value, _platform_all,
-		"Vertices and indices kept in GL buffers (1) or streamed each draw (0); -1: streamed on Android but with NVIDIA's driver (the Shield TV), kept elsewhere. Try the other if a level's geometry stretches into spikes or goes missing. From the next start." },
-	{ "debug.gpu_base_vertex", _config_integer, "-1", "HALO_GPU_BASE_VERTEX", _environment_value, _platform_all,
-		"OpenGL ES: indexed draws with a base vertex where the driver has them (1 and -1), or none at all (0): indexed draws streamed with their indices rebased, as on OpenGL ES 3.0. For finding what a driver gets wrong; from the next start." },
-	{ "debug.gpu_integer_attributes", _config_integer, "-1", "HALO_GPU_INTEGER_ATTRIBUTES", _environment_value, _platform_all,
-		"OpenGL ES: the packed normals and word attributes read as integers (1 and -1), or as two 16-bit halves read as floats and put back together in the vertex shader (0). For finding what a driver gets wrong; from the next start." },
-	{ "debug.gpu_buffer_writes", _config_integer, "-1", "HALO_GPU_BUFFER_WRITES", _environment_value, _platform_all,
-		"OpenGL ES: vertices and indices written into an unsynchronized mapping of their GL buffer (0 and -1), or with glBufferSubData (1). For finding what a driver gets wrong; from the next start." },
-	{ "debug.gpu_wide_indices", _config_integer, "-1", "HALO_GPU_WIDE_INDICES", _environment_value, _platform_all,
-		"OpenGL ES: indexed draws from the game's 16-bit indices (0 and -1), or from 32-bit copies streamed for the draw (1). For finding what a driver gets wrong; from the next start." },
 	{ "debug.gpu_dump_shaders", _config_string, "\"\"", "HALO_GPU_DUMP_SHADERS", _environment_value, _platform_all,
 		"A folder to write the generated GLSL to; empty none." },
 	{ "debug.gpu_debug_expression", _config_string, "\"\"", "HALO_GPU_DEBUG_EXPR", _environment_value, _platform_all,
@@ -1561,6 +1547,26 @@ static void config_report_unknown_key(int line, const char *name)
 	}
 }
 
+/* settings earlier builds wrote that are gone: left in the file, ignored
+without a word (the GPU switches tried for the Shield TV) */
+static const char *const config_retired_keys[] =
+{
+	"debug.gpu_word_attributes", "debug.gpu_geometry_cache", "debug.gpu_base_vertex",
+	"debug.gpu_integer_attributes", "debug.gpu_buffer_writes", "debug.gpu_wide_indices",
+};
+
+static int config_key_retired(const char *name)
+{
+	size_t index;
+
+	for (index = 0; index < sizeof(config_retired_keys) / sizeof(config_retired_keys[0]); index++)
+	{
+		if (!strcmp(config_retired_keys[index], name))
+			return 1;
+	}
+	return 0;
+}
+
 /* keys in the file that are no setting, likely misspelt */
 static void config_report_unknown_keys(toml_datum_t table)
 {
@@ -1582,7 +1588,7 @@ static void config_report_unknown_keys(toml_datum_t table)
 
 			snprintf(name, sizeof(name), "%s.%s", table.u.tab.key[section_index], section.u.tab.key[key_index]);
 			/* (game.gore: the older switch, read as game.gore_level) */
-			if (config_setting_index(name) < 0 && strcmp(name, "game.gore"))
+			if (config_setting_index(name) < 0 && strcmp(name, "game.gore") && !config_key_retired(name))
 				config_report_unknown_key(section.u.tab.value[key_index].lineno, name);
 		}
 	}

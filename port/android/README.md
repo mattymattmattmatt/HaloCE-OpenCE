@@ -228,7 +228,7 @@ These settings are only for Android:
 | `input.touch_controls` | The touch controls in a game. `"auto"` (the default): shown on a touchscreen while no controller is connected. `"on"`: also shown with a controller. `"off"`: never shown. A device without a touchscreen never shows them. The menus take taps in any case. |
 | `display.screen_width` | The number of columns of the 480-line picture. `0` (the default): the shape of the display (1068 on a 20:9 phone). `640`: the 4:3 shape of the Xbox. |
 | `debug.sample_seconds` | Refer to "Find problems". |
-| `debug.memory_watch` | `true` (the default): the app notices the game's writes to cached textures by page protection. `false`: it compares page contents once a frame instead, which is slower. Geometry uses the streaming path in either mode (but refer to "Geometry uploads"). Refer to "Limits". |
+| `debug.memory_watch` | `true` (the default): the app notices the game's writes to cached textures by page protection. `false`: it compares page contents once a frame instead, which is slower. Geometry uses the streaming path in either mode. Refer to "Limits". |
 
 ## Internet play
 
@@ -465,38 +465,18 @@ assembly of the port is necessary:
 
 Android streams vertex and index data from the current CPU bytes instead
 of reusing the persistent geometry mirror or its cached index extents.
+This is automatic; no console command or configuration change is needed.
 Affected players reported that bypassing the cache resolved stretched or
 missing geometry, with some also reporting better performance. The exact
 cache failure mechanism remains unconfirmed.
 
-With NVIDIA's driver (the Shield TV) AUTO keeps the mirror. The Shield TV
-draws level geometry, scenery and characters with vertices stretched out
-to one point, with either path; the cause is not yet known.
-
-Video Setup > GPU TROUBLESHOOTING (Android only) changes how the GPU is
-fed, one setting at a time, from the next start, to find what a driver
-gets wrong. AUTO is what the port does without them:
-
-| Row | Setting | Other values |
-| --- | --- | --- |
-| GEOMETRY | `debug.gpu_geometry_cache` | STREAMED (0), CACHED (1) |
-| BASE VERTEX | `debug.gpu_base_vertex` | OFF (0): no draw with a base vertex; indexed draws streamed with rebased indices, as on OpenGL ES 3.0 |
-| WORD ATTRIBUTES | `debug.gpu_word_attributes` | ON (1), OFF (0): the narrow attributes read directly, not as words |
-| INTEGER ATTRIBUTES | `debug.gpu_integer_attributes` | OFF (0): packed normals and words read as two 16-bit halves (floats) put back together in the vertex shader, no `glVertexAttribIPointer` |
-| BUFFER WRITES | `debug.gpu_buffer_writes` | SAFE (1): `glBufferSubData` instead of unsynchronized mappings |
-| 32-BIT INDICES | `debug.gpu_wide_indices` | ON (1): indexed draws from 32-bit indices streamed for the draw |
-
-The log's `GPU: geometry ...` line names the choices in effect, and the GL
-vendor and renderer.
-
-A frame that streams more than its buffer holds goes on in spare buffers
-of its frame of the ring instead of orphaning the one its earlier draws
-read (`stream_spare_get`).
-
-`tools/test_android_mirror_uploads.py` checks the bypass with large and
-reused ranges, frame-counter rollover and desktop/web cache controls;
-`tools/test_android_stream_spares.py` checks the spares. Neither
-substitutes for device gameplay validation.
+The Android-only guard in `mirror_range` uses the existing streaming
+fallback. Streamed upload methods, frame fences, shaders, texture caching
+and CPU write tracking are unchanged. Desktop and web retain their cache.
+Xbox and Custom Edition maps keep their existing loaders and resource
+paths. `tools/test_android_mirror_uploads.py` checks the bypass with large
+and reused ranges, frame-counter rollover and desktop/web cache controls;
+it does not substitute for device gameplay validation.
 
 ## Find problems
 
