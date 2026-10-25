@@ -140,14 +140,12 @@ static void host_gl_buffer_write(GLenum target, unsigned offset, unsigned size, 
 
 /* debug.gpu_geometry_cache as d3d8_gl.c resolves it: off on Android (but
 with NVIDIA's driver, or TEST_GEOMETRY_CACHE: the control), on elsewhere */
-static struct { BOOL geometry_cache; BOOL buffer_subdata; } debug_settings = {
+static struct { BOOL geometry_cache; } debug_settings = {
 #if defined(HALO_ANDROID) && !defined(TEST_GEOMETRY_CACHE)
-    FALSE,
-#else
-    TRUE,
-#endif
-    /* (debug.gpu_buffer_writes at its default: mapped) */
     FALSE
+#else
+    TRUE
+#endif
 };
 #include "mirror.inc"
 

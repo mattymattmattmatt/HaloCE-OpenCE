@@ -79,11 +79,6 @@ static void buffer_upload(GLenum target, unsigned long offset, unsigned long siz
 {
 	host_gl_buffer_write(target, (unsigned)offset, (unsigned)size, data);
 }
-/* (d3d8_gl.c's, with debug.gpu_buffer_writes left at its default) */
-static void gles_buffer_write(GLenum target, unsigned long offset, unsigned long size, const void *data)
-{
-	host_gl_buffer_write(target, (unsigned)offset, (unsigned)size, data);
-}
 
 #include "spares.inc"
 

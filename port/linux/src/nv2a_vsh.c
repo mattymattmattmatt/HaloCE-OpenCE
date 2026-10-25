@@ -412,8 +412,6 @@ static void word_attribute(struct xgpu_text *text, unsigned long index, const st
 	xgpu_text_append(text, ");\n");
 }
 
-int nv2a_vertex_integer_fetch = 1;
-
 char *nv2a_vertex_shader_to_glsl(const DWORD *instructions, unsigned long instruction_count,
 	unsigned long packed_attribute_mask, const struct nv2a_vertex_words *words,
 	const struct nv2a_vertex_lighting *lighting)
@@ -433,9 +431,7 @@ char *nv2a_vertex_shader_to_glsl(const DWORD *instructions, unsigned long instru
 		xgpu_text_append(&text, "out vec3 xWorldPosition;\n");
 	for (index = 0; index < XGPU_VERTEX_ATTRIBUTE_COUNT; index++)
 	{
-		if (!nv2a_vertex_integer_fetch && ((packed_attribute_mask | word_mask) & (1UL << index)))
-			xgpu_text_append(&text, "layout(location = %lu) in vec4 v%lu_halves;\n", index, index);
-		else if (packed_attribute_mask & (1UL << index))
+		if (packed_attribute_mask & (1UL << index))
 			xgpu_text_append(&text, "layout(location = %lu) in uint v%lu_packed;\n", index, index);
 		else if (word_mask & (1UL << index))
 			xgpu_text_append(&text, "layout(location = %lu) in uint v%lu_word;\n", index, index);
@@ -446,10 +442,6 @@ char *nv2a_vertex_shader_to_glsl(const DWORD *instructions, unsigned long instru
 	xgpu_text_append(&text, "void main()\n{\n");
 	for (index = 0; index < XGPU_VERTEX_ATTRIBUTE_COUNT; index++)
 	{
-		/* (the word put back together from its halves, read as floats) */
-		if (!nv2a_vertex_integer_fetch && ((packed_attribute_mask | word_mask) & (1UL << index)))
-			xgpu_text_append(&text, "\tuint v%lu_%s = uint(v%lu_halves.x) | (uint(v%lu_halves.y) << 16u);\n", index,
-				packed_attribute_mask & (1UL << index) ? "packed" : "word", index, index);
 		if (packed_attribute_mask & (1UL << index))
 			xgpu_text_append(&text, "\tvec4 v%lu = unpack_normpacked3(v%lu_packed);\n", index, index);
 		else if (word_mask & (1UL << index))
