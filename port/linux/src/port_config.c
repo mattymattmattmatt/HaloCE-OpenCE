@@ -957,10 +957,6 @@ static const struct config_setting config_settings[] =
 		"With gpu_trace_frame, also the vertex shader constants." },
 	{ "debug.gpu_skip_vertex_shaders", _config_string, "\"\"", "HALO_GPU_SKIP_VS", _environment_value, _platform_all,
 		"Comma-separated ids of vertex shaders not to draw with." },
-	{ "debug.gpu_word_attributes", _config_integer, "-1", "HALO_GPU_WORD_ATTRIBUTES", _environment_value, _platform_all,
-		"Read vertex attributes narrower than a 32-bit word (the models' node indices\n"
-		"and weights) as the words they sit in, decoded in the vertex shader: -1 with\n"
-		"OpenGL ES (some drivers, the Shield TV's, misread them), 1 always, 0 never." },
 	{ "debug.gpu_dump_shaders", _config_string, "\"\"", "HALO_GPU_DUMP_SHADERS", _environment_value, _platform_all,
 		"A folder to write the generated GLSL to; empty none." },
 	{ "debug.gpu_debug_expression", _config_string, "\"\"", "HALO_GPU_DEBUG_EXPR", _environment_value, _platform_all,

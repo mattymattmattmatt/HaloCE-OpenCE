@@ -424,9 +424,6 @@ struct vertex_shader_object
 	struct vertex_element elements[XGPU_VERTEX_ATTRIBUTE_COUNT];
 	unsigned long element_count;
 	unsigned long packed_mask;
-	/* the attributes read as the 32-bit words they sit in, when
-	vertex_words_enabled (parse_declaration) */
-	struct nv2a_vertex_words words;
 	/* [0] streams per the declaration, [1] immediate mode (all floats) */
 	GLuint shader[2];
 	/* one of the game's model lighting programs (halo_vertex_shader_lighting),
@@ -819,9 +816,6 @@ static struct
 	const char *skip_vertex_shaders;
 	const char *dump_shaders;
 	BOOL statistics;
-	/* debug.gpu_word_attributes: the attributes narrower than a word read
-	as their words (vertex_words_enabled) */
-	BOOL word_attributes;
 } debug_settings;
 
 /* ---------- GL state cache
@@ -2014,17 +2008,6 @@ static void gl_initialize(void)
 		config_string("debug.gpu_dump_shaders") : NULL;
 	debug_settings.statistics = config_boolean("debug.gpu_stats");
 	{
-		long words = config_integer("debug.gpu_word_attributes");
-
-#ifdef HALO_GLES
-		debug_settings.word_attributes = words != 0;
-#else
-		debug_settings.word_attributes = words > 0;
-#endif
-		if (debug_settings.word_attributes)
-			platform_log("GPU: attributes narrower than a word are read as words");
-	}
-	{
 		GLint renderbuffer_size = 0;
 
 		glGetIntegerv(GL_MAX_SAMPLES, &anti_aliasing_maximum_samples);
@@ -2949,63 +2932,6 @@ static unsigned long vertex_type_bytes(unsigned long type)
 	}
 }
 
-/* Attributes narrower than a 32-bit word, or off a word's boundary, read as
-the word they sit in and decoded by the vertex shader (nv2a_vertex_words).
-Every model's vertex has two of them: its two node indices (PBYTE2 at
-byte 28) and the first node's weight (NORMSHORT1 at byte 30), the only
-attributes of the game's that are not whole words. On the NVIDIA driver of
-the Shield TV (Tegra X1) every model's arms and body stretch into long
-spikes while the level, all of whose attributes are whole words, draws as
-it should: the vertices are put between their two nodes by a weight far
-outside 0..1, as when the weight is read from the wrong bytes or without
-its normalization. A whole word at a word's boundary every driver fetches
-alike. On by default with OpenGL ES (debug.gpu_word_attributes). */
-static void vertex_word_element(struct vertex_shader_object *object, const struct vertex_element *element)
-{
-	unsigned long kind, components, size, shift = element->offset & 3;
-
-	switch (element->type)
-	{
-	case D3DVSDT_PBYTE1: kind = _nv2a_word_unsigned_normalized_byte; components = 1; size = 1; break;
-	case D3DVSDT_PBYTE2: kind = _nv2a_word_unsigned_normalized_byte; components = 2; size = 1; break;
-	case D3DVSDT_PBYTE3: kind = _nv2a_word_unsigned_normalized_byte; components = 3; size = 1; break;
-	case D3DVSDT_SHORT1: kind = _nv2a_word_short; components = 1; size = 2; break;
-	case D3DVSDT_NORMSHORT1: kind = _nv2a_word_normalized_short; components = 1; size = 2; break;
-	default: return;
-	}
-	/* (a short off its own boundary, or one past the word, stays as it is) */
-	if ((element->offset & (size - 1)) || shift + components * size > 4)
-		return;
-	object->words.mask |= 1UL << element->reg;
-	object->words.kind[element->reg] = (unsigned char)kind;
-	object->words.components[element->reg] = (unsigned char)components;
-	object->words.shift[element->reg] = (unsigned char)shift;
-}
-
-/* whether the element is read as its word, at its word's boundary */
-static BOOL vertex_word_used(const struct vertex_shader_object *declaration, const struct vertex_element *element,
-	unsigned long stride, unsigned long stream_offset)
-{
-	static BOOL warned;
-
-	if (!debug_settings.word_attributes || !(declaration->words.mask & (1UL << element->reg)))
-		return FALSE;
-	if (((stride | stream_offset) & 3) && !warned)
-	{
-		warned = TRUE;
-		platform_log("GPU: a stream of stride %lu at %lu is not in words; its small attributes are read unaligned",
-			stride, stream_offset);
-	}
-	return TRUE;
-}
-
-/* the attributes the shader reads as integers, which a disabled one reads
-as the integer zero */
-static unsigned long vertex_integer_mask(const struct vertex_shader_object *declaration)
-{
-	return declaration->packed_mask | (debug_settings.word_attributes ? declaration->words.mask : 0);
-}
-
 static void parse_declaration(struct vertex_shader_object *object, const DWORD *declaration)
 {
 	unsigned long stream = 0;
@@ -3041,8 +2967,6 @@ static void parse_declaration(struct vertex_shader_object *object, const DWORD *
 				offsets[stream] += element->bytes;
 				if (element->type == D3DVSDT_NORMPACKED3)
 					object->packed_mask |= 1UL << element->reg;
-				else
-					vertex_word_element(object, element);
 			}
 			break;
 		case D3DVSD_TOKEN_CONSTMEM:
@@ -3274,9 +3198,7 @@ static GLuint vertex_shader_get(struct vertex_shader_object *program, BOOL immed
 	if (!*shader && !(program->shaders_tried & tried))
 	{
 		char *source = nv2a_vertex_shader_to_glsl(program->instructions, program->instruction_count,
-			immediate ? 0 : device.vertex_shader->packed_mask,
-			immediate || !debug_settings.word_attributes ? NULL : &device.vertex_shader->words,
-			lit ? &program->lighting : NULL);
+			immediate ? 0 : device.vertex_shader->packed_mask, lit ? &program->lighting : NULL);
 
 		program->shaders_tried |= tried;
 		*shader = xgpu_compile_shader(GL_VERTEX_SHADER, source, "vertex");
@@ -5475,11 +5397,6 @@ static BOOL vertex_array_cache_use(const struct vertex_shader_object *declaratio
 				glVertexAttribIPointer(element->reg, 1, GL_UNSIGNED_INT, (GLsizei)device.streams[stream].stride,
 					(const void *)(offsets[stream] + element->offset));
 			}
-			else if (vertex_word_used(declaration, element, device.streams[stream].stride, offsets[stream]))
-			{
-				glVertexAttribIPointer(element->reg, 1, GL_UNSIGNED_INT, (GLsizei)device.streams[stream].stride,
-					(const void *)(offsets[stream] + (element->offset & ~3UL)));
-			}
 			else
 			{
 				attribute_format(element, &size, &type, &normalized);
@@ -5555,7 +5472,7 @@ static void setup_streams(unsigned long first, unsigned long count)
 			for (index = 0; index < XGPU_VERTEX_ATTRIBUTE_COUNT; index++)
 			{
 				if (!enabled[index])
-					state_attribute_constant(index, vertex_integer_mask(declaration) & (1UL << index) ? NULL : device.attributes[index]);
+					state_attribute_constant(index, declaration->packed_mask & (1UL << index) ? NULL : device.attributes[index]);
 			}
 			return;
 		}
@@ -5593,11 +5510,6 @@ static void setup_streams(unsigned long first, unsigned long count)
 			state_attribute_stream(element->reg, (GLuint)stream, stream_buffers[stream], 1, GL_UNSIGNED_INT, GL_FALSE,
 				TRUE, (GLsizei)stride, stream_offsets[stream], element->offset);
 		}
-		else if (vertex_word_used(declaration, element, stride, stream_offsets[stream]))
-		{
-			state_attribute_stream(element->reg, (GLuint)stream, stream_buffers[stream], 1, GL_UNSIGNED_INT, GL_FALSE,
-				TRUE, (GLsizei)stride, stream_offsets[stream], element->offset & ~3UL);
-		}
 		else
 		{
 			attribute_format(element, &size, &type, &normalized);
@@ -5608,11 +5520,6 @@ static void setup_streams(unsigned long first, unsigned long count)
 		if (element->type == D3DVSDT_NORMPACKED3)
 		{
 			layout_attribute(&layout, element->reg, (GLuint)stream, 1, GL_UNSIGNED_INT, GL_FALSE, TRUE, element->offset);
-		}
-		else if (vertex_word_used(declaration, element, stride, stream_offsets[stream]))
-		{
-			layout_attribute(&layout, element->reg, (GLuint)stream, 1, GL_UNSIGNED_INT, GL_FALSE, TRUE,
-				element->offset & ~3UL);
 		}
 		else
 		{
@@ -5642,7 +5549,7 @@ static void setup_streams(unsigned long first, unsigned long count)
 	for (index = 0; index < XGPU_VERTEX_ATTRIBUTE_COUNT; index++)
 	{
 		if (!enabled[index])
-			state_attribute_value(index, vertex_integer_mask(declaration) & (1UL << index) ? NULL : device.attributes[index]);
+			state_attribute_value(index, declaration->packed_mask & (1UL << index) ? NULL : device.attributes[index]);
 	}
 }
 
