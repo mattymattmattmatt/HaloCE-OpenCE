@@ -3681,9 +3681,9 @@ recharge; an unshielded one (Marines, Grunts, Jackals, Hunters, the
 Flood) for 30 s after its body was last hurt, each hit starting that
 again. None once it is dead, or while it rides. Hits are seen as its body
 vitality going down, so whatever hurts it counts. Local cosmetics (bleed
-quads, the gore duration's life, the gore level's: Off none); the
-campaign on this machine alone, not multiplayer or network co-op.
-game.gore_wound_drips. */
+quads, the gore duration's life); on with the gore level at Heavy or
+Extreme, off at Off and Mild; the campaign on this machine alone, not
+multiplayer or network co-op. */
 
 #define GORE_DRIP_MAXIMUM_UNITS 2048 /* (the object array's) */
 #define GORE_DRIP_MAXIMUM_DROPS 288 /* (about 1400 of the 3072 quads at most) */
@@ -3730,7 +3730,9 @@ static long gore_drip_last_time = NONE;
 
 static boolean drips_enabled(void)
 {
-	return config_boolean("game.gore_wound_drips") && gore_bleed_level_scale() > 0.f &&
+	/* (Heavy and Extreme: the levels at full blood or more; Off and Mild
+	none) */
+	return gore_bleed_level_scale() >= 0.75f &&
 		!game_engine_running() && game_connection() == _game_connection_local && !network_coop_active();
 }
 
