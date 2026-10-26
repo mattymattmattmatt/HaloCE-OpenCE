@@ -3749,13 +3749,13 @@ static void drip_free(struct gore_drip *drip)
 }
 
 /* a drop's half size (wu): its splat sprite (the droplets about the
-middle too) twice the print's main blob's mean half size: its blob, the
-middle, about 60% of the footprint's length across */
+middle too) 0.3 of the print's main blob's mean half size: small drops
+(about 6 cm across, the splat) */
 static real drip_size(struct gore_footprint_shape const *shape)
 {
 	struct gore_footprint_blob const *blob = &shape->blobs[0];
 	char const *text = getenv("HALO_GORE_DRIP_SCALE"); /* (tuning) */
-	real scale = text ? (real)atof(text) : 2.f;
+	real scale = text ? (real)atof(text) : 0.3f;
 
 	return (blob->half_length + blob->half_width) * 0.5f / WU * footprint_scale() * scale;
 }
