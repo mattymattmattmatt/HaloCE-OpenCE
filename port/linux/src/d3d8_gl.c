@@ -931,6 +931,11 @@ static struct
 static void vertex_array_cache_invalidate(void);
 #endif
 
+int xgpu_gl_ready(void)
+{
+	return device.gl_ready;
+}
+
 void xgpu_gl_state_invalidate(void)
 {
 	memset(&gl_state, 0xff, sizeof(gl_state));
@@ -6855,6 +6860,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 				x, y + height, x + width, y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 		}
 		glBindVertexArray(device.vertex_array);
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
 		platform_video_swap();
 #ifndef HALO_GLES
 		visibility_read_batch();
