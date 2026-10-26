@@ -68,6 +68,7 @@ kills them whole; each bleed logs its numbers when it is done.
 #include "halo_port_capacity.h"
 #include "network_coop.h" /* network_coop_active: the wound drips are the campaign's alone */
 #include "objects/damage.h" /* the drip test's hits */
+#include "bitmaps/bitmap_group.h" /* the drips' splat: its sprites */
 
 #include <math.h>
 #include <string.h>
@@ -3688,7 +3689,7 @@ game.gore_wound_drips. */
 #define GORE_DRIP_MAXIMUM_DROPS 288 /* (about 1400 of the 3072 quads at most) */
 #define GORE_DRIP_MINIMUM_TICKS 9 /* between one unit's drops (a running one's further apart) */
 #define GORE_DRIP_MAXIMUM_DISTANCE 40.f /* wu from the player: no drops further off, unseen */
-#define GORE_DRIP_MAXIMUM_QUADS 8
+#define GORE_DRIP_MAXIMUM_QUADS 4
 #define GORE_DRIP_UNSHIELDED_TICKS (30 * 30)
 /* (a shield never seen to recharge: given up after this) */
 #define GORE_DRIP_SHIELDED_MAXIMUM_TICKS (90 * 30)
@@ -3747,54 +3748,86 @@ static void drip_free(struct gore_drip *drip)
 	drip->quad_count = 0;
 }
 
-/* a drop's half size (wu): round, about 60% of its footprint's length
-across (0.8 of the print's main blob's mean half size) */
+/* a drop's half size (wu): its splat sprite (the droplets about the
+middle too) twice the print's main blob's mean half size: its blob, the
+middle, about 60% of the footprint's length across */
 static real drip_size(struct gore_footprint_shape const *shape)
 {
 	struct gore_footprint_blob const *blob = &shape->blobs[0];
 	char const *text = getenv("HALO_GORE_DRIP_SCALE"); /* (tuning) */
-	real scale = text ? (real)atof(text) : 0.8f;
+	real scale = text ? (real)atof(text) : 2.f;
 
 	return (blob->half_length + blob->half_width) * 0.5f / WU * footprint_scale() * scale;
 }
 
-/* one round blob of a drop, in every layer (as a footprint's blob) */
+/* the drop's splat: the stock blood decals' drip splatter (the Grunt's
+bullet hit splat: a blob, droplets thrown about it; any of its four
+sprites), whoever bleeds, in their blood's colour */
+static long drip_splat_definition(void)
+{
+	long definition_index = tag_loaded(DECAL_TAG, "effects\\decals\\blood splats\\blood grunt splat");
+
+	return definition_index != NONE ? definition_index : gore_footprint_look.decal_definition_index;
+}
+
+/* one drop: its splat sprite, whole, in each layer: the colour (the
+splat's own max blend, the blood's colour at its brightest) three times, then
+the dark (reverse subtract: what the blood lacks taken from the ground) */
 static void drip_blob(struct gore_drip *drip, real_point3d const *center, real_vector3d const *normal,
-	real_vector3d const *forward, real half_length, real half_width, real strength, short cluster_index)
+	real_vector3d const *forward, real half_size, real strength, short cluster_index, short sequence)
 {
 	static real const cu[4] = { 0.f, 1.f, 1.f, 0.f };
 	static real const cv[4] = { 0.f, 0.f, 1.f, 1.f };
 	struct gore_bleed *bleed = &gore_footprint_look;
-	/* (the splat's solid middle) */
-	char const *inset_text = getenv("HALO_GORE_DRIP_INSET"); /* (tuning) */
-	real inset = inset_text ? (real)atof(inset_text) : 0.35f;
+	long splat = drip_splat_definition();
+	char const *layers_text = getenv("HALO_GORE_DRIP_LAYERS"); /* (tuning: c colour, d dark) */
+	char const *layers = layers_text ? layers_text : "cccd";
 	real_point3d corners[4];
 	real_point2d uv[4];
 	real_vector3d side;
-	short extra = bleed_extra_layers(bleed);
-	short base_layers = 2;
+	real_rgb_color color = bleed->color;
+	real brightest = MAX(color.red, MAX(color.green, color.blue));
+	short colours = 0;
 	short corner;
-	short layer;
 
+	if (brightest > 0.01f)
+	{
+		color.red = MIN(color.red / brightest, 1.f);
+		color.green = MIN(color.green / brightest, 1.f);
+		color.blue = MIN(color.blue / brightest, 1.f);
+	}
 	cross_product3d(normal, forward, &side);
 	for (corner = 0; corner < 4; corner++)
 	{
-		point_from_line3d(center, forward, (cv[corner] * 2.f - 1.f) * half_length, &corners[corner]);
-		point_from_line3d(&corners[corner], &side, (cu[corner] * 2.f - 1.f) * half_width, &corners[corner]);
-		uv[corner].x = inset + cu[corner] * (1.f - 2.f * inset);
-		uv[corner].y = inset + cv[corner] * (1.f - 2.f * inset);
+		point_from_line3d(center, forward, (cv[corner] * 2.f - 1.f) * half_size, &corners[corner]);
+		point_from_line3d(&corners[corner], &side, (cu[corner] * 2.f - 1.f) * half_size, &corners[corner]);
+		uv[corner].x = cu[corner];
+		uv[corner].y = cv[corner];
 	}
-	for (layer = 0; layer < base_layers + extra && drip->quad_count < GORE_DRIP_MAXIMUM_QUADS; layer++)
+	for (; *layers && drip->quad_count < GORE_DRIP_MAXIMUM_QUADS; layers++)
 	{
+		boolean dark = *layers == 'd';
 		short quad;
 
-		if (layer >= base_layers)
-			quad = bleed_blend_quad_new(bleed, layer == base_layers ? 4 : bleed->tint_blend ? (short)(bleed->tint_blend - 1) : 6,
-				cluster_index, corners, uv, normal);
-		else
-			quad = bleed_quad_new(bleed->decal_definition_index, 0, cluster_index, corners, uv, &bleed->color, normal);
+		if (*layers != 'c' && *layers != 'd')
+			continue;
+		quad = bleed_quad_new(splat, sequence, cluster_index, corners, uv, dark ? &bleed->dark_color : &color, normal);
 		if (quad == NONE)
 			continue;
+		if (dark)
+		{
+			gore_bleed_quads[quad].strength = bleed_dark_strength() * (bleed->dark_scale > 0.f ? bleed->dark_scale : 1.f);
+			gore_bleed_quads[quad].blend = 4;
+			decal_quad_set_blend_function(gore_bleed_quads[quad].decal_index, 4);
+		}
+		/* (a pale blood's (the grunt's cyan) colour layers past the
+		first: added, lighter, as its own splats') */
+		else if (colours++ > 0 && bleed->tint_blend)
+		{
+			gore_bleed_quads[quad].strength = bleed->tint_strength * 0.6f;
+			gore_bleed_quads[quad].blend = (short)(bleed->tint_blend - 1);
+			decal_quad_set_blend_function(gore_bleed_quads[quad].decal_index, gore_bleed_quads[quad].blend);
+		}
 		gore_bleed_quads[quad].strength *= strength;
 		decal_quad_set_color(gore_bleed_quads[quad].decal_index, &gore_bleed_quads[quad].color, gore_bleed_quads[quad].strength);
 		drip->quads[drip->quad_count] = quad;
@@ -3803,25 +3836,25 @@ static void drip_blob(struct gore_drip *drip, real_point3d const *center, real_v
 	}
 }
 
-/* a drop under the unit, a little off its line, on level enough ground */
-static void drip_put(long unit_index, struct biped_datum *biped, struct gore_footprint_shape const *shape)
+/* a drop of this blood here: its sprite (any of the four, or this one),
+turned any way, its size varied a little */
+static boolean drip_put_at(long blood_definition_index, real_point3d const *point, real half_size, short sequence)
 {
 	struct gore_drip *drip;
 	struct collision_result collision;
-	real_point3d at = biped->object.position;
 	real_vector3d forward;
-	real size = drip_size(shape) * bleed_random(0.7f, 1.3f);
-	real stretch = bleed_random(1.f, 1.25f);
+	real_point3d at;
 	real angle = bleed_random(0.f, 6.2832f);
+	char const *sequence_text = getenv("HALO_GORE_DRIP_SEQUENCE"); /* (tuning) */
 	short cluster_index;
 
-	at.x += bleed_random(-0.12f, 0.12f) / WU;
-	at.y += bleed_random(-0.12f, 0.12f) / WU;
-	if (!bleed_ground(&at, 0.5f, 1.2f, &collision) || dot_product3d(&collision.plane.n, global_up3d) < 0.5f)
-		return;
+	if (!bleed_ground(point, 0.5f, 1.2f, &collision) || dot_product3d(&collision.plane.n, global_up3d) < 0.5f)
+		return FALSE;
 	cluster_index = bleed_cluster(&collision);
-	if (cluster_index == NONE || !footprint_look_set(biped->definition_index))
-		return;
+	if (cluster_index == NONE || !footprint_look_set(blood_definition_index))
+		return FALSE;
+	if (sequence == NONE)
+		sequence = sequence_text ? (short)atoi(sequence_text) : (short)MIN((short)bleed_random(0.f, 4.f), 3);
 	drip = &gore_drips[gore_drip_next];
 	gore_drip_next = (short)((gore_drip_next + 1) % GORE_DRIP_MAXIMUM_DROPS);
 	drip_free(drip);
@@ -3831,30 +3864,24 @@ static void drip_put(long unit_index, struct biped_datum *biped, struct gore_foo
 	bleed_project(&forward, &collision.plane.n);
 	bleed_normalize(&forward, global_forward3d);
 	point_from_line3d(&collision.point, &collision.plane.n, GORE_BLEED_LIFT * 1.3f, &at);
-	drip_blob(drip, &at, &collision.plane.n, &forward, size * stretch, size, bleed_random(0.85f, 1.f), cluster_index);
-	/* (now and then a fleck beside it) */
-	if (bleed_random(0.f, 1.f) < 0.3f)
-	{
-		real_vector3d side;
-		real_point3d fleck;
-
-		cross_product3d(&collision.plane.n, &forward, &side);
-		point_from_line3d(&at, &forward, size * bleed_random(1.4f, 2.f) * (bleed_random(0.f, 1.f) < 0.5f ? -1.f : 1.f), &fleck);
-		point_from_line3d(&fleck, &side, size * bleed_random(-0.6f, 0.6f), &fleck);
-		drip_blob(drip, &fleck, &collision.plane.n, &forward, size * 0.38f, size * 0.32f, 0.9f, cluster_index);
-	}
+	drip_blob(drip, &at, &collision.plane.n, &forward, half_size, bleed_random(0.85f, 1.f), cluster_index, sequence);
 	gore_drips_made++;
 	if (bleed_log() && getenv("HALO_GORE_DRIP_TRACE"))
-	{
-		short live = 0, q;
+		error(_error_silent, "gore drip: %s drop %ld (sprite %d, %d quads, %.3f wu, turned %.0f) at %.2f %.2f %.2f",
+			tag_get_name(blood_definition_index), gore_drips_made, sequence, drip->quad_count, half_size,
+			angle * 57.2958f, collision.point.x, collision.point.y, collision.point.z);
+	return TRUE;
+}
 
-		for (q = 0; q < drip->quad_count; q++)
-			live += gore_bleed_quads[drip->quads[q]].decal_index != NONE && decal_quad_exists(gore_bleed_quads[drip->quads[q]].decal_index);
-		error(_error_silent, "gore drip: %s drop %ld (%d quads, %d decals, %.3f wu, strength %.2f) at %.2f %.2f %.2f",
-			tag_get_name(biped->definition_index), gore_drips_made, drip->quad_count, live, size,
-			drip->quad_count ? gore_bleed_quads[drip->quads[0]].strength : 0.f,
-			collision.point.x, collision.point.y, collision.point.z);
-	}
+/* a drop under the unit, a little off its line: 0-360 degrees turned,
+its size within 18% of the species' */
+static void drip_put(long unit_index, struct biped_datum *biped, struct gore_footprint_shape const *shape)
+{
+	real_point3d at = biped->object.position;
+
+	at.x += bleed_random(-0.12f, 0.12f) / WU;
+	at.y += bleed_random(-0.12f, 0.12f) / WU;
+	drip_put_at(biped->definition_index, &at, drip_size(shape) * bleed_random(0.82f, 1.18f), NONE);
 	(void)unit_index;
 }
 
@@ -3999,6 +4026,37 @@ static void drips_update(void)
 			drip_put(unit_index, biped, shape);
 			tracked->dropped = now;
 			tracked->next_idle = now + (long)bleed_random(36.f, 75.f);
+		}
+	}
+}
+
+/* (the test: a decal's sprites, logged) */
+static void drip_test_log_decal(char const *name)
+{
+	long definition_index = tag_loaded(DECAL_TAG, name);
+	long group_index = decal_definition_bitmap_group(definition_index);
+	struct bitmap_group *group;
+	long sequence_index;
+
+	if (definition_index == NONE || group_index == NONE)
+		return;
+	group = bitmap_group_get(group_index);
+	if (!group)
+		return;
+	error(_error_silent, "gore drip test: decal %s: bitmap %s, type %d, %ld bitmaps, %ld sequences, blend %d", name,
+		tag_get_name(group_index), group->type, group->bitmaps.count, group->sequences.count,
+		decal_definition_blend_function(definition_index));
+	for (sequence_index = 0; sequence_index < group->sequences.count; sequence_index++)
+	{
+		struct bitmap_group_sequence *sequence = TAG_BLOCK_GET_ELEMENT(&group->sequences, sequence_index, struct bitmap_group_sequence);
+		long sprite_index;
+
+		for (sprite_index = 0; sprite_index < sequence->sprites.count; sprite_index++)
+		{
+			struct bitmap_group_sprite *sprite = TAG_BLOCK_GET_ELEMENT(&sequence->sprites, sprite_index, struct bitmap_group_sprite);
+
+			error(_error_silent, "gore drip test:   sequence %ld sprite %ld: bitmap %d, bounds %.3f %.3f %.3f %.3f", sequence_index,
+				sprite_index, sprite->bitmap_index, sprite->bounds.x0, sprite->bounds.x1, sprite->bounds.y0, sprite->bounds.y1);
 		}
 	}
 }
@@ -4245,6 +4303,30 @@ static void drip_test_update(void)
 			gore_drip_test_facing.k = look.z - (gore_drip_test_place.z + 0.62f);
 			bleed_normalize(&gore_drip_test_facing, global_forward3d);
 		}
+		/* (HALO_GORE_DRIP_SHOWCASE: each lane's blood in each of the
+		splat's four sprites, large, in a row beside the lanes) */
+		if (getenv("HALO_GORE_DRIP_SHOWCASE"))
+		{
+			short lane;
+			short sprite;
+
+			for (lane = 0; lane < GORE_DRIP_TEST_LANES; lane++)
+			{
+				struct object_datum *unit = object_try_and_get_and_verify_type(gore_drip_test_units[lane], _object_mask_biped);
+
+				for (sprite = 0; unit && sprite < 4; sprite++)
+				{
+					real_point3d at;
+
+					point_from_line3d(&start, &side, 0.9f + 0.4f * (real)lane, &at);
+					point_from_line3d(&at, &gore_drip_test_way, (0.6f + 0.75f * (real)sprite) / WU, &at);
+					drip_put_at(unit->definition_index, &at, (real)atof(getenv("HALO_GORE_DRIP_SHOWCASE")) / WU, sprite);
+				}
+			}
+		}
+		drip_test_log_decal("effects\\decals\\blood splats\\blood grunt splat");
+		drip_test_log_decal("effects\\decals\\blood splats\\blood elite splat");
+		drip_test_log_decal("effects\\decals\\blood splats\\blood splat");
 		gore_drip_test_time = game_time_get();
 		gore_drip_test_state = 1;
 	}
