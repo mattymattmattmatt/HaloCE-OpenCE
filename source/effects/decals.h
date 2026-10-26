@@ -89,6 +89,7 @@ long decal_quad_new_ex(long decal_definition_index, short sequence_index, short 
 void decal_quad_set_color(long decal_index, real_rgb_color const *color, real alpha);
 short decal_definition_sequence_count(long decal_definition_index);
 short decal_definition_blend_function(long decal_definition_index);
+long decal_definition_bitmap_group(long decal_definition_index); /* port */
 void decal_quad_set_blend_function(long decal_index, short framebuffer_blend_function);
 /* port: a quad drawn with another bitmap (its group's bitmap, these texture
 coordinates within it, 0 to 1) in place of its definition's; the bitmap group

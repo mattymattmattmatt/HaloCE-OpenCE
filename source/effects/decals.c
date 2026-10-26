@@ -2994,6 +2994,14 @@ short decal_definition_blend_function(
 		decal_definition_get(decal_definition_index)->shader.framebuffer_blend_function : NONE;
 }
 
+/* port: the definition's bitmap group (its sprites, for the gore mod) */
+long decal_definition_bitmap_group(
+	long decal_definition_index)
+{
+	return decal_definition_index != NONE ?
+		decal_definition_get(decal_definition_index)->shader.map.index : NONE;
+}
+
 void decal_quad_delete(
 	long decal_index)
 {
