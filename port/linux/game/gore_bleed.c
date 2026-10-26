@@ -66,6 +66,8 @@ kills them whole; each bleed logs its numbers when it is done.
 #include "units/bipeds.h"
 #include "units/units.h"
 #include "halo_port_capacity.h"
+#include "network_coop.h" /* network_coop_active: the wound drips are the campaign's alone */
+#include "objects/damage.h" /* the drip test's hits */
 
 #include <math.h>
 #include <string.h>
@@ -3667,6 +3669,602 @@ static void footprints_reset(void)
 		gore_footprint_test_units[index] = NONE;
 }
 
+/* ---------- wound drips
+
+A wounded biped drips blood as it goes: drops of its own blood (the
+footprints' look: its species' splat in its colour), round, some 60% of
+its footprint's size, a little apart along its path and now and then
+where it stands. A shielded one (the Master Chief, the Elites) drips
+once its body is hurt with its shield down, until the shield starts to
+recharge; an unshielded one (Marines, Grunts, Jackals, Hunters, the
+Flood) for 30 s after its body was last hurt, each hit starting that
+again. None once it is dead, or while it rides. Hits are seen as its body
+vitality going down, so whatever hurts it counts. Local cosmetics (bleed
+quads, the gore duration's life, the gore level's: Off none); the
+campaign on this machine alone, not multiplayer or network co-op.
+game.gore_wound_drips. */
+
+#define GORE_DRIP_MAXIMUM_UNITS 2048 /* (the object array's) */
+#define GORE_DRIP_MAXIMUM_DROPS 288 /* (about 1400 of the 3072 quads at most) */
+#define GORE_DRIP_MINIMUM_TICKS 9 /* between one unit's drops (a running one's further apart) */
+#define GORE_DRIP_MAXIMUM_DISTANCE 40.f /* wu from the player: no drops further off, unseen */
+#define GORE_DRIP_MAXIMUM_QUADS 8
+#define GORE_DRIP_UNSHIELDED_TICKS (30 * 30)
+/* (a shield never seen to recharge: given up after this) */
+#define GORE_DRIP_SHIELDED_MAXIMUM_TICKS (90 * 30)
+
+enum
+{
+	_drip_none = 0,
+	_drip_hit, /* unshielded: until its time */
+	_drip_shield_down /* shielded: until the shield recharges */
+};
+
+struct gore_drip_unit
+{
+	long unit_index; /* NONE: not seen */
+	real body;
+	real shield;
+	short state;
+	long until; /* (_drip_hit's end; _drip_shield_down's give-up) */
+	long started;
+	real_point3d last; /* where it last dripped */
+	real gap; /* metres to the next drop */
+	long next_idle; /* the next drop while it stands */
+	long dropped; /* its last drop's time */
+};
+
+struct gore_drip
+{
+	short quad_count;
+	short quads[GORE_DRIP_MAXIMUM_QUADS];
+	long serials[GORE_DRIP_MAXIMUM_QUADS];
+};
+
+static struct gore_drip_unit gore_drip_units[GORE_DRIP_MAXIMUM_UNITS];
+static struct gore_drip gore_drips[GORE_DRIP_MAXIMUM_DROPS];
+static short gore_drip_next;
+static long gore_drips_made;
+static long gore_drip_last_time = NONE;
+
+static boolean drips_enabled(void)
+{
+	return config_boolean("game.gore_wound_drips") && gore_bleed_level_scale() > 0.f &&
+		!game_engine_running() && game_connection() == _game_connection_local && !network_coop_active();
+}
+
+static void drip_free(struct gore_drip *drip)
+{
+	short index;
+
+	for (index = 0; index < drip->quad_count; index++)
+	{
+		struct gore_bleed_quad *quad = &gore_bleed_quads[drip->quads[index]];
+
+		if (quad->decal_index != NONE && quad->serial == drip->serials[index])
+			bleed_quad_free(quad);
+	}
+	drip->quad_count = 0;
+}
+
+/* a drop's half size (wu): round, about 60% of its footprint's length
+across (0.8 of the print's main blob's mean half size) */
+static real drip_size(struct gore_footprint_shape const *shape)
+{
+	struct gore_footprint_blob const *blob = &shape->blobs[0];
+	char const *text = getenv("HALO_GORE_DRIP_SCALE"); /* (tuning) */
+	real scale = text ? (real)atof(text) : 0.8f;
+
+	return (blob->half_length + blob->half_width) * 0.5f / WU * footprint_scale() * scale;
+}
+
+/* one round blob of a drop, in every layer (as a footprint's blob) */
+static void drip_blob(struct gore_drip *drip, real_point3d const *center, real_vector3d const *normal,
+	real_vector3d const *forward, real half_length, real half_width, real strength, short cluster_index)
+{
+	static real const cu[4] = { 0.f, 1.f, 1.f, 0.f };
+	static real const cv[4] = { 0.f, 0.f, 1.f, 1.f };
+	struct gore_bleed *bleed = &gore_footprint_look;
+	/* (the splat's solid middle) */
+	char const *inset_text = getenv("HALO_GORE_DRIP_INSET"); /* (tuning) */
+	real inset = inset_text ? (real)atof(inset_text) : 0.35f;
+	real_point3d corners[4];
+	real_point2d uv[4];
+	real_vector3d side;
+	short extra = bleed_extra_layers(bleed);
+	short base_layers = 2;
+	short corner;
+	short layer;
+
+	cross_product3d(normal, forward, &side);
+	for (corner = 0; corner < 4; corner++)
+	{
+		point_from_line3d(center, forward, (cv[corner] * 2.f - 1.f) * half_length, &corners[corner]);
+		point_from_line3d(&corners[corner], &side, (cu[corner] * 2.f - 1.f) * half_width, &corners[corner]);
+		uv[corner].x = inset + cu[corner] * (1.f - 2.f * inset);
+		uv[corner].y = inset + cv[corner] * (1.f - 2.f * inset);
+	}
+	for (layer = 0; layer < base_layers + extra && drip->quad_count < GORE_DRIP_MAXIMUM_QUADS; layer++)
+	{
+		short quad;
+
+		if (layer >= base_layers)
+			quad = bleed_blend_quad_new(bleed, layer == base_layers ? 4 : bleed->tint_blend ? (short)(bleed->tint_blend - 1) : 6,
+				cluster_index, corners, uv, normal);
+		else
+			quad = bleed_quad_new(bleed->decal_definition_index, 0, cluster_index, corners, uv, &bleed->color, normal);
+		if (quad == NONE)
+			continue;
+		gore_bleed_quads[quad].strength *= strength;
+		decal_quad_set_color(gore_bleed_quads[quad].decal_index, &gore_bleed_quads[quad].color, gore_bleed_quads[quad].strength);
+		drip->quads[drip->quad_count] = quad;
+		drip->serials[drip->quad_count] = gore_bleed_quads[quad].serial;
+		drip->quad_count++;
+	}
+}
+
+/* a drop under the unit, a little off its line, on level enough ground */
+static void drip_put(long unit_index, struct biped_datum *biped, struct gore_footprint_shape const *shape)
+{
+	struct gore_drip *drip;
+	struct collision_result collision;
+	real_point3d at = biped->object.position;
+	real_vector3d forward;
+	real size = drip_size(shape) * bleed_random(0.7f, 1.3f);
+	real stretch = bleed_random(1.f, 1.25f);
+	real angle = bleed_random(0.f, 6.2832f);
+	short cluster_index;
+
+	at.x += bleed_random(-0.12f, 0.12f) / WU;
+	at.y += bleed_random(-0.12f, 0.12f) / WU;
+	if (!bleed_ground(&at, 0.5f, 1.2f, &collision) || dot_product3d(&collision.plane.n, global_up3d) < 0.5f)
+		return;
+	cluster_index = bleed_cluster(&collision);
+	if (cluster_index == NONE || !footprint_look_set(biped->definition_index))
+		return;
+	drip = &gore_drips[gore_drip_next];
+	gore_drip_next = (short)((gore_drip_next + 1) % GORE_DRIP_MAXIMUM_DROPS);
+	drip_free(drip);
+	forward.i = cosf(angle);
+	forward.j = sinf(angle);
+	forward.k = 0.f;
+	bleed_project(&forward, &collision.plane.n);
+	bleed_normalize(&forward, global_forward3d);
+	point_from_line3d(&collision.point, &collision.plane.n, GORE_BLEED_LIFT * 1.3f, &at);
+	drip_blob(drip, &at, &collision.plane.n, &forward, size * stretch, size, bleed_random(0.85f, 1.f), cluster_index);
+	/* (now and then a fleck beside it) */
+	if (bleed_random(0.f, 1.f) < 0.3f)
+	{
+		real_vector3d side;
+		real_point3d fleck;
+
+		cross_product3d(&collision.plane.n, &forward, &side);
+		point_from_line3d(&at, &forward, size * bleed_random(1.4f, 2.f) * (bleed_random(0.f, 1.f) < 0.5f ? -1.f : 1.f), &fleck);
+		point_from_line3d(&fleck, &side, size * bleed_random(-0.6f, 0.6f), &fleck);
+		drip_blob(drip, &fleck, &collision.plane.n, &forward, size * 0.38f, size * 0.32f, 0.9f, cluster_index);
+	}
+	gore_drips_made++;
+	if (bleed_log() && getenv("HALO_GORE_DRIP_TRACE"))
+	{
+		short live = 0, q;
+
+		for (q = 0; q < drip->quad_count; q++)
+			live += gore_bleed_quads[drip->quads[q]].decal_index != NONE && decal_quad_exists(gore_bleed_quads[drip->quads[q]].decal_index);
+		error(_error_silent, "gore drip: %s drop %ld (%d quads, %d decals, %.3f wu, strength %.2f) at %.2f %.2f %.2f",
+			tag_get_name(biped->definition_index), gore_drips_made, drip->quad_count, live, size,
+			drip->quad_count ? gore_bleed_quads[drip->quads[0]].strength : 0.f,
+			collision.point.x, collision.point.y, collision.point.z);
+	}
+	(void)unit_index;
+}
+
+static void drip_state_set(struct gore_drip_unit *tracked, struct biped_datum *biped, short state, char const *why)
+{
+	if (tracked->state != state && bleed_log())
+	{
+		if (state == _drip_none)
+			error(_error_silent, "gore drip: %s %08lx stops (%s) after %.1f s, at %.1f s", tag_get_name(biped->definition_index),
+				tracked->unit_index, why, (real)(game_time_get() - tracked->started) / 30.f, (real)game_time_get() / 30.f);
+		else
+			error(_error_silent, "gore drip: %s %08lx starts (%s; shield %.2f, body %.2f), at %.1f s", tag_get_name(biped->definition_index),
+				tracked->unit_index, why, biped->object.shield_vitality, biped->object.body_vitality, (real)game_time_get() / 30.f);
+	}
+	if (tracked->state == _drip_none && state != _drip_none)
+	{
+		tracked->started = game_time_get();
+		tracked->last = biped->object.position;
+		tracked->gap = bleed_random(0.3f, 0.5f);
+		tracked->next_idle = game_time_get() + (long)bleed_random(30.f, 60.f);
+		/* (the first drop where it was hit) */
+		tracked->gap = 0.f;
+	}
+	tracked->state = state;
+}
+
+static void drips_update(void)
+{
+	struct object_iterator iterator;
+	struct biped_datum *biped;
+	long now = game_time_get();
+	long player_index;
+	real_point3d player_at = { 0.f, 0.f, 0.f };
+
+	if (!drips_enabled())
+	{
+		gore_drip_last_time = NONE;
+		return;
+	}
+	/* (a revert, a loaded game, or the drips just turned on: what was seen
+	is stale) */
+	if (gore_drip_last_time == NONE || now < gore_drip_last_time || now - gore_drip_last_time > 30)
+	{
+		long index;
+
+		for (index = 0; index < GORE_DRIP_MAXIMUM_UNITS; index++)
+			gore_drip_units[index].unit_index = NONE;
+	}
+	gore_drip_last_time = now;
+	player_index = bleed_test_player();
+	if (player_index != NONE)
+		player_at = object_get(player_index)->object.position;
+	object_iterator_new(&iterator, _object_mask_biped, 0);
+	while ((biped = (struct biped_datum *)object_iterator_next(&iterator)) != NULL)
+	{
+		long unit_index = iterator.index;
+		struct gore_drip_unit *tracked = &gore_drip_units[DATUM_INDEX_TO_ABSOLUTE_INDEX(unit_index) % GORE_DRIP_MAXIMUM_UNITS];
+		struct gore_footprint_shape const *shape;
+		boolean shielded = biped->object.maximum_shield_vitality > 0.f;
+		real body = biped->object.body_vitality;
+		real shield = biped->object.shield_vitality;
+		boolean hurt;
+		real_vector3d moved;
+		real distance;
+
+		if (gore_object_is_piece(unit_index))
+			continue;
+		if (tracked->unit_index != unit_index)
+		{
+			/* (first seen: its vitality as it is) */
+			csmemset(tracked, 0, sizeof(*tracked));
+			tracked->unit_index = unit_index;
+			tracked->body = body;
+			tracked->shield = shield;
+			continue;
+		}
+		hurt = body < tracked->body - 0.0005f;
+		if (TEST_FLAG(biped->object.damage_flags, _object_dead_bit))
+		{
+			drip_state_set(tracked, biped, _drip_none, "dead");
+			tracked->body = body;
+			tracked->shield = shield;
+			continue;
+		}
+		if (hurt)
+		{
+			if (!shielded)
+			{
+				drip_state_set(tracked, biped, _drip_hit, "hit");
+				tracked->until = now + GORE_DRIP_UNSHIELDED_TICKS;
+			}
+			else if (shield <= 0.f)
+			{
+				drip_state_set(tracked, biped, _drip_shield_down, "hit with its shield down");
+				tracked->until = now + GORE_DRIP_SHIELDED_MAXIMUM_TICKS;
+			}
+		}
+		tracked->body = body;
+		if (tracked->state == _drip_hit && now >= tracked->until)
+			drip_state_set(tracked, biped, _drip_none, "30 s since the last hit");
+		/* (the shield's first recharge: its vitality up from nothing) */
+		else if (tracked->state == _drip_shield_down && shield > 0.f && shield > tracked->shield)
+			drip_state_set(tracked, biped, _drip_none, "shield recharging");
+		else if (tracked->state == _drip_shield_down && now >= tracked->until)
+			drip_state_set(tracked, biped, _drip_none, "shield never recharged");
+		tracked->shield = shield;
+		if (tracked->state == _drip_none || biped->object.parent_object_index != NONE ||
+			TEST_FLAG(biped->biped.flags, _biped_airborne_bit))
+			continue;
+		shape = footprint_shape(biped->definition_index);
+		if (!shape)
+			continue;
+		vector_from_points3d(&tracked->last, &biped->object.position, &moved);
+		moved.k = 0.f;
+		distance = magnitude3d(&moved) * WU;
+		if (distance > 8.f)
+		{
+			/* (teleported) */
+			tracked->last = biped->object.position;
+			continue;
+		}
+		if (now - tracked->dropped < GORE_DRIP_MINIMUM_TICKS ||
+			(player_index != NONE && distance_squared3d(&player_at, &biped->object.position) >
+			GORE_DRIP_MAXIMUM_DISTANCE * GORE_DRIP_MAXIMUM_DISTANCE))
+			continue;
+		if (distance >= tracked->gap)
+		{
+			/* (a drop each 0.4 to 0.8 m of its path; further apart as an
+			unshielded wound's time runs out) */
+			real thinning = tracked->state == _drip_hit ?
+				1.f + 0.8f * (real)(now - (tracked->until - GORE_DRIP_UNSHIELDED_TICKS)) / (real)GORE_DRIP_UNSHIELDED_TICKS : 1.f;
+
+			drip_put(unit_index, biped, shape);
+			tracked->dropped = now;
+			tracked->last = biped->object.position;
+			tracked->gap = bleed_random(0.4f, 0.8f) * thinning;
+			tracked->next_idle = now + (long)bleed_random(36.f, 75.f);
+		}
+		else if (now >= tracked->next_idle)
+		{
+			/* (standing: a drop now and then, where it stands) */
+			drip_put(unit_index, biped, shape);
+			tracked->dropped = now;
+			tracked->next_idle = now + (long)bleed_random(36.f, 75.f);
+		}
+	}
+}
+
+/* debug.gore_drip_test (seconds): debug.gore_drip_test_unit's bipeds
+(comma separated tag names; "elite,grunt,cyborg" if none) put in lanes on
+open ground ahead of the player, each shot with assault rifle bullets
+through the stock damage path (a shielded one until its shield is down and
+its body hurt; an Elite again at 5 and 10 s, to keep it down), then walked
+up and down its lane; the player above them, looking. */
+#define GORE_DRIP_TEST_LANES 4
+static short gore_drip_test_state;
+static long gore_drip_test_time;
+static long gore_drip_test_units[GORE_DRIP_TEST_LANES] = { NONE, NONE, NONE, NONE };
+static short gore_drip_test_shots[GORE_DRIP_TEST_LANES];
+static real_point3d gore_drip_test_starts[GORE_DRIP_TEST_LANES];
+static real_vector3d gore_drip_test_way;
+static real_point3d gore_drip_test_place;
+static real_vector3d gore_drip_test_facing;
+
+/* a bullet into the unit's middle, from the player's side */
+static void drip_test_shoot(long unit_index)
+{
+	long bullet = tag_loaded('jpt!', "weapons\\assault rifle\\bullet");
+	struct object_datum *target = object_get(unit_index);
+	struct damage_data damage;
+	real_vector3d normal;
+
+	if (bullet == NONE)
+		bullet = tag_loaded('jpt!', "weapons\\pistol\\bullet");
+	if (bullet == NONE)
+		return;
+	damage_data_new(&damage, bullet);
+	damage.direction = gore_drip_test_facing;
+	damage.direction.k = 0.f;
+	bleed_normalize(&damage.direction, global_forward3d);
+	damage.origin = gore_drip_test_place;
+	damage.epicenter = target->object.bounding_sphere_center;
+	scenario_location_from_point(&damage.location, &damage.epicenter);
+	scale_vector3d(&damage.direction, -1.f, &normal);
+	object_cause_damage(&damage, unit_index, NONE, NONE, NONE, &normal);
+}
+
+static void drip_test_update(void)
+{
+	real seconds = (real)config_real("debug.gore_drip_test");
+	long player_index;
+	struct object_datum *player;
+
+	if (seconds <= 0.f)
+		return;
+	player_index = bleed_test_player();
+	if (player_index == NONE)
+		return;
+	player = object_get(player_index);
+	if (gore_drip_test_state == 1)
+	{
+		long age = game_time_get() - gore_drip_test_time;
+		/* (a 6 m leg, at 1.2 m/s, up and down) */
+		long leg = (long)(6.f / 1.2f * 30.f);
+		real_vector3d forward = gore_drip_test_facing;
+		short lane;
+
+		forward.k = 0.f;
+		bleed_normalize(&forward, global_forward3d);
+		object_set_position(player_index, &gore_drip_test_place, &forward, global_up3d);
+		player->object.translational_velocity = *global_zero_vector3d;
+		player->object.body_vitality = 1.f;
+		player->object.shield_vitality = MAX(player->object.shield_vitality, 1.f);
+		player_control_set_facing(0, &gore_drip_test_facing);
+		for (lane = 0; lane < GORE_DRIP_TEST_LANES; lane++)
+		{
+			struct biped_datum *unit = (struct biped_datum *)object_try_and_get_and_verify_type(gore_drip_test_units[lane], _object_mask_biped);
+			char const *name;
+			real along;
+			real_point3d at;
+			real_vector3d way = gore_drip_test_way;
+			struct collision_result collision;
+
+			if (!unit || TEST_FLAG(unit->object.damage_flags, _object_dead_bit))
+				continue;
+			name = tag_get_name(unit->definition_index);
+			/* the hits: at the start (a shielded one until it is wounded);
+			an Elite again at 5 and 10 s */
+			if (unit->object.maximum_shield_vitality > 0.f ? (age < 60 && (unit->object.shield_vitality > 0.f ||
+				unit->object.body_vitality >= 1.f)) || ((age == 150 || age == 300) && strstr(name, "elite")) :
+				gore_drip_test_shots[lane] == 0)
+			{
+				short shots = 0;
+
+				do
+				{
+					drip_test_shoot(gore_drip_test_units[lane]);
+					gore_drip_test_shots[lane]++;
+				} while (++shots < 40 && unit->object.maximum_shield_vitality > 0.f && unit->object.shield_vitality > 0.f);
+				if (unit->object.maximum_shield_vitality > 0.f && unit->object.shield_vitality <= 0.f &&
+					unit->object.body_vitality >= 1.f)
+				{
+					drip_test_shoot(gore_drip_test_units[lane]);
+					gore_drip_test_shots[lane]++;
+				}
+				error(_error_silent, "gore drip test: t+%.1f s: %s shot (%d bullets so far): shield %.2f body %.2f",
+					(real)age / 30.f, name, gore_drip_test_shots[lane], unit->object.shield_vitality, unit->object.body_vitality);
+			}
+			along = (real)(age % leg) * 1.2f / 30.f / WU;
+			if ((age / leg) & 1)
+			{
+				along = 6.f / WU - along;
+				scale_vector3d(&way, -1.f, &way);
+			}
+			point_from_line3d(&gore_drip_test_starts[lane], &gore_drip_test_way, along, &at);
+			if (bleed_ground(&at, 1.f, 2.f, &collision))
+				at = collision.point;
+			at.z += 0.02f;
+			object_set_position(gore_drip_test_units[lane], &at, &way, global_up3d);
+			scale_vector3d(&way, 1.2f / 30.f / WU, &unit->object.translational_velocity);
+			SET_FLAG(unit->biped.flags, _biped_airborne_bit, FALSE);
+			unit->biped.airborne_ticks = 0;
+		}
+		if (age > 0 && age % 150 == 0)
+			error(_error_silent, "gore drip test: t+%ld s, %ld drops", age / 30, gore_drips_made);
+		return;
+	}
+	if (gore_drip_test_state != 0 || game_time_get() < (long)(seconds * 30.f))
+		return;
+	gore_drip_test_state = 2;
+	{
+		struct unit_datum *player_unit = (struct unit_datum *)player;
+		char const *unit_name = config_string("debug.gore_drip_test_unit");
+		real_vector3d forward = player_unit->unit.looking_vector;
+		real_vector3d side;
+		real_point3d eye = player->object.position;
+		real_point3d start;
+		struct collision_result collision;
+		short tries;
+		boolean have = FALSE;
+
+		eye.z += 0.6f;
+		forward.k = 0.f;
+		bleed_normalize(&forward, global_forward3d);
+		/* (open ground: a 6 m walk, near level, nothing in the way) */
+		for (tries = 0; tries < 16 && !have; tries++)
+		{
+			real_vector3d way = forward;
+			short step;
+			boolean ok = TRUE;
+
+			bleed_rotate_about(&way, global_up3d, (real)tries * 0.3927f);
+			point_from_line3d(&eye, &way, 1.5f, &start);
+			if (!bleed_ground(&start, 2.f, 10.f, &collision))
+				continue;
+			start = collision.point;
+			for (step = 1; step <= 10 && ok; step++)
+			{
+				real_point3d probe;
+				struct collision_result ground;
+				real_vector3d ray;
+				real_point3d from = start;
+
+				point_from_line3d(&start, &way, (real)step * 0.25f, &probe);
+				ok = bleed_ground(&probe, 1.f, 1.5f, &ground) && fabsf(ground.point.z - start.z) < 0.6f;
+				if (ok)
+				{
+					from.z += 0.4f;
+					vector_from_points3d(&from, &probe, &ray);
+					ray.k = 0.f;
+					ok = !collision_test_vector(_collision_test_environment_flags, &from, &ray, player_index, &ground);
+				}
+			}
+			if (ok)
+			{
+				gore_drip_test_way = way;
+				have = TRUE;
+			}
+		}
+		if (!have)
+		{
+			error(_error_silent, "gore drip test: no open ground about the player: no test");
+			return;
+		}
+		cross_product3d(global_up3d, &gore_drip_test_way, &side);
+		{
+			char names[256];
+			char *name;
+			char *next = names;
+			short lane = 0;
+
+			csstrncpy(names, unit_name && *unit_name ? unit_name : "elite,grunt,cyborg", sizeof(names) - 1);
+			names[sizeof(names) - 1] = 0;
+			while ((name = next) != NULL && lane < GORE_DRIP_TEST_LANES)
+			{
+				long definition_index;
+				struct object_placement_data placement;
+				real_point3d lane_start;
+
+				next = strchr(name, ',');
+				if (next)
+					*next++ = 0;
+				if (!*name)
+					continue;
+				definition_index = footprint_test_biped(name);
+				if (definition_index == NONE)
+				{
+					error(_error_silent, "gore drip test: the map has no biped \"%s\"", name);
+					continue;
+				}
+				point_from_line3d(&start, &side, -0.9f * (real)lane, &lane_start);
+				if (!bleed_ground(&lane_start, 1.f, 2.f, &collision))
+					continue;
+				lane_start = collision.point;
+				gore_drip_test_starts[lane] = lane_start;
+				object_placement_data_new(&placement, definition_index, NONE);
+				placement.position = lane_start;
+				placement.position.z += 0.05f;
+				placement.forward = gore_drip_test_way;
+				placement.up = *global_up3d;
+				gore_drip_test_units[lane] = object_new(&placement);
+				/* (on the player's side: the marines leave it be) */
+				if (gore_drip_test_units[lane] != NONE)
+					object_get(gore_drip_test_units[lane])->object.owner_team_index = player->object.owner_team_index;
+				gore_drip_test_shots[lane] = 0;
+				error(_error_silent, "gore drip test: lane %d: a %s %08lx (shield %.0f) at %.2f %.2f %.2f (level %s)", lane,
+					tag_get_name(definition_index), gore_drip_test_units[lane], gore_drip_test_units[lane] != NONE ?
+					object_get(gore_drip_test_units[lane])->object.maximum_shield_vitality : 0.f,
+					lane_start.x, lane_start.y, lane_start.z, config_string("game.gore_level"));
+				lane++;
+			}
+		}
+		/* (the player beside the lanes, above them, looking down at them) */
+		{
+			real_point3d look;
+			real height = getenv("HALO_GORE_DRIP_TEST_HEIGHT") ? (real)atof(getenv("HALO_GORE_DRIP_TEST_HEIGHT")) : 1.6f;
+			real back = getenv("HALO_GORE_DRIP_TEST_BACK") ? (real)atof(getenv("HALO_GORE_DRIP_TEST_BACK")) : 2.4f;
+
+			point_from_line3d(&start, &gore_drip_test_way, 1.3f, &look);
+			point_from_line3d(&look, &side, -0.9f, &look);
+			point_from_line3d(&look, &side, back, &gore_drip_test_place);
+			point_from_line3d(&gore_drip_test_place, &gore_drip_test_way, -0.4f, &gore_drip_test_place);
+			if (bleed_ground(&gore_drip_test_place, 2.f, 6.f, &collision))
+				gore_drip_test_place = collision.point;
+			gore_drip_test_place.z += height;
+			gore_drip_test_facing.i = look.x - gore_drip_test_place.x;
+			gore_drip_test_facing.j = look.y - gore_drip_test_place.y;
+			gore_drip_test_facing.k = look.z - (gore_drip_test_place.z + 0.62f);
+			bleed_normalize(&gore_drip_test_facing, global_forward3d);
+		}
+		gore_drip_test_time = game_time_get();
+		gore_drip_test_state = 1;
+	}
+}
+
+static void drips_reset(void)
+{
+	long index;
+
+	for (index = 0; index < GORE_DRIP_MAXIMUM_UNITS; index++)
+		gore_drip_units[index].unit_index = NONE;
+	for (index = 0; index < GORE_DRIP_MAXIMUM_DROPS; index++)
+		gore_drips[index].quad_count = 0;
+	gore_drip_next = 0;
+	gore_drip_last_time = NONE;
+	gore_drip_test_state = 0;
+	for (index = 0; index < GORE_DRIP_TEST_LANES; index++)
+		gore_drip_test_units[index] = NONE;
+}
+
 /* ---------- bloody vehicle tracks
 
 A wheeled vehicle (a Warthog's kind: the jeep type) or a tank (the
@@ -4633,6 +5231,7 @@ void gore_bleed_reset(void)
 	gore_bleed_test_rounds_passed = 0;
 	gore_impact_test_state = 0;
 	footprints_reset();
+	drips_reset();
 	tracks_reset();
 	gore_impact_test_unit = NONE;
 	gore_impact_test_tries = 0;
@@ -4707,6 +5306,8 @@ void gore_bleed_update(void)
 	}
 	footprint_test_update();
 	footprints_update();
+	drip_test_update();
+	drips_update();
 	track_test_update();
 	tracks_update();
 	if ((game_time_get() % 15) == 0)
