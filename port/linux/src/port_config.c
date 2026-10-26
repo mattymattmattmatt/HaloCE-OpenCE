@@ -466,8 +466,6 @@ static const struct config_setting config_settings[] =
 		"Gore: a sniper rifle kill on the head of a grunt, jackal, elite, marine or the player takes only the head off." },
 	{ "game.gore_footprints", _config_boolean, "true", "HALO_GORE_FOOTPRINTS", _environment_value, _platform_all,
 		"Gore: anyone who walks through blood leaves bloody footprints of their own feet, fading over 12 to 18 steps." },
-	{ "game.gore_wound_drips", _config_boolean, "true", "HALO_GORE_WOUND_DRIPS", _environment_value, _platform_all,
-		"With gore on, in the campaign, the wounded drip blood as they go: a shielded one (the Master Chief, an Elite) while hurt with its shield down, until it recharges; an unshielded one for 30 s after its last hit. Not in multiplayer or network co-op." },
 	{ "game.gore_vehicle_tracks", _config_boolean, "true", "HALO_GORE_VEHICLE_TRACKS", _environment_value, _platform_all,
 		"Gore: a wheeled vehicle or a tank that runs over a corpse or through blood leaves bloody tyre or tread tracks, fading over 22 m (tyres) or 30 m (treads)." },
 	{ "game.gore_flood", _config_boolean, "true", "HALO_GORE_FLOOD", _environment_value, _platform_all,
@@ -1808,11 +1806,13 @@ static void config_report_unknown_key(int line, const char *name)
 }
 
 /* settings earlier builds wrote that are gone: left in the file, ignored
-without a word (the GPU switches tried for the Shield TV) */
+without a word (the GPU switches tried for the Shield TV; gore's wound
+drips' switch, now the gore level's) */
 static const char *const config_retired_keys[] =
 {
 	"debug.gpu_word_attributes", "debug.gpu_geometry_cache", "debug.gpu_base_vertex",
 	"debug.gpu_integer_attributes", "debug.gpu_buffer_writes", "debug.gpu_wide_indices",
+	"game.gore_wound_drips",
 };
 
 static int config_key_retired(const char *name)

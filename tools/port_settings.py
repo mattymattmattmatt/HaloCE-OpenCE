@@ -129,8 +129,6 @@ SCREENS = {
              "How long blood, pieces and bodies stay. Long:\ntwice; Very Long: four times. Permanent: until\nthe limits. Multiplayer: Long at most.", None),
             ("CORPSE BLEED:", "game.gore_corpse_bleed", ON_OFF,
              "With gore on, a body at rest pools blood that\nruns down a slope. Off: no pools or runs.", None),
-            ("WOUND DRIPS:", "game.gore_wound_drips", ON_OFF,
-             "With gore on, in the campaign, the wounded drip\nblood: shields down, till they recharge; others,\nfor 30 s after a hit. Off: no drips.", None),
             # (manual_respawn.c: the campaign alone; with the gore mod's
             # options, as there is no gameplay settings screen in this port)
             ("MANUAL RESPAWN:", "game.manual_respawn", ON_OFF,
@@ -243,16 +241,14 @@ _graphics = {"display.high_res_hud", "display.hud_button_style", "display.high_r
 # (the visual modifiers: a screen of their own, Extra Effects)
 _extra_effects = {"display.shield_glow", "display.shield_glow_intensity",
                   "display.overshield_effect", "display.hdr", "display.hdr_output",
-                  "game.gore_level", "game.gore_duration", "game.gore_corpse_bleed", "game.gore_wound_drips",
-                  "game.manual_respawn"}
+                  "game.gore_level", "game.gore_duration", "game.gore_corpse_bleed", "game.manual_respawn"}
 SCREENS["video_settings/graphics"] = {
     "screen": "graphics_settings_screen", "header": _video["header"], "spacing": 30,
     "same_place": ["anti_aliasing_android"],
     "rows": [row for row in _video["rows"] if row[1] in _graphics],
 }
 SCREENS["video_settings/extra_effects"] = {
-    # (ten rows on the desktop: closer, the help below them)
-    "screen": "extra_effects_settings_screen", "header": _video["header"], "spacing": 27, "help_top": 347,
+    "screen": "extra_effects_settings_screen", "header": _video["header"], "spacing": 30,
     "rows": [row for row in _video["rows"] if row[1] in _extra_effects],
 }
 _video["rows"] = [row for row in _video["rows"] if row[1] not in _graphics | _extra_effects]
