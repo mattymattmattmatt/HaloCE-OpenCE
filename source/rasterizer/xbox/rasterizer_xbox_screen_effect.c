@@ -215,6 +215,25 @@ static real_vector2d vector2d_reciprocal(
 	return reciprocal;
 }
 
+/* port: the one window drawn in a part of the screen, side-by-side
+stereo's eye (port/linux/game/stereo.c: two eye windows for the one
+player, so main_get_window_count is still 1). The passes below take one
+window to be the whole screen: a pass into the screen effect's own target
+(whose viewport is all of it) stretched the window across that target,
+and the screen's copies read it from the screen's left edge, not the
+window's. Such a window is drawn as a split screen's is, into its own
+place in that target, and read from there. */
+static boolean rasterizer_screen_effect_window_is_part(
+	void)
+{
+	rectangle2d const *viewport = &global_window_parameters.camera.viewport_bounds;
+	rectangle2d const *screen = &rasterizer_globals.reserved04.screen_bounds;
+
+	return main_get_window_count() <= 1 &&
+		(viewport->x0 != screen->x0 || viewport->x1 != screen->x1 ||
+		viewport->y0 != screen->y0 || viewport->y1 != screen->y1);
+}
+
 static void rasterizer_screen_effect_set_texture_transforms(
 	struct rasterizer_cinematic_screen_effect_parameters const *parameters,
 	short pass,
@@ -360,6 +379,20 @@ static void rasterizer_screen_effect_set_texture_transforms(
 		{
 			constants[2][3] += x_offset * scanline_scale.i;
 			constants[3][3] += y_offset * scanline_scale.j;
+		}
+
+		/* port: a window in a part of the screen (stereo's eye): the noise
+		and screen copies read at the window's place too, as the first two
+		do (rasterizer_screen_effect_window_is_part) */
+		if (rasterizer_screen_effect_window_is_part())
+		{
+			if (noise_bitmap == &viewport_map)
+			{
+				constants[4][3] += global_window_parameters.camera.viewport_bounds.x0;
+				constants[5][3] += global_window_parameters.camera.viewport_bounds.y0;
+			}
+			constants[6][3] += global_window_parameters.camera.viewport_bounds.x0;
+			constants[7][3] += global_window_parameters.camera.viewport_bounds.y0;
 		}
 
 		if (parameters->convolution_type == _rasterizer_screen_effect_convolution_type_blur)
@@ -1058,7 +1091,12 @@ void _rasterizer_screen_effect(
 			viewport_height = global_window_parameters.camera.viewport_bounds.y1 -
 				global_window_parameters.camera.viewport_bounds.y0;
 
-			if (pass == 0 && main_get_window_count() > 1 && pass_count != 1)
+			/* port: and a window in a part of the screen (stereo's eye) in its
+			own place of the screen effect's target, on every pass into it
+			(rasterizer_screen_effect_window_is_part) */
+			if (pass_count != 1 &&
+				((pass == 0 && main_get_window_count() > 1) ||
+				(!(pass & 1) && rasterizer_screen_effect_window_is_part())))
 			{
 				vertex_bounds.x0 = 2 * global_window_parameters.camera.viewport_bounds.x0 *
 					(1.0f / (real)halo_screen_width()) - 1.0f;

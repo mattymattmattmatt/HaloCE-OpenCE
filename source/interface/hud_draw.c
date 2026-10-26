@@ -103,6 +103,7 @@ symbols in this file:
 #include "objects/objects.h"
 #include "rasterizer/rasterizer.h"
 #include "render/render.h"
+#include "main/main.h" /* port: main_get_window_count (the zoomed layout) */
 #include "units/unit_definitions.h"
 #include "units/units.h"
 #include "cache_file_formats.h" /* port: port/linux/game/cache_file_formats.c */
@@ -1413,8 +1414,25 @@ void hud_zoomed_layout_begin(
 {
 	long width = render.camera.window_bounds.x1 - render.camera.window_bounds.x0;
 	short inset = (short)((width - width * 640 / halo_screen_width()) / 2);
+	long frame_width = rasterizer_globals.reserved04.frame_bounds.x1 - rasterizer_globals.reserved04.frame_bounds.x0;
 
 	*saved_window_bounds = render.camera.window_bounds;
+	/* port: one window in a part of the screen (side-by-side stereo's
+	eye, port/linux/game/stereo.c): its scope's mask is the whole
+	screen's, at the whole screen's size (interface.c, the one window's
+	mask), so its zoomed view is laid out as the whole screen's, 640 wide
+	in the screen's own frame, at the middle of the eye's window where the
+	mask and the reticle are; at the eye's own share the angle ticks fell
+	inside the scope and off it */
+	if (main_get_window_count() <= 1 && width != frame_width)
+	{
+		long zoomed_width = frame_width * 640 / halo_screen_width();
+		long middle = (render.camera.window_bounds.x0 + render.camera.window_bounds.x1) / 2;
+
+		render.camera.window_bounds.x0 = (short)(middle - zoomed_width / 2);
+		render.camera.window_bounds.x1 = (short)(render.camera.window_bounds.x0 + zoomed_width);
+		return;
+	}
 	render.camera.window_bounds.x0 += inset;
 	render.camera.window_bounds.x1 -= inset;
 }
