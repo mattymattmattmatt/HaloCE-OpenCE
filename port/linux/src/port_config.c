@@ -458,6 +458,8 @@ static const struct config_setting config_settings[] =
 		"Gore: a sniper rifle kill on the head of a grunt, jackal, elite, marine or the player takes only the head off." },
 	{ "game.gore_footprints", _config_boolean, "true", "HALO_GORE_FOOTPRINTS", _environment_value, _platform_all,
 		"Gore: anyone who walks through blood leaves bloody footprints of their own feet, fading over 12 to 18 steps." },
+	{ "game.gore_wound_drips", _config_boolean, "true", "HALO_GORE_WOUND_DRIPS", _environment_value, _platform_all,
+		"With gore on, in the campaign, the wounded drip blood as they go: a shielded one (the Master Chief, an Elite) while hurt with its shield down, until it recharges; an unshielded one for 30 s after its last hit. Not in multiplayer or network co-op." },
 	{ "game.gore_vehicle_tracks", _config_boolean, "true", "HALO_GORE_VEHICLE_TRACKS", _environment_value, _platform_all,
 		"Gore: a wheeled vehicle or a tank that runs over a corpse or through blood leaves bloody tyre or tread tracks, fading over 22 m (tyres) or 30 m (treads)." },
 	{ "game.gore_flood", _config_boolean, "true", "HALO_GORE_FLOOD", _environment_value, _platform_all,
@@ -903,6 +905,10 @@ static const struct config_setting config_settings[] =
 		"Seconds after the start before anything is damaged, so that a game can\n"
 		"be set up and started first (a host's messages to its own client are\n"
 		"damaged too)." },
+	{ "debug.gore_drip_test", _config_real, "0.0", "HALO_GORE_DRIP_TEST", _environment_value, _platform_all,
+		"Seconds after the start before debug.gore_drip_test_unit's bipeds are shot and walked up and down ahead of the player (gore's wound drips); 0 never." },
+	{ "debug.gore_drip_test_unit", _config_string, "\"elite,grunt,cyborg\"", "HALO_GORE_DRIP_TEST_UNIT", _environment_value, _platform_all,
+		"The wound drip test's bipeds: comma separated parts of their tag names." },
 	{ "debug.gore_footprint_test", _config_real, "0.0", "HALO_GORE_FOOTPRINT_TEST", _environment_value, _platform_all,
 		"Seconds after the start before a biped (debug.gore_footprint_test_unit) is walked through blood ahead of the player (gore's bloody footprints); 0 never." },
 	{ "debug.gore_footprint_test_unit", _config_string, "\"marine\"", "HALO_GORE_FOOTPRINT_TEST_UNIT", _environment_value, _platform_all,
