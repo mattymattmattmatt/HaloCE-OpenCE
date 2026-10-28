@@ -147,19 +147,10 @@ def miniupnpc_sources() -> List[Path]:
 
 def build_repository() -> str:
     """the GitHub repository a build is made from, owner/name, which a client
-    tells the servers it joins (network_distributed.c): CI's
-    GITHUB_REPOSITORY, else the checkout's origin remote's (its credentials
-    left out: only the owner and the name are kept), else none"""
-    repository = os.environ.get("GITHUB_REPOSITORY", "")
-    if not repository:
-        try:
-            url = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True,
-                                 timeout=10, check=False).stdout.strip()
-        except (OSError, subprocess.SubprocessError):
-            url = ""
-        found = re.search(r"github\.com[:/]+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/*$", url)
-        repository = found.group(1) if found else ""
-    return repository if re.fullmatch(r"[A-Za-z0-9_.-]{1,39}/[A-Za-z0-9_.-]{1,100}", repository) else ""
+    tells the servers it joins (network_distributed.c). This build names
+    the gore mod's repository, on CI and off it, whichever repository or
+    checkout it is built from."""
+    return "MattyMadeIt/HaloCE-Gore-Mod"
 
 
 def updater_defines(release: bool) -> str:
