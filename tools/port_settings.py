@@ -117,8 +117,6 @@ SCREENS = {
              "Shields light their surroundings as they flare.\nOnline: the host's choice.", None),
             ("GLOW INTENSITY:", "display.shield_glow_intensity", [("DEFAULT", "default"), ("LIGHT SHOW", "light_show")],
              "Light Show: three times as far, at full from a\nthird of the flare. Online: the host's choice.", None),
-            ("MATCH TIMER:", "display.match_timer", ON_OFF,
-             "Draw a clock at the bottom right in multiplayer,\ncounting up from the start of the game.", None),
             ("HDR:", "display.hdr", ON_OFF,
              "Keep the light of explosions, plasma and the sun\npast white, and roll it off instead of clipping.", None),
             ("HDR DISPLAY:", "display.hdr_output", ON_OFF,
@@ -226,7 +224,7 @@ SCREENS = {
              "Level the view while walking.", None),
             ("BUTTON LAYOUT:", "profile.button_preset",
              [("DEFAULT", "0"), ("SWAP TRIGGERS", "1"), ("SWAP A, L TRIGGER", "2"), ("SWAP B, L TRIGGER", "3"),
-              ("SWAP B, R STICK", "4"), ("BUMPER JUMPER", "5")],
+              ("SWAP B, R STICK", "4"), ("BUMPER JUMPER", "5"), ("FISHSTICKS", "6"), ("RECON", "7")],
              "Which of the controller's buttons does what (not\nthe keyboard's: Controls Setup sets those).", None),
             ("STICK LAYOUT:", "profile.joystick_preset",
              [("DEFAULT", "0"), ("SOUTHPAW", "1"), ("LEGACY", "2"), ("LEGACY SOUTHPAW", "3")],
@@ -245,7 +243,7 @@ SCREENS = {
 # pending edits, Defaults, OK and Cancel as the other settings screens.
 _video = SCREENS["video_settings"]
 _graphics = {"display.high_res_hud", "display.hud_button_style", "display.high_res_text", "display.anti_aliasing",
-             "display.anisotropic_filtering", "display.shadow_resolution", "display.per_pixel_lighting", "display.match_timer",
+             "display.anisotropic_filtering", "display.shadow_resolution", "display.per_pixel_lighting",
              "display.model_detail"}
 # (the visual modifiers: a screen of their own, Extra Effects)
 _extra_effects = {"display.shield_glow", "display.shield_glow_intensity",
@@ -325,7 +323,7 @@ _network["categories"] = [
      "Downloading Custom Edition maps you do not have,\nand helping send them to other players.",
      "desktop android"),
     ("MULTIPLAYER HUD:", "network_setup/multiplayer_hud",
-     "Players' names above their heads, the\nscoreboard, and the text chat."),
+     "Players' names above their heads, the\nscoreboard, the text chat and the match clock."),
     ("STREAMER MODE:", "network_setup/streamer_mode",
      "Hide offensive words in names and text from\nother players, maps and mods, as stars."),
     ("SERVER BROWSER:", "network_setup/server_browser",
@@ -385,6 +383,8 @@ SCREENS["network_setup/multiplayer_hud"] = {
          "SHOW the text chat, or HIDE it: no lines, and\nits keys and D-pad Up open nothing.", None),
         ("CHAT TEXT:", "display.chat_style", [("COLORS", "colors"), ("WHITE", "white")],
          "The text chat's colors: COLORS, names in their\nteam's color; WHITE, as Custom Edition.", None),
+        ("MATCH TIMER:", "display.match_timer", ON_OFF,
+         "Draw a clock at the bottom right in multiplayer,\ncounting up from the start of the game.", None),
     ],
 }
 
@@ -1222,6 +1222,8 @@ BROWSER_WORDS = [
     # (the error panel: nothing can be listed)
     "Internet play is off:\\nSettings > Network Setup",
     "Neither the master servers\\nnor the brokers answer:\\ncheck the connection",
+    # (a refusal added later, last so that the others keep their places)
+    "The host refused: your player name",
 ]
 
 
