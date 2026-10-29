@@ -75,6 +75,10 @@ static void director_process_variables(short local, unsigned long flags, real sp
 }
 static void director_inhibit_input(short local) { inhibited++; }
 static void director_inhibit_facing(short local) { inhibited++; }
+/* (the gore mod's death camera guards, director.c: alive, and the switch
+allowed, as upstream) */
+static boolean director_port_dead_view(short local) { (void)local; return FALSE; }
+static boolean director_port_switch_allowed(short local, boolean held) { (void)local; (void)held; return TRUE; }
 
 #include "under_test.inc"
 
