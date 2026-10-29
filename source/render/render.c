@@ -436,7 +436,8 @@ static void render_window(
 		}
 		interface_draw_screen();
 		rasterizer_screen_flash();
-		halo_screen_ui_offset(TRUE);
+		/* port: the view's menus centred in it (a quarter's are 320 wide) */
+		halo_screen_ui_offset_view(rasterizer_camera->viewport_bounds.x1 - rasterizer_camera->viewport_bounds.x0);
 		stereo_ui_begin(&rasterizer_camera->viewport_bounds); /* port: an eye's menu squeezed into its half (stereo.c) */
 		render_ui_widgets(local_player_index, &rasterizer_camera->viewport_bounds);
 		stereo_ui_end();
