@@ -3779,9 +3779,8 @@ from the globals' harmful falling distances (stock: 3 and 6 world units,
 9.1 m and 18.3 m: damage from 13.4 m/s, full at 18.9 m/s; the globals'
 instant-death speed, their maximum falling velocity, is 31.4 m/s; the log
 line "gore: impact splat threshold" has the map's own). The splat takes
-game.gore_impact_speed_scale times the deadly speed (default 1.65: 31.2
-m/s, about the instant-death speed, a fall some 2.7 times the height of one
-that just kills), or game.gore_impact_speed (m/s) if above 0.
+game.gore_impact_speed_scale times the deadly speed (default 1.35: 25.5
+m/s, a fall some 1.8 times the height of one that just kills), or game.gore_impact_speed (m/s) if above 0.
 
 Networked: only the host (or a game with no network) decides. A living
 biped's kill is dealt as act-of-god damage of the globals' falling damage
@@ -3849,13 +3848,15 @@ static real gore_impact_threshold(real *lethal_out)
 				falling->falling_distance_lower_bound * GORE_METRES_PER_WORLD_UNIT, falling->falling_distance_upper_bound * GORE_METRES_PER_WORLD_UNIT,
 				falling->runtime_minimum_damage_velocity * GORE_TICK_TO_MPS, lethal,
 				falling->runtime_maximum_falling_velocity * GORE_TICK_TO_MPS,
-				absolute > 0.f ? absolute : lethal * (scale < 1.f ? 1.65f : scale));
+				absolute > 0.f ? absolute : lethal * (scale < 1.f || (scale > 1.649f && scale < 1.651f) ? 1.35f : scale));
 		}
 	}
 	if (absolute > 0.f)
 		return absolute;
-	if (scale < 1.f)
-		scale = 1.65f;
+	/* (1.65 was the default before 1.35, and config.toml keeps the default
+	it was written with: that one is read as the new default) */
+	if (scale < 1.f || (scale > 1.649f && scale < 1.651f))
+		scale = 1.35f;
 	return lethal * scale;
 }
 

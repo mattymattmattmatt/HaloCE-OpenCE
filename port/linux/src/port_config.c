@@ -514,11 +514,11 @@ static const struct config_setting config_settings[] =
 		"or a wall far faster than a deadly fall comes apart where it hit and\n"
 		"leaves a big splat of its blood there (the impact splat). As much as\n"
 		"game.gore_level's gore (none when it is \"off\"); never the Flood." },
-	{ "game.gore_impact_speed_scale", _config_real, "1.65", "HALO_GORE_IMPACT_SPEED_SCALE", _environment_value, _platform_all,
+	{ "game.gore_impact_speed_scale", _config_real, "1.35", "HALO_GORE_IMPACT_SPEED_SCALE", _environment_value, _platform_all,
 		"Gore impact splat: the impact speed it takes, times the map's deadly\n"
 		"fall speed (the globals' full falling damage, 18.9 m/s on the stock\n"
-		"maps): 1.65 is 31.2 m/s, about the globals' own instant-death speed,\n"
-		"a fall some 2.7 times the height of one that just kills." },
+		"maps): 1.35 is 25.5 m/s, a fall some 1.8 times the height of one\n"
+		"that just kills." },
 	{ "game.gore_impact_speed", _config_real, "0.0", "HALO_GORE_IMPACT_SPEED", _environment_value, _platform_all,
 		"Gore impact splat: the impact speed it takes in m/s, instead of\n"
 		"game.gore_impact_speed_scale (0: that)." },
