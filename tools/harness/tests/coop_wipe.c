@@ -70,6 +70,8 @@ static void skip_vote_clear(void){}
 static void coop_enemies_new_game(void){}
 static void coop_pickups_new_game(void){}
 static void coop_vehicles_new_game(void){}
+/* (the gore mod's game.manual_respawn, players.c: off, as upstream) */
+static boolean manual_respawn_hold(void) { return FALSE; }
 #include "under_test.inc"
 static long add_player(void){long id=datum_new(player_data);int slot=DATUM_INDEX_TO_ABSOLUTE_INDEX(id);CHECK(id!=NONE,"player fixture full");((struct player_datum *)datum_get(player_data,id))->unit_index=100+slot;live_machine_players[slot<2?slot:2][slot<3?0:1]=id;return id;}
 static struct player_datum *player(int slot){return (void *)(player_data->data+slot*player_data->size);}
