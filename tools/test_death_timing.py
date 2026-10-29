@@ -62,10 +62,11 @@ static int player_data;
 enum {_game_connection_local,_game_connection_network_client,_game_connection_network_server};
 static short game_connection(void) {return _game_connection_local;}
 static boolean network_coop_active(void) {return FALSE;}
-static boolean players_respawn_network_coop(boolean fallback) {(void)fallback;return FALSE;}
+static boolean players_respawn_network_coop(boolean starting) {(void)starting;return FALSE;}
 static void players_respawn_at_checkpoint(void) {}
 static boolean players_are_all_dead(void) {return FALSE;}
 static boolean main_coop_host_revert(void) {return FALSE;}
+static boolean network_coop_wipe_reverts(void) {return FALSE;}
 /* (game.manual_respawn: holding while a test sets it) */
 static int hold,holds;
 static boolean manual_respawn_hold(void) {holds++;return hold;}
