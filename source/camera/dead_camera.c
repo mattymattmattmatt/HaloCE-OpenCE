@@ -147,6 +147,10 @@ void dead_camera_update(
 	if (unit)
 	{
 		result->position = unit->object.bounding_sphere_center;
+		/* port: the body's last place is kept, so that a body gone (gibbed
+		where it landed: the gore mod's impact splat) leaves the camera
+		where it ended, not where the death began (in the air of a fall) */
+		camera->position = result->position;
 	}
 	else
 	{
