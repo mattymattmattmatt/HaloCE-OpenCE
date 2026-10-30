@@ -31,7 +31,11 @@ a metre nearer, is brought back behind the player as a co-op respawn is.
 
 Nothing happens during a cutscene, while the players' input is off (a
 scripted sequence), while the scripts have the AI off, or while the player
-is in a vehicle (the allies regroup when they are on foot again). A killed
+is in a vehicle (the allies regroup when they are on foot again). An ally
+riding a vehicle no player rides gets out (allies_tidy). They come in, and
+are brought back, behind the player against the way they move, else beside
+them, never ahead in their path (allies_place). In combat they keep within
+ALLY_LEASH_COMBAT and come back only to ALLY_LEASH_COMBAT_RETURN. A killed
 ally comes back ALLY_RESPAWN_TICKS later, behind a player. Fewer wanted
 (the menu) takes away the extras; 0 takes them all.
 */
@@ -130,10 +134,17 @@ enum
 	ALLY_STUCK_TICKS = 6 * TICKS_PER_SECOND,
 };
 #define ALLY_LEASH_FOLLOW 5.f
-#define ALLY_LEASH_COMBAT 10.f
+#define ALLY_LEASH_COMBAT 14.f
 #define ALLY_LEASH_RETURN 4.f
+/* (in combat they come back only to within this: room to fight, out of the
+player's way) */
+#define ALLY_LEASH_COMBAT_RETURN 8.f
 #define ALLY_TELEPORT_DISTANCE 25.f
 #define ALLY_SPAWN_BEHIND 1.5f
+/* (farther behind a player on the move: out of their run) */
+#define ALLY_SPAWN_BEHIND_MOVING 3.f
+/* (an ally riding a vehicle no player rides gets out after this) */
+#define ALLY_VEHICLE_ALONE_TICKS (2 * TICKS_PER_SECOND)
 #define ALLY_RETARGET_DISTANCE 1.5f
 /* orders (coop_allies_order_input): the action button held this long, on
 foot with nothing to pick up or enter; the aimed point at most this far;
@@ -160,6 +171,9 @@ struct coop_ally
 	real_point3d destination;
 	/* (its name on the HUD: allies_names) */
 	short name;
+	/* (riding with no player since, and the next try to get out) */
+	long alone_since;
+	long exit_time;
 };
 
 static struct
@@ -449,19 +463,56 @@ boolean coop_allies_available(void)
 	return global_scenario_get() == NULL || allies_variant_search(TRUE) != NONE;
 }
 
-/* behind the player, as a co-op respawn (players_coop_spawn_location) */
-static void allies_behind(long player_unit_index, real_point3d *position, real *facing)
+/* the player's way: where they move (running, strafing, backing up), else
+where they face; flat */
+static void allies_heading(long player_unit_index, real_vector3d *heading, boolean *moving)
 {
-	struct object_datum *beside = object_get(player_unit_index);
-	real behind = beside->object.bounding_sphere_radius + ALLY_METRES(ALLY_SPAWN_BEHIND);
+	struct object_datum *player = object_get(player_unit_index);
+	real_vector3d const *velocity = &player->object.translational_velocity;
+	real speed = velocity->i * velocity->i + velocity->j * velocity->j;
 
-	point_from_line3d(&beside->object.position, &beside->object.forward, -behind, position);
-	if (player_position_switches_bsp(position))
-		point_from_line3d(&beside->object.position, &beside->object.forward, behind, position);
-	if (scenario_leaf_index_from_point(position) == NONE || player_position_switches_bsp(position))
-		*position = beside->object.position;
+	/* (faster than a walk's start: about 0.6 m/s) */
+	*moving = speed > ALLY_METRES(0.02f) * ALLY_METRES(0.02f);
+	heading->i = *moving ? velocity->i : player->object.forward.i;
+	heading->j = *moving ? velocity->j : player->object.forward.j;
+	heading->k = 0.f;
+	if (normalize3d(heading) == 0.f)
+	{
+		heading->i = 1.f;
+		heading->j = 0.f;
+	}
+}
+
+/* a place by the player: behind them (side 0: against their way), else to
+their left (1) or right (2); never ahead, in their path. FALSE if it is
+outside the level or on a loading zone */
+static boolean allies_place(long player_unit_index, short side, real_point3d *position, real *facing)
+{
+	struct object_datum *player = object_get(player_unit_index);
+	real_vector3d heading, away;
+	boolean moving;
+	real distance;
+
+	allies_heading(player_unit_index, &heading, &moving);
+	distance = player->object.bounding_sphere_radius +
+		ALLY_METRES(side == 0 && moving ? ALLY_SPAWN_BEHIND_MOVING : ALLY_SPAWN_BEHIND);
+	if (side == 0)
+	{
+		away.i = -heading.i;
+		away.j = -heading.j;
+	}
+	else
+	{
+		/* (beside, and a little behind) */
+		away.i = (side == 1 ? -heading.j : heading.j) - 0.5f * heading.i;
+		away.j = (side == 1 ? heading.i : -heading.i) - 0.5f * heading.j;
+	}
+	away.k = 0.f;
+	normalize3d(&away);
+	point_from_line3d(&player->object.position, &away, distance, position);
 	if (facing)
-		*facing = arctangent(beside->object.forward.j, beside->object.forward.i);
+		*facing = arctangent(heading.j, heading.i);
+	return scenario_leaf_index_from_point(position) != NONE && !player_position_switches_bsp(position);
 }
 
 /* the player's biped on the ground: not falling (off a cliff, where an ally
@@ -473,36 +524,17 @@ static boolean allies_player_grounded(long player_unit_index)
 	return biped && !TEST_FLAG(biped->biped.flags, _biped_airborne_bit);
 }
 
-/* moves the ally's biped beside the player, with room and a line of sight */
+/* moves the ally's biped by the player (behind, else beside), with room and
+a line of sight to them; FALSE (not moved) when none of them has room */
 static boolean allies_bring_back(long unit_index, long player_unit_index)
 {
-	real_point3d position;
-
-	allies_behind(player_unit_index, &position, NULL);
-	return biped_fix_position(unit_index, player_unit_index, &position, NULL, 2.f, FALSE, FALSE, TRUE);
-}
-
-/* else beside the player, to its left, right or in front (a narrow
-corridor, a ledge behind) */
-static boolean allies_place_around(long unit_index, long player_unit_index)
-{
-	struct object_datum *player = object_get(player_unit_index);
-	real away = player->object.bounding_sphere_radius + ALLY_METRES(ALLY_SPAWN_BEHIND);
-	real_vector3d left;
 	short side;
 
-	left.i = -player->object.forward.j;
-	left.j = player->object.forward.i;
-	left.k = 0.f;
 	for (side = 0; side < 3; side++)
 	{
 		real_point3d position;
 
-		if (side == 2)
-			point_from_line3d(&player->object.position, &player->object.forward, away, &position);
-		else
-			point_from_line3d(&player->object.position, &left, side ? -away : away, &position);
-		if (scenario_leaf_index_from_point(&position) != NONE && !player_position_switches_bsp(&position) &&
+		if (allies_place(player_unit_index, side, &position, NULL) &&
 			biped_fix_position(unit_index, player_unit_index, &position, NULL, 2.f, FALSE, FALSE, TRUE))
 		{
 			return TRUE;
@@ -555,7 +587,7 @@ static void allies_note(char const *why)
 	allies_log("campaign allies: %s", why);
 }
 
-static void allies_spawn(long player_unit_index)
+static boolean allies_spawn(long player_unit_index)
 {
 	long variant = allies_variant();
 	struct actor_starting_location location;
@@ -572,10 +604,21 @@ static void allies_spawn(long player_unit_index)
 		/* (ALLIES back to NONE: the pause menu shows NO MARINES) */
 		if (config_integer("bots.coop") != 0 && !getenv("HALO_COOP_ALLIES") && !config_write("bots.coop", "0"))
 			allies_log("campaign allies: could not write bots.coop");
-		return;
+		return FALSE;
 	}
 	csmemset(&location, 0, sizeof(location));
-	allies_behind(player_unit_index, &location.position, &location.facing);
+	{
+		short side;
+
+		/* (behind, else beside; else later: never ahead, in their run) */
+		for (side = 0; side < 3 && !allies_place(player_unit_index, side, &location.position, &location.facing); side++)
+			;
+		if (side == 3)
+		{
+			allies_note("no room behind or beside the player (waiting)");
+			return FALSE;
+		}
+	}
 	location.cluster_index = NONE;
 	location.noncombat_sequence_id = ALLY_SEQUENCE_ID;
 	location.initial_state = ALLY_DEFAULT_STATE_ALERT;
@@ -586,7 +629,7 @@ static void allies_spawn(long player_unit_index)
 	if (actor_index == NONE)
 	{
 		allies_note("the game made no actor (the pool full?)");
-		return;
+		return FALSE;
 	}
 	{
 		struct actor_datum *actor = actor_get(actor_index);
@@ -595,18 +638,14 @@ static void allies_spawn(long player_unit_index)
 		{
 			allies_note("the actor made is not one of ours");
 			actor_erase(actor_index, TRUE);
-			return;
+			return FALSE;
 		}
-		/* (the place behind the player, else where it stands if it has room) */
-		boolean behind = allies_bring_back(actor->meta.unit_index, player_unit_index);
-
-		if (!behind &&
-			!biped_fix_position(actor->meta.unit_index, NONE, &location.position, NULL, 2.f, FALSE, FALSE, TRUE) &&
-			!allies_place_around(actor->meta.unit_index, player_unit_index))
+		/* (behind the player, else beside them, with room; else none yet) */
+		if (!allies_bring_back(actor->meta.unit_index, player_unit_index))
 		{
-			allies_note("no room behind the player");
+			allies_note("no room behind or beside the player (waiting)");
 			actor_erase(actor_index, TRUE);
-			return;
+			return FALSE;
 		}
 		actor->meta.force_active = TRUE;
 		{
@@ -614,8 +653,7 @@ static void allies_spawn(long player_unit_index)
 			char const *name = slot ? allies_names[slot->name] : "A Marine";
 			char text[128];
 
-			allies_log("campaign allies: %s joined %s (%d wanted)", name,
-				behind ? "behind the player" : "where the player stands (no clear room behind)", allies_wanted());
+			allies_log("campaign allies: %s joined behind or beside the player (%d wanted)", name, allies_wanted());
 			short letter;
 
 			/* (short: a phone's HUD lines are narrow) */
@@ -628,6 +666,7 @@ static void allies_spawn(long player_unit_index)
 			coop_allies.told_orders = TRUE;
 		}
 	}
+	return TRUE;
 }
 
 /* HALO_ALLIES_TEST (automated tests, no person playing): "order:<s>" holds
@@ -675,6 +714,76 @@ static void allies_test(long now)
 	{
 		allies_log("campaign allies: test: killing the player");
 		unit_kill(player->unit_index);
+	}
+}
+
+/* each update: the order's state with none alive (a hold with nobody to
+hold, a dead player's half-held button), and an ally riding a vehicle no
+player rides (a Warthog's gun the player left): out of it */
+static void allies_tidy(long now)
+{
+	struct data_iterator iterator;
+	struct actor_datum *actor;
+	struct player_datum *player;
+	long units[1];
+
+	if (coop_allies.holding && !allies_units(units, 1))
+	{
+		coop_allies.holding = FALSE;
+		allies_log("campaign allies: none left to hold the place (following again)");
+	}
+	data_iterator_new(&iterator, player_data);
+	while ((player = data_iterator_next(&iterator)) != NULL)
+	{
+		short slot = (short)DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index);
+
+		if (player->unit_index == NONE && slot >= 0 && slot < ALLY_ORDER_PLAYERS)
+		{
+			coop_allies.order_ticks[slot] = 0;
+			coop_allies.order_down[slot] = FALSE;
+		}
+	}
+	if (allies_quiet())
+		return;
+	data_iterator_new(&iterator, actor_data);
+	while ((actor = data_iterator_next(&iterator)) != NULL)
+	{
+		long actor_index = iterator.datum_index, root_index;
+		struct unit_datum *unit;
+		struct coop_ally *ally;
+		struct data_iterator players;
+		boolean shared = FALSE;
+
+		if (!ally_actor(actor) || actor->meta.erase_next_tick)
+			continue;
+		unit = unit_try_and_get(actor->meta.unit_index);
+		if (!unit || TEST_FLAG(unit->object.damage_flags, _object_dead_bit))
+			continue;
+		root_index = object_get_ultimate_parent(actor->meta.unit_index);
+		if (root_index == actor->meta.unit_index || (ally = allies_slot(actor_index)) == NULL)
+			continue;
+		data_iterator_new(&players, player_data);
+		while ((player = data_iterator_next(&players)) != NULL)
+		{
+			if (player->unit_index != NONE && object_try_and_get(player->unit_index) &&
+				object_get_ultimate_parent(player->unit_index) == root_index)
+			{
+				shared = TRUE;
+			}
+		}
+		if (shared || !ally->alone_since)
+		{
+			ally->alone_since = shared ? 0 : now + 1;
+			continue;
+		}
+		if (now + 1 - ally->alone_since < ALLY_VEHICLE_ALONE_TICKS || now < ally->exit_time)
+			continue;
+		ally->exit_time = now + TICKS_PER_SECOND;
+		if (unit->object.parent_object_index != NONE && unit->unit.parent_seat_index != NONE)
+		{
+			unit_try_and_exit_seat(actor->meta.unit_index);
+			allies_note("an ally got out of a vehicle no player rides");
+		}
 	}
 }
 
@@ -751,7 +860,7 @@ void coop_allies_update(void)
 		{
 			real distance;
 
-			if (!ally_actor(actor) || actor->meta.erase_next_tick)
+			if (!ally_actor(actor) || actor->meta.erase_next_tick || !object_try_and_get(actor->meta.unit_index))
 				continue;
 			allies_nearest_player(&object_get(actor->meta.unit_index)->object.position, &distance);
 			nearest = MIN(nearest, distance);
@@ -766,7 +875,7 @@ void coop_allies_update(void)
 			{
 				real distance;
 
-				if (!ally_actor(actor) || actor->meta.erase_next_tick)
+				if (!ally_actor(actor) || actor->meta.erase_next_tick || !object_try_and_get(actor->meta.unit_index))
 					continue;
 				distance = distance3d(&object_get(actor->meta.unit_index)->object.position, &coop_allies.hold_point);
 				hold_nearest = MIN(hold_nearest, distance);
@@ -780,6 +889,7 @@ void coop_allies_update(void)
 			(coop_allies.reports++ % 6 ? platform_log : allies_log)("campaign allies: %d with the players, %.1f to %.1f m from the nearest", count,
 				nearest / ALLY_METRES(1.f), farthest / ALLY_METRES(1.f));
 	}
+	allies_tidy(now);
 	if (count < coop_allies.last_count)
 		coop_allies.next_spawn_time = MAX(coop_allies.next_spawn_time, now + ALLY_RESPAWN_TICKS);
 	coop_allies.last_count = count;
@@ -800,8 +910,8 @@ void coop_allies_update(void)
 	}
 	if (!allies_player_grounded(player_unit_index))
 		return;
-	allies_spawn(player_unit_index);
-	coop_allies.next_spawn_time = now + ALLY_RETRY_TICKS / 4;
+	/* (no room: a moment later, as the player moves on) */
+	coop_allies.next_spawn_time = now + (allies_spawn(player_unit_index) ? ALLY_RETRY_TICKS / 4 : TICKS_PER_SECOND / 2);
 	coop_allies.last_count = count;
 }
 
@@ -826,7 +936,8 @@ void coop_allies_leash(long actor_index)
 		return;
 	now = game_time_get();
 	fighting = actor->state.action == _actor_action_fight || actor->state.action == _actor_action_uncover ||
-		actor->state.action == _actor_action_avoid || actor->state.action == _actor_action_flee;
+		actor->state.action == _actor_action_avoid || actor->state.action == _actor_action_flee ||
+		actor_in_combat(actor_index);
 
 	/* (told to hold a place: there, fighting within ALLY_HOLD_RANGE of it,
 	whoever is near; no bringing back beside the players) */
@@ -869,7 +980,7 @@ void coop_allies_leash(long actor_index)
 	}
 	if (!ally->returning)
 		return;
-	if (distance < ALLY_METRES(ALLY_LEASH_RETURN))
+	if (distance < ALLY_METRES(fighting ? ALLY_LEASH_COMBAT_RETURN : ALLY_LEASH_RETURN))
 	{
 		ally->returning = FALSE;
 		return;
@@ -993,6 +1104,14 @@ static void allies_order(long unit_index)
 	long units[ALLY_MAXIMUM * 2];
 	short count = allies_units(units, (short)NUMBEROF(units)), index;
 
+	/* (all died while the button was held: nobody to order) */
+	if (count <= 0)
+	{
+		coop_allies.holding = FALSE;
+		allies_log("campaign allies: ordered, but none is alive");
+		allies_tell("NO ALLIES");
+		return;
+	}
 	if (coop_allies.holding)
 	{
 		coop_allies.holding = FALSE;
@@ -1106,9 +1225,16 @@ long coop_allies_respawn_unit(boolean (*test)(long unit_index))
 	long units[ALLY_MAXIMUM * 2];
 	short count = allies_units(units, (short)NUMBEROF(units)), index;
 
+	/* (on foot first; then one riding, which the respawn stands beside its
+	vehicle: players.c) */
 	for (index = 0; index < count; index++)
 	{
 		if (allies_on_foot(units[index]) != NONE && (!test || test(units[index])))
+			return units[index];
+	}
+	for (index = 0; index < count; index++)
+	{
+		if (allies_on_foot(units[index]) == NONE && (!test || test(units[index])))
 			return units[index];
 	}
 	return NONE;
