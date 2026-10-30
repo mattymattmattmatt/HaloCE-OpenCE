@@ -1,6 +1,6 @@
 """The real lobby of network_server_manager.c's bots (bots.count): as many as the setting asks for join a local Slayer
-game's lobby, as far as it has room, on the teams bots.teams asks for, follow the players' team changes and leave when
-fewer are asked for; none in a game other machines may join, in another gametype, or once the game has started."""
+game's lobby, or a hosted one's (system link, internet), as far as it has room, on the teams bots.teams asks for, follow
+the players' team changes and leave when fewer are asked for; none in another gametype, or once the game has started."""
 
 import re
 import sys
@@ -11,15 +11,15 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, constant, enum_with, function, mutated, read, run, structure  # noqa: E402
 
-CASES = ["fills", "room", "fewer", "even", "against", "follows-players", "never-network", "slayer-only",
+CASES = ["fills", "room", "fewer", "even", "against", "follows-players", "hosted-network", "slayer-only",
          "not-once-started", "no-player-no-bots", "names-and-machines"]
 GAME_MANAGER_FUNCTIONS = ("network_game_invalidate_player", "network_player_is_valid", "network_game_player_is_valid",
                           "network_game_add_player", "network_game_remove_player")
 
 # a fault in network_game_server_port_bots, and the case that must catch it
 NEGATIVE_CONTROLS = {
-    "bots-in-network-games": (("network_game_is_splitscreen_local() && ", ""), "never-network"),
-    "bots-in-any-gametype": ((" && server->game.variant.game_engine_index == game_engine_slayer", ""), "slayer-only"),
+    "bots-in-any-gametype": (("if (server->game.variant.game_engine_index == game_engine_slayer)", "if (TRUE)"),
+                             "slayer-only"),
     "bots-once-started": (("server->state != _network_game_server_state_pregame || server->sent_start_game_message",
                            "server->state != _network_game_server_state_pregame"), "not-once-started"),
     "teams-not-evened": (("team_counts[1] < team_counts[0] ? 1 : 0", "1"), "even"),
