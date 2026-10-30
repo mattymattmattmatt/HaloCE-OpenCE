@@ -318,6 +318,7 @@ symbols in this file:
 #include "units/vehicle_definitions.h"
 #include "units/vehicles.h"
 #include "networking/network_game_globals.h"
+#include "coop_allies.h" /* port: port/linux/game/coop_allies.c */
 
 /* ---------- constants */
 
@@ -4227,6 +4228,9 @@ static void actor_update(
 				actor_communication_update(actor_index);
 				actor_conversation_control(actor_index);
 				actor_destination_update(actor_index);
+				/* port: an allied marine stays near the players
+				(port/linux/game/coop_allies.c) */
+				coop_allies_leash(actor_index);
 				actor_look_affect_movement(actor_index);
 				actor_move_update(actor_index);
 				actor_look_update(actor_index);

@@ -237,6 +237,7 @@ symbols in this file:
 #include "scenario/scenario_definitions.h"
 #include "tag_files/tag_files.h"
 #include "tag_files/tag_groups.h"
+#include "coop_allies.h" /* port: port/linux/game/coop_allies.c */
 
 #include <stddef.h>
 
@@ -1957,6 +1958,8 @@ void ai_update(
 		{
 			ai_conversation_update();
 			encounters_update();
+			/* port: the campaign's allied marines (port/linux/game/coop_allies.c) */
+			coop_allies_update();
 			actors_update();
 			ai_globals->ai_has_control_data = TRUE;
 		}

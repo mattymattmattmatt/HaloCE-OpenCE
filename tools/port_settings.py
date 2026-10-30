@@ -421,7 +421,29 @@ _network["categories"] = [
      "What the Server Browser lists and its order: the\nsame settings as its Filters screen."),
     ("DISCORD ACCOUNT:", "network_setup/discord_account",
      "Link a Discord account, which lets you join\nservers that block VPNs while you use one."),
+    ("BOTS:", "network_setup/bots",
+     "Computer players in local Slayer games, and\nAI marines fighting beside you in the campaign."),
 ]
+# (ten places now: a little closer together, the help a little lower)
+_network.update({"spacing": 28, "help_top": 356, "help_height": 54})
+
+# Network Setup's bots (port/linux/game/bots.c, coop_allies.c): the local
+# Slayer game's computer players, and the campaign's allied marines
+SCREENS["network_setup/bots"] = {
+    "screen": "bots_settings_screen", "header": _network["header"], "spacing": 30,
+    "rows": [
+        ("BOTS:", "bots.count", [("NONE", "0")] + [(str(n), str(n)) for n in range(1, 16)],
+         "Computer players who join a local (split screen)\nSlayer game's lobby, as far as it has room.", None),
+        ("BOT SKILL:", "bots.skill",
+         [("RECRUIT", "recruit"), ("EASY", "easy"), ("NORMAL", "normal"), ("HEROIC", "heroic"),
+          ("VETERAN", "veteran"), ("LEGENDARY", "legendary")],
+         "How soon the bots react, how well they aim and\nhow far they see.", None),
+        ("BOT TEAMS:", "bots.teams", [("EVEN", "even"), ("AGAINST YOU", "against")],
+         "Team games: bots on both teams, evening them, or\nall on the team the players are not on.", None),
+        ("CAMPAIGN ALLIES:", "bots.coop", [("NONE", "0")] + [(str(n), str(n)) for n in range(1, 5)],
+         "AI marines who follow the nearest player in the\ncampaign, fight beside them and come back.", None),
+    ],
+}
 SCREENS["network_setup/map_sharing"] = {
     "screen": "map_sharing_settings_screen", "header": _network["header"], "spacing": 30,
     "rows": [
