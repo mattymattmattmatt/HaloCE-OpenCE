@@ -383,7 +383,7 @@ static boolean allies_variant_fits(long tag_index, short type)
 /* the level's marines' variant, armed, on foot; else its crewmen's; else
 (a level whose scenario places none: Two Betrayals) any such variant the
 map's tags have */
-static long allies_variant(void)
+static long allies_variant_search(boolean quiet)
 {
 	struct scenario *scenario = global_scenario_get();
 	short pass, index;
@@ -417,7 +417,7 @@ static long allies_variant(void)
 		}
 	}
 	/* (none: what the map has, for halo.log, once) */
-	if (!coop_allies.logged_variant)
+	if (!quiet && !coop_allies.logged_variant)
 	{
 		struct tag_iterator iterator;
 		long tag_index;
@@ -435,6 +435,18 @@ static long allies_variant(void)
 		}
 	}
 	return NONE;
+}
+
+static long allies_variant(void)
+{
+	return allies_variant_search(FALSE);
+}
+
+/* the menus: TRUE when the level loaded has a marine or crewman to be allies
+(the spawner's own search: FALSE greys the pause menu's ALLIES) */
+boolean coop_allies_available(void)
+{
+	return global_scenario_get() == NULL || allies_variant_search(TRUE) != NONE;
 }
 
 /* behind the player, as a co-op respawn (players_coop_spawn_location) */
@@ -556,7 +568,12 @@ static void allies_spawn(long player_unit_index)
 			tag_get_name(variant));
 	}
 	if (variant == NONE)
+	{
+		/* (ALLIES back to NONE: the pause menu shows NO MARINES) */
+		if (config_integer("bots.coop") != 0 && !getenv("HALO_COOP_ALLIES") && !config_write("bots.coop", "0"))
+			allies_log("campaign allies: could not write bots.coop");
 		return;
+	}
 	csmemset(&location, 0, sizeof(location));
 	allies_behind(player_unit_index, &location.position, &location.facing);
 	location.cluster_index = NONE;
