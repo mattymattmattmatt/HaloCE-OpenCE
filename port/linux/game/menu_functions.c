@@ -4099,7 +4099,15 @@ boolean pc_menu_text_color(struct widget_instance *widget, real_argb_color *colo
 	short ping;
 	unsigned long rgba;
 
-	if (row < 0 || row >= BROWSER_ROWS || strncmp(widget->name, "server_item_", 12))
+	/* (the campaign pause menu's ALLIES on a level with no marines: grey) */
+	if (widget->name && strstr(widget->name, "allies_button") && !coop_allies_available())
+	{
+		color->red = (real)((ROW_COLOR_GREYED >> 24) & 0xFF) / 255.0f;
+		color->green = (real)((ROW_COLOR_GREYED >> 16) & 0xFF) / 255.0f;
+		color->blue = (real)((ROW_COLOR_GREYED >> 8) & 0xFF) / 255.0f;
+		return TRUE;
+	}
+		if (row < 0 || row >= BROWSER_ROWS || strncmp(widget->name, "server_item_", 12))
 		return FALSE;
 	ping = browser_row_pings[row];
 	if (strcmp(widget->name, "server_item_ping"))
@@ -5768,6 +5776,12 @@ static boolean campaign_allies_change(void)
 	long count = config_integer("bots.coop");
 	char value[8];
 
+	/* (a level with no marine or crewman: greyed, NONE) */
+	if (!coop_allies_available())
+	{
+		ui_play_audio_feedback_sound(SOUND_ERROR);
+		return TRUE;
+	}
 	count = count < 0 || count >= 4 ? 0 : count + 1;
 	snprintf(value, sizeof(value), "%ld", count);
 	coop_allies_arm();
@@ -5782,7 +5796,8 @@ static void campaign_allies_text(struct widget_instance *button)
 {
 	long count = config_integer("bots.coop");
 
-	button->parameters.text_box.string_list_index = (short)(count < 0 ? 0 : count > 4 ? 4 : count);
+	button->parameters.text_box.string_list_index = !coop_allies_available() ? 5 :
+		(short)(count < 0 ? 0 : count > 4 ? 4 : count);
 }
 
 /* ---- the lobby: the game's players (up to the port's 128), its map and

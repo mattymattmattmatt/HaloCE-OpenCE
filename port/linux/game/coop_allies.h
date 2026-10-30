@@ -25,6 +25,7 @@ short coop_allies_hud_units(short local_player_index, boolean multiplayer, long 
 /* menu_functions.c: ALLIES chosen in a menu (kept for the next level's
 start, which otherwise sets them back to none) */
 void coop_allies_arm(void);
+boolean coop_allies_available(void);
 
 /* director.c, a dead player's camera (not network co-op's): the ally it
 watches, the left and right of the D-pad (Y: right) going round the living

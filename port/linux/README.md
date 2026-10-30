@@ -426,7 +426,9 @@ A tap still reloads. A player who dies while an ally lives respawns beside
 it, solo too, once the ally is safe (as a network co-op respawn beside a
 teammate; after 10 seconds, beside one on the ground anyway), after the
 respawn button with `game.manual_respawn`; the team is lost (the checkpoint)
-only when the last ally dies too. Each level starts with none (ALLIES back to NONE) unless
+only when the last ally dies too. On a level whose map has no armed marine or crewman (the spawner's own
+search: c20, c40, d20 and d40 among the campaign's), the pause menu's ALLIES
+is grey and reads ALLIES: NO MARINES, and none come. Each level starts with none (ALLIES back to NONE) unless
 Server Setup's ALLIES chose them before it. With `game.manual_respawn`, the
 prompt reads WAITING FOR A SAFE SPOT TO RESPAWN until an ally is safe. Dead,
 the D-pad's left and right (or Y) turn the camera to each living ally from
