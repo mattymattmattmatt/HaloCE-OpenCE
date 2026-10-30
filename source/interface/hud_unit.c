@@ -87,6 +87,7 @@ symbols in this file:
 #include "units/unit_definitions.h"
 #include "units/units.h"
 #include "network_chat.h" /* port: port/linux/game/network_chat.c */
+#include "coop_allies.h" /* port: port/linux/game/coop_allies.c */
 
 /* ---------- constants */
 
@@ -829,6 +830,8 @@ void hud_render_unit_interface(
 				local_player_count() > 1)
 		};
 		long unit_count = 1;
+		/* port: a campaign ally's HUD, a passenger's moved (coop_allies.c) */
+		struct unit_hud_interface_definition *hud_overrides[18] = { NULL };
 		unsigned long auxilary_flags;
 		unsigned long aux_activated_when_disabled_flags;
 		real auxilary_values[1];
@@ -890,6 +893,14 @@ void hud_render_unit_interface(
 			}
 		}
 
+		/* port: on foot, the campaign allies' health, as a vehicle shows its
+		passengers' (port/linux/game/coop_allies.c) */
+		if (unit_count == 1 && unit->object.parent_object_index == NONE)
+		{
+			unit_count += coop_allies_hud_units(local_player_count() > 1, &unit_indices[1], &unit_hud_indices[1],
+				&hud_overrides[1], (short)(NUMBEROF(unit_indices) - 1));
+		}
+
 		auxilary_flags = unit->unit.integrated_light_power == 1.0f;
 		aux_activated_when_disabled_flags =
 			!TEST_FLAG(unit->unit.flags, _unit_integrated_light_on_bit) &&
@@ -906,8 +917,8 @@ void hud_render_unit_interface(
 
 			if (hud_unit && unit_hud_indices[unit_count] != NONE)
 			{
-				struct unit_hud_interface_definition *hud_definition =
-					unit_hud_interface_definition_get(unit_hud_indices[unit_count]);
+				struct unit_hud_interface_definition *hud_definition = hud_overrides[unit_count] ?
+					hud_overrides[unit_count] : unit_hud_interface_definition_get(unit_hud_indices[unit_count]);
 
 				if (hud_definition->background.interface_bitmap.index != NONE)
 				{

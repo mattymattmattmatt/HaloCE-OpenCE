@@ -615,12 +615,9 @@ static const struct config_setting config_settings[] =
 		"from near them, and come back behind them when killed, left behind or\n"
 		"stuck, in solo, split screen and hosted co-op campaigns. Server Setup's\n"
 		"CO-OP OPTIONS and the campaign pause menu's ALLIES set it; a change takes\n"
-		"effect at once (port/linux/game/coop_allies.c)." },
-	{ "game.coop_character", _config_string, "\"chief\"", "HALO_COOP_CHARACTER", _environment_value, _platform_all,
-		"Who the players are in the campaign: \"chief\" (the Master Chief) or\n"
-		"\"marine\" (the level's marine biped; the Chief on a level without one,\n"
-		"and on The Pillar of Autumn, whose scripts animate the Chief). Server\n"
-		"Setup's CO-OP OPTIONS sets it; from the next spawn." },
+		"effect at once. The action button held 1.5 s on foot sends them where\n"
+		"the player aims, and again brings them back; a dead player respawns\n"
+		"beside a living ally (port/linux/game/coop_allies.c)." },
 	{ "display.viewmodel_shield", _config_boolean, "false", "HALO_VIEWMODEL_SHIELD", _environment_value, _platform_all,
 		"The energy shield's flare on the first-person arms too, as on the body\n"
 		"(the stock game draws it on the body only)." },
@@ -2270,7 +2267,6 @@ static const struct
 	{ "network.voice_mode", { "off", "team_proximity", "team_enemy_proximity", "team_global",
 		"team_global_enemy_proximity", NULL }, NULL },
 	{ "network.coop_team_wipe", { "auto", "revert", "respawn", NULL }, NULL },
-	{ "game.coop_character", { "chief", "marine", NULL }, NULL },
 	{ "network.coop_friendly_fire", { "off", "on", "shields_only", "explosives_only", NULL }, NULL },
 	{ "network.shield_effects", { "stock", "glow", "light_show", "overshield", "glow_overshield",
 		"light_show_overshield", "players", NULL }, NULL },

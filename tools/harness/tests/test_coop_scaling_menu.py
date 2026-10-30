@@ -52,7 +52,7 @@ def test_team_wipe_generated_screen():
     assert [item.get('text') for item in strings] == ['AUTO', 'REVERT CHECKPOINT', 'RESPAWN ONLY']
     menu = widgets[base + 'coop_options_menu']
     rows = [child for child in menu.findall('child') if '/op_coop_' in child.get('widget', '')]
-    assert len(rows) == 11
+    assert len(rows) == 10
     assert any(row.get('widget') == base + 'op_coop_team_wipe' for row in rows)
     help_top = int(widgets[base + 'coop_options_help'].get('top'))
     for row in rows:

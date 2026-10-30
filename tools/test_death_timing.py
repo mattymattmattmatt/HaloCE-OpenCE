@@ -63,6 +63,7 @@ enum {_game_connection_local,_game_connection_network_client,_game_connection_ne
 static short game_connection(void) {return _game_connection_local;}
 static boolean network_coop_active(void) {return FALSE;}
 static boolean players_respawn_network_coop(boolean starting) {(void)starting;return FALSE;}
+static boolean players_respawn_on_ally(boolean *result) {(void)result;return FALSE;}
 static void players_respawn_at_checkpoint(void) {}
 static boolean players_are_all_dead(void) {return FALSE;}
 static boolean main_coop_host_revert(void) {return FALSE;}
