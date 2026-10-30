@@ -7006,7 +7006,6 @@ static struct gametype_option const gametype_options[] =
 		{ "true", "false" } },
 	/* (the campaign's AI allies and the players' character: coop_allies.c) */
 	{ "coop_allies_spinner", _option_setting, 0, 0, 5, { 0 }, "bots.coop", { "0", "1", "2", "3", "4" } },
-	{ "coop_character_spinner", _option_setting, 0, 0, 2, { 0 }, "game.coop_character", { "chief", "marine" } },
 	/* a multiplayer game's bots (Server Setup's BOTS: tools/port_settings.py's
 	BOTS_SETUP; bots.c) */
 	{ "bots_count_spinner", _option_setting, 0, 0, 16, { 0 }, "bots.count",

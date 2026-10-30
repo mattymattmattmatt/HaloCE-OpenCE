@@ -510,6 +510,9 @@ struct data_array *team_data;
 struct data_array *player_data;
 static long machine_to_player_table[MAXIMUM_NETWORK_MACHINE_COUNT][MAXIMUM_LOCAL_PLAYERS] = { 0 };
 static boolean players_lost_map_started = FALSE;
+/* port: the players all died with a campaign ally alive, so the team was
+not lost (players_respawn_on_ally) */
+static boolean players_dead_on_allies;
 static short over_shield_screen_flash_fade_function = 0;
 static real over_shield_screen_flash_alpha = 0.f;
 static real over_shield_screen_flash_green = 0.f;
@@ -836,6 +839,13 @@ void player_died(
 	{
 		if (other_player->unit_index != NONE)
 			players_globals->all_dead = FALSE;
+	}
+	/* port: not while a campaign ally lives: the dead respawn beside it
+	(players_respawn_on_ally) */
+	if (players_globals->all_dead && coop_allies_alive())
+	{
+		players_globals->all_dead = FALSE;
+		players_dead_on_allies = TRUE;
 	}
 
 	return;
@@ -1456,11 +1466,7 @@ static void player_spawn(
 				}
 				else
 				{
-					/* port: or the level's marine (game.coop_character:
-					port/linux/game/coop_allies.c) */
-					unit_definition_index = coop_character_unit();
-					if (unit_definition_index == NONE)
-						unit_definition_index = player_information->player_unit.index;
+					unit_definition_index = player_information->player_unit.index;
 				}
 
 				object_placement_data_new(
@@ -2420,6 +2426,11 @@ void debug_player_teleport(
 	return;
 }
 
+static boolean players_respawn_on_ally(
+	boolean *result);
+static boolean players_waiting_on_allies(
+	void);
+
 boolean players_respawn_coop(
 	void)
 {
@@ -2431,6 +2442,11 @@ boolean players_respawn_coop(
 	long root_object_index;
 	boolean result;
 	boolean dangerous;
+
+	/* port: nobody alive but a campaign ally: beside the ally
+	(players_respawn_on_ally) */
+	if (players_respawn_on_ally(&result))
+		return result;
 
 	/* port: network co-op checks safety around each teammate instead
 	(players_respawn_network_coop) */
@@ -2977,6 +2993,94 @@ static boolean players_respawn_network_coop(
 		players_coop_state.respawn_wait_since = 0;
 
 	return result;
+}
+
+/* port: a player dead while a campaign ally lives (port/linux/game/
+coop_allies.c) respawns beside it, solo too, by network co-op's rule: an
+ally safe to stand beside (players_coop_unit_safe: on the ground, not under
+attack, no enemy projectile near), else after COOP_RESPAWN_FALLBACK_TICKS
+one on the ground. FALSE (result untouched) when a player lives, or no ally
+does: the usual respawn. */
+static boolean players_respawn_on_ally(
+	boolean *result)
+{
+	struct data_iterator iterator;
+	struct player_datum *player;
+	long anchor_index;
+
+	data_iterator_new(&iterator, player_data);
+	while ((player = data_iterator_next(&iterator)) != NULL)
+	{
+		if (player->unit_index != NONE)
+			return FALSE;
+	}
+	if (coop_allies_respawn_unit(NULL) == NONE)
+		return FALSE;
+	*result = FALSE;
+	if (!players_coop_state.respawn_wait_since)
+		players_coop_state.respawn_wait_since = game_time_get() + 1;
+	if (game_time_get() % COOP_RESPAWN_CHECK_TICKS != 0)
+		return TRUE;
+	anchor_index = coop_allies_respawn_unit(players_coop_unit_safe);
+	if (anchor_index == NONE &&
+		game_time_get() + 1 - players_coop_state.respawn_wait_since >= COOP_RESPAWN_FALLBACK_TICKS)
+	{
+		anchor_index = coop_allies_respawn_unit(players_coop_unit_grounded);
+	}
+	if (anchor_index == NONE)
+		return TRUE;
+	*result = TRUE;
+	data_iterator_new(&iterator, player_data);
+	while ((player = data_iterator_next(&iterator)) != NULL)
+	{
+		if (player->unit_index != NONE || player->quit_out_of_game ||
+			players_coop_waiting_to_start(iterator.datum_index))
+		{
+			continue;
+		}
+		players_coop_spawn_beside_index = anchor_index;
+		player_spawn(iterator.datum_index);
+		players_coop_spawn_beside_index = NONE;
+		if (player->unit_index == NONE)
+			*result = FALSE;
+		else
+			players_coop_respawn_beside(iterator.datum_index, anchor_index);
+	}
+	if (*result)
+	{
+		players_coop_state.respawn_wait_since = 0;
+		error(_error_log, "campaign allies: the dead respawned beside an ally");
+	}
+
+	return TRUE;
+}
+
+/* port: every player dead, one at least waiting to respawn, and no campaign
+ally left to respawn beside */
+static boolean players_waiting_on_allies(
+	void)
+{
+	struct data_iterator iterator;
+	struct player_datum *player;
+	boolean waiting = FALSE;
+
+	if (!players_dead_on_allies)
+		return FALSE;
+	data_iterator_new(&iterator, player_data);
+	while ((player = data_iterator_next(&iterator)) != NULL)
+	{
+		if (player->unit_index != NONE)
+		{
+			players_dead_on_allies = FALSE;
+			return FALSE;
+		}
+		if (!player->quit_out_of_game && player->statistics.deaths != 0)
+			waiting = TRUE;
+	}
+	if (!waiting || coop_allies_alive())
+		return FALSE;
+	players_dead_on_allies = FALSE;
+	return TRUE;
 }
 
 /* What a new player can spawn beside: the player's unit on foot, or the
@@ -4997,6 +5101,14 @@ void players_update_before_game(
 						SET_FLAG(action->control_flags, _unit_control_weapon_reload_bit, TRUE);
 					}
 
+					/* port: the action button held on foot orders the campaign
+					allies (port/linux/game/coop_allies.c): nothing to pick up or
+					enter near (the last tick's look: player_examine_nearby_objects) */
+					coop_allies_order_input(iterator.datum_index,
+						TEST_FLAG(action->control_flags, _unit_control_action_bit) ||
+							TEST_FLAG(action->control_flags, _unit_control_weapon_reload_bit),
+						player->action_result == _player_action_result_reload);
+
 					if (TEST_FLAG(action->control_flags, _unit_control_swap_weapons_bit) &&
 						unit->object.parent_object_index == NONE)
 					{
@@ -5277,6 +5389,14 @@ void players_update_after_game(
 				_local_player_triggered_switch_none;
 			players_globals->bsp_check_recursive_switch_ticks = 0;
 		}
+	}
+
+	/* port: the dead were waiting to respawn beside a campaign ally, and the
+	last ally died: the team is lost, as when the last player dies */
+	if (!players_globals->all_dead && !game_engine_running() && !network_game_distributed_client() &&
+		players_waiting_on_allies())
+	{
+		players_globals->all_dead = TRUE;
 	}
 
 	if (players_globals->all_dead)

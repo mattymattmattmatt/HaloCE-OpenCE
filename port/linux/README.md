@@ -414,9 +414,17 @@ Infection and Gun Game, which are Slayer's: below).
 Campaign allies (`bots.coop`) are the campaign's: Server Setup > CO-OP
 OPTIONS > ALLIES before a co-op game, and the campaign pause menu's ALLIES
 (solo, or a co-op game's host) at any time, which brings them in behind the
-player, or takes the extras away, at once. CO-OP OPTIONS > CO-OP CHARACTER
-(`game.coop_character`) has the players play the level's marine instead of
-the Master Chief, solo too.
+player, or takes the extras away, at once. Their health shows on the HUD as a
+vehicle's passengers' does (the level's vehicles' passenger HUDs, one
+under the other; none on a level with no vehicle that has one). Holding the
+action (reload) button 1.5 seconds on foot, with nothing near to pick up or
+enter, sends them to the ground you aim at (80 m at most): they hold there,
+fighting within 20 m of it, until it is held again, when they follow again.
+A tap still reloads. A player who dies while an ally lives respawns beside
+it, solo too, once the ally is safe (as a network co-op respawn beside a
+teammate; after 10 seconds, beside one on the ground anyway), after the
+respawn button with `game.manual_respawn`; the team is lost (the checkpoint)
+only when the last ally dies too.
 
 `bots.skill` sets six levels, from `"recruit"` (for new players: it reacts
 late, aims loosely and never throws) to `"legendary"`. Each level fights as
@@ -577,7 +585,6 @@ the setting for one start of the game. It has priority over the file.
 | `bots.skill` | `"normal"` | `HALO_BOT_SKILL` | How well the bots play: `"recruit"`, `"easy"`, `"normal"`, `"heroic"`, `"veteran"` or `"legendary"`: how soon they react, how far and how wide they see, how large their aim error is and how fast it settles, how fast they turn, and how they fight. `"easy"`, `"normal"`, `"heroic"` and `"legendary"` keep their numbers; `"recruit"` is below `"easy"`, and `"veteran"` halfway from `"heroic"` to `"legendary"`. Refer to "Bots". |
 | `bots.teams` | `"even"` | `HALO_BOT_TEAMS` | In a team game: `"even"` puts the bots on both teams, evening them with the players; `"against"` puts them all on the team the players are not on. |
 | `bots.coop` | `0` | `HALO_COOP_ALLIES` | Campaign allies: 0 to 4 AI marines (crewmen on a level with no marines; none on a level with neither) who follow the nearest player, fight from within about 10 m of them, and come back beside them when killed, left behind or stuck. Solo, split screen and hosted co-op. CO-OP OPTIONS > ALLIES, and the campaign pause menu's ALLIES (solo, or a co-op host), which takes effect at once. |
-| `game.coop_character` | `"chief"` | `HALO_COOP_CHARACTER` | The players' character in the campaign (Server Setup > CO-OP OPTIONS > CO-OP CHARACTER; solo too): `"chief"`, the Master Chief; `"marine"`, the level's marine (its marines' biped: no shields, and the HUD's health and motion sensor may be missing, as the biped has no HUD of its own). The Chief still on The Pillar of Autumn (its scripts animate him) and on a level with no armed marine. |
 | `paths.data` | `""` | `HALO_DATA_ROOT` | The data root. Refer to "Start the game". |
 | `paths.saves` | `""` | `HALO_SAVE_ROOT` | The save root. Refer to "Files and folders". |
 | `paths.logs` | `""` | `HALO_LOG_ROOT` | The folder of `debug.txt`, `bans.txt` and `cheaters.txt`. Empty: the data root. With it, the data root can be read-only (a dedicated server's maps mounted so). |

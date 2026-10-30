@@ -56,8 +56,18 @@ ally comes back ALLY_RESPAWN_TICKS later, behind a player. Fewer wanted
 #include "units/biped_definitions.h"
 #include "units/bipeds.h"
 #include "units/units.h"
+#include "ai/ai_communication.h"
+#include "interface/hud_messaging.h"
+#include "interface/unit_hud_interface_definition.h"
+#include "physics/collisions.h"
+#include "sound/sound_definitions.h"
+#include "units/dialogue_definitions.h"
+#include "units/unit_definitions.h"
+#include "network_distributed.h"
 #include "coop_allies.h"
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 long config_integer(char const *name);
@@ -82,6 +92,17 @@ enum
 #define ALLY_TELEPORT_DISTANCE 25.f
 #define ALLY_SPAWN_BEHIND 1.5f
 #define ALLY_RETARGET_DISTANCE 1.5f
+/* orders (coop_allies_order_input): the action button held this long, on
+foot with nothing to pick up or enter; the aimed point at most this far;
+held there, an ally walks to within ALLY_HOLD_ARRIVE of it, fights within
+ALLY_HOLD_RANGE of it and stops walking back within ALLY_HOLD_STOP */
+#define ALLY_ORDER_TICKS (3 * TICKS_PER_SECOND / 2)
+#define ALLY_ORDER_REACH 80.f
+#define ALLY_HOLD_ARRIVE 3.f
+#define ALLY_HOLD_RANGE 20.f
+#define ALLY_HOLD_STOP 2.f
+/* the players whose held button is counted (by absolute index) */
+#define ALLY_ORDER_PLAYERS 16
 /* (world units are 10 feet: metres to world units) */
 #define ALLY_METRES(m) ((m) / 3.048f)
 
@@ -105,6 +126,16 @@ static struct
 	short last_count;
 	short last_wanted;
 	boolean logged_variant;
+	boolean logged_voices;
+	/* (the order: hold there, else follow) */
+	boolean holding;
+	long hold_surface;
+	real_point3d hold_point;
+	short order_ticks[ALLY_ORDER_PLAYERS];
+	boolean order_spent[ALLY_ORDER_PLAYERS];
+	/* (HALO_ALLIES_TEST: the button held until this tick, the next step) */
+	long test_hold_until;
+	short test_step;
 	struct coop_ally allies[ALLY_MAXIMUM * 2];
 } coop_allies;
 
@@ -165,6 +196,109 @@ static long allies_on_foot(long unit_index)
 static boolean allies_quiet(void)
 {
 	return cinematic_in_progress() || !player_input_enabled();
+}
+
+/* tells the players (a local one on the HUD, a client's by a notice) */
+static void allies_tell(char const *text)
+{
+	struct data_iterator iterator;
+	struct player_datum *player;
+	wchar_t wide[128];
+	long index;
+
+	for (index = 0; text[index] && index < (long)NUMBEROF(wide) - 1; index++)
+		wide[index] = (wchar_t)(unsigned char)text[index];
+	wide[index] = 0;
+	data_iterator_new(&iterator, player_data);
+	while ((player = data_iterator_next(&iterator)) != NULL)
+	{
+		if (player->local_player_index != NONE)
+			hud_print_message(player->local_player_index, wide);
+		else if (global_network_game_server_get())
+		{
+			long machine_index = distributed_player_machine((short)DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index));
+
+			if (machine_index != NONE)
+				distributed_send_notice_to_machine(machine_index, text);
+		}
+	}
+}
+
+/* the first of the vocalizations (dialogue_definitions.c's names) the
+unit's dialogue has a sound for, said now; FALSE if none */
+static boolean allies_say(long unit_index, char const *const *names, short count)
+{
+	short index;
+
+	for (index = 0; index < count; index++)
+	{
+		short vocalization_type = dialogue_get_vocalization_type_by_name(names[index]);
+		long sound_definition_index = NONE;
+		short play_type;
+
+		if (vocalization_type == NONE)
+			continue;
+		play_type = unit_test_speech(unit_index, _unit_speech_scripted, FALSE, TRUE, NULL, &vocalization_type,
+			&sound_definition_index);
+		if (play_type > 0 && sound_definition_index != NONE)
+		{
+			struct unit_speech_item speech_item;
+
+			csmemset(&speech_item, 0, sizeof(speech_item));
+			speech_item.vocalization_type = vocalization_type;
+			speech_item.sound_definition_index = sound_definition_index;
+			speech_item.priority = _unit_speech_scripted;
+			ai_communication_packet_new(&speech_item.ai);
+			unit_speak(unit_index, play_type, &speech_item);
+			platform_log("campaign allies: said \"%s\" (%s)", names[index], tag_get_name(sound_definition_index));
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+/* once a level, the sounds of the vocalizations an order could use
+(halo.log): their tags and the permutations' names */
+static void allies_log_voices(long unit_index)
+{
+	static char const *const names[] =
+	{
+		"advance", "advance re", "retreat", "retreat re", "cover", "sighted friend player",
+	};
+	struct unit_datum *unit = unit_get(unit_index);
+	short index;
+
+	for (index = 0; index < (short)NUMBEROF(names); index++)
+	{
+		short vocalization_type = dialogue_get_vocalization_type_by_name(names[index]);
+		long sound_definition_index = NONE;
+		char permutations[256] = "";
+
+		if (vocalization_type == NONE || unit->unit.dialogue_index == NONE)
+			continue;
+		unit_test_speech(unit_index, _unit_speech_none, FALSE, FALSE, NULL, &vocalization_type, &sound_definition_index);
+		if (sound_definition_index != NONE)
+		{
+			struct sound_definition *sound = sound_definition_get(sound_definition_index);
+
+			if (sound->pitch_ranges.count > 0)
+			{
+				struct sound_pitch_range *range = TAG_BLOCK_GET_ELEMENT(&sound->pitch_ranges, 0, struct sound_pitch_range);
+				short permutation;
+
+				for (permutation = 0; permutation < range->permutations.count && permutation < 12; permutation++)
+				{
+					struct sound_permutation *entry =
+						TAG_BLOCK_GET_ELEMENT(&range->permutations, permutation, struct sound_permutation);
+					size_t used = strlen(permutations);
+
+					snprintf(permutations + used, sizeof(permutations) - used, "%s%.31s", used ? ", " : "", entry->name);
+				}
+			}
+		}
+		platform_log("campaign allies: voice \"%s\": %s [%s]", names[index],
+			sound_definition_index == NONE ? "none" : tag_get_name(sound_definition_index), permutations);
+	}
 }
 
 /* the level's marines' variant, armed, on foot; else its crewmen's */
@@ -310,6 +444,60 @@ static void allies_spawn(long player_unit_index)
 		actor->meta.force_active = TRUE;
 		platform_log("campaign allies: one joined %s (%d wanted)",
 			behind ? "behind the player" : "where the player stands (no clear room behind)", allies_wanted());
+		if (!coop_allies.logged_voices)
+		{
+			coop_allies.logged_voices = TRUE;
+			allies_tell("A Marine ally joined you. Hold the action button to send the allies where you aim");
+			allies_log_voices(actor->meta.unit_index);
+		}
+		else
+			allies_tell("A Marine ally joined you");
+	}
+}
+
+/* HALO_ALLIES_TEST (automated tests, no person playing): "order:<s>" holds
+the first player's action button 2 seconds from that second of game time
+(an order, as a person's hold), "kill:<s>" kills that player; separated by
+commas, in order */
+static void allies_test(long now)
+{
+	char const *script = getenv("HALO_ALLIES_TEST");
+	char step[32];
+	short index;
+	long seconds;
+	struct data_iterator iterator;
+	struct player_datum *player;
+
+	if (!script || !*script)
+		return;
+	for (index = 0; index <= coop_allies.test_step; index++)
+	{
+		size_t length = strcspn(script, ",");
+
+		if (!length)
+			return;
+		if (index == coop_allies.test_step)
+		{
+			snprintf(step, sizeof(step), "%.*s", (int)MIN(length, sizeof(step) - 1), script);
+			break;
+		}
+		script += length + (script[length] == ',');
+	}
+	seconds = atol(strchr(step, ':') ? strchr(step, ':') + 1 : step);
+	if (now < seconds * TICKS_PER_SECOND)
+		return;
+	coop_allies.test_step++;
+	if (!strncmp(step, "order", 5))
+	{
+		coop_allies.test_hold_until = now + 2 * TICKS_PER_SECOND;
+		platform_log("campaign allies: test: holding the action button");
+		return;
+	}
+	data_iterator_new(&iterator, player_data);
+	if ((player = data_iterator_next(&iterator)) != NULL && player->unit_index != NONE)
+	{
+		platform_log("campaign allies: test: killing the player");
+		unit_kill(player->unit_index);
 	}
 }
 
@@ -327,6 +515,7 @@ void coop_allies_update(void)
 	coop_allies.last_tick = now;
 	if (!allies_running())
 		return;
+	allies_test(now);
 
 	wanted = allies_wanted();
 	/* (more wanted, as the pause menu's ALLIES asks: at once) */
@@ -361,8 +550,28 @@ void coop_allies_update(void)
 			nearest = MIN(nearest, distance);
 			farthest = MAX(farthest, distance);
 		}
-		platform_log("campaign allies: %d with the players, %.1f to %.1f m from the nearest", count,
-			nearest / ALLY_METRES(1.f), farthest / ALLY_METRES(1.f));
+		if (coop_allies.holding)
+		{
+			real hold_nearest = REAL_MAX, hold_farthest = 0.f;
+
+			data_iterator_new(&iterator, actor_data);
+			while ((actor = data_iterator_next(&iterator)) != NULL)
+			{
+				real distance;
+
+				if (!ally_actor(actor) || actor->meta.erase_next_tick)
+					continue;
+				distance = distance3d(&object_get(actor->meta.unit_index)->object.position, &coop_allies.hold_point);
+				hold_nearest = MIN(hold_nearest, distance);
+				hold_farthest = MAX(hold_farthest, distance);
+			}
+			platform_log("campaign allies: %d holding, %.1f to %.1f m from the held point (%.1f to %.1f m from the "
+				"nearest player)", count, hold_nearest / ALLY_METRES(1.f), hold_farthest / ALLY_METRES(1.f),
+				nearest / ALLY_METRES(1.f), farthest / ALLY_METRES(1.f));
+		}
+		else
+			platform_log("campaign allies: %d with the players, %.1f to %.1f m from the nearest", count,
+				nearest / ALLY_METRES(1.f), farthest / ALLY_METRES(1.f));
 	}
 	if (count < coop_allies.last_count)
 		coop_allies.next_spawn_time = MAX(coop_allies.next_spawn_time, now + ALLY_RESPAWN_TICKS);
@@ -401,12 +610,29 @@ void coop_allies_leash(long actor_index)
 	if (object_get_ultimate_parent(actor->meta.unit_index) != actor->meta.unit_index)
 		return;
 	player_unit_index = allies_nearest_player(&actor->input.position.body_position, &distance);
-	if (allies_on_foot(player_unit_index) == NONE)
+	if (!coop_allies.holding && allies_on_foot(player_unit_index) == NONE)
 		return;
 	ally = allies_slot(actor_index);
 	if (!ally)
 		return;
 	now = game_time_get();
+	fighting = actor->state.action == _actor_action_fight || actor->state.action == _actor_action_uncover ||
+		actor->state.action == _actor_action_avoid || actor->state.action == _actor_action_flee;
+
+	/* (told to hold a place: there, fighting within ALLY_HOLD_RANGE of it,
+	whoever is near; no bringing back beside the players) */
+	if (coop_allies.holding)
+	{
+		real from_point = distance3d(&actor->input.position.body_position, &coop_allies.hold_point);
+
+		if (!ally->returning && from_point > ALLY_METRES(fighting ? ALLY_HOLD_RANGE : ALLY_HOLD_ARRIVE))
+			ally->returning = TRUE;
+		if (ally->returning && from_point < ALLY_METRES(ALLY_HOLD_STOP))
+			ally->returning = FALSE;
+		if (ally->returning)
+			actor_move_to_point(actor_index, &coop_allies.hold_point, coop_allies.hold_surface, NONE);
+		return;
+	}
 
 	/* (a place beside them tried at most once a second) */
 	if (now >= ally->teleport_time && (distance > ALLY_METRES(ALLY_TELEPORT_DISTANCE) ||
@@ -423,8 +649,6 @@ void coop_allies_leash(long actor_index)
 		ally->best_time = now;
 	}
 
-	fighting = actor->state.action == _actor_action_fight || actor->state.action == _actor_action_uncover ||
-		actor->state.action == _actor_action_avoid || actor->state.action == _actor_action_flee;
 	leash = fighting ? ALLY_LEASH_COMBAT : ALLY_LEASH_FOLLOW;
 	if (!ally->returning && distance > ALLY_METRES(leash))
 	{
@@ -461,30 +685,224 @@ void coop_allies_leash(long actor_index)
 	actor_move_to_point(actor_index, &ally->destination, ally->surface_index, NONE);
 }
 
-/* the players' unit in the campaign (game.coop_character): the level's
-marines' biped for "marine", else NONE (the Chief, the globals'). Not on The
-Pillar of Autumn, whose scripts animate the Chief's own biped (the cryo bay,
-Keyes' bridge) */
-long coop_character_unit(void)
+/* the living allies' units, on foot or riding */
+static short allies_units(long *unit_indices, short maximum)
 {
-	char const *map;
-	long variant;
+	struct data_iterator iterator;
+	struct actor_datum *actor;
+	short count = 0;
 
-	if (game_engine_running() || strcmp(config_string("game.coop_character"), "marine"))
-		return NONE;
-	map = global_scenario_index != NONE ? tag_get_name(global_scenario_index) : NULL;
-	if (map && strstr(map, "a10"))
+	if (!actor_data || !allies_running())
+		return 0;
+	data_iterator_new(&iterator, actor_data);
+	while ((actor = data_iterator_next(&iterator)) != NULL && count < maximum)
 	{
-		platform_log("co-op character: the Master Chief on The Pillar of Autumn (its scripts animate him)");
-		return NONE;
+		struct unit_datum *unit;
+
+		if (!ally_actor(actor) || actor->meta.erase_next_tick)
+			continue;
+		unit = unit_try_and_get(actor->meta.unit_index);
+		if (!unit || TEST_FLAG(unit->object.damage_flags, _object_dead_bit))
+			continue;
+		unit_indices[count++] = actor->meta.unit_index;
 	}
-	variant = allies_variant();
-	if (variant == NONE)
+	return count;
+}
+
+/* where the player aims: the structure hit within ALLY_ORDER_REACH, else
+(a wall, a slope) the ground just in front of it */
+static boolean allies_order_target(long unit_index, real_point3d *point, long *surface_index)
+{
+	unsigned long const flags = FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit);
+	struct unit_datum *unit = unit_get(unit_index);
+	real_point3d origin, above;
+	real_vector3d ray, down;
+	struct collision_result hit;
+
+	unit_get_camera_position(unit_index, &origin);
+	scale_vector3d(&unit->unit.aiming_vector, ALLY_METRES(ALLY_ORDER_REACH), &ray);
+	if (!collision_test_vector(flags, &origin, &ray, unit_index, &hit))
+		return FALSE;
+	if (hit.plane.n.k < 0.6f)
 	{
-		platform_log("co-op character: no armed marine on this level: the Master Chief");
-		return NONE;
+		point_from_line3d(&hit.point, &unit->unit.aiming_vector, -ALLY_METRES(0.75f), &above);
+		down.i = down.j = 0.f;
+		down.k = -ALLY_METRES(8.f);
+		if (!collision_test_vector(flags, &above, &down, unit_index, &hit) || hit.plane.n.k < 0.6f)
+			return FALSE;
 	}
-	platform_log("co-op character: a player spawns as %s",
-		tag_get_name(actor_variant_definition_get(variant)->unit_reference.index));
-	return actor_variant_definition_get(variant)->unit_reference.index;
+	*point = hit.point;
+	*surface_index = hit.surface_index;
+	return hit.surface_index != NONE;
+}
+
+/* the order given: hold the aimed point, or (holding) follow again */
+static void allies_order(long unit_index)
+{
+	static char const *const go[] = { "advance", "cover" };
+	static char const *const regroup[] = { "advance re", "retreat", "sighted friend player" };
+	long units[ALLY_MAXIMUM * 2];
+	short count = allies_units(units, (short)NUMBEROF(units)), index;
+
+	if (coop_allies.holding)
+	{
+		coop_allies.holding = FALSE;
+		for (index = 0; index < NUMBEROF(coop_allies.allies); index++)
+			coop_allies.allies[index].returning = FALSE;
+		platform_log("campaign allies: ordered to regroup (%d)", count);
+		allies_tell("Allies: regrouping on you");
+		allies_say(units[0], regroup, (short)NUMBEROF(regroup));
+		return;
+	}
+	if (!allies_order_target(unit_index, &coop_allies.hold_point, &coop_allies.hold_surface))
+	{
+		platform_log("campaign allies: ordered, but no ground where the player aims");
+		allies_tell("Allies: no ground to hold there");
+		return;
+	}
+	coop_allies.holding = TRUE;
+	for (index = 0; index < NUMBEROF(coop_allies.allies); index++)
+		coop_allies.allies[index].returning = FALSE;
+	platform_log("campaign allies: ordered to hold %.1f m away (%d)",
+		distance3d(&object_get(unit_index)->object.position, &coop_allies.hold_point) / ALLY_METRES(1.f), count);
+	allies_tell("Allies: moving up to hold there (hold the action button again to regroup)");
+	allies_say(units[0], go, (short)NUMBEROF(go));
+}
+
+void coop_allies_order_input(long player_index, boolean held, boolean nothing_near)
+{
+	short slot = (short)DATUM_INDEX_TO_ABSOLUTE_INDEX(player_index);
+	long unit_index, units[1];
+
+	if (slot < 0 || slot >= ALLY_ORDER_PLAYERS)
+		return;
+	if (game_time_get() < coop_allies.test_hold_until)
+		held = TRUE;
+	if (!held)
+	{
+		coop_allies.order_ticks[slot] = 0;
+		coop_allies.order_spent[slot] = FALSE;
+		return;
+	}
+	if (coop_allies.order_spent[slot])
+		return;
+	unit_index = player_get(player_index)->unit_index;
+	/* (a hold that began beside a weapon or a vehicle is theirs) */
+	if (!nothing_near || allies_on_foot(unit_index) == NONE || !allies_units(units, 1))
+	{
+		coop_allies.order_spent[slot] = TRUE;
+		return;
+	}
+	if (++coop_allies.order_ticks[slot] < ALLY_ORDER_TICKS)
+		return;
+	coop_allies.order_spent[slot] = TRUE;
+	allies_order(unit_index);
+}
+
+boolean coop_allies_alive(void)
+{
+	long units[1];
+
+	return allies_wanted() > 0 && allies_units(units, 1) > 0;
+}
+
+long coop_allies_respawn_unit(boolean (*test)(long unit_index))
+{
+	long units[ALLY_MAXIMUM * 2];
+	short count = allies_units(units, (short)NUMBEROF(units)), index;
+
+	for (index = 0; index < count; index++)
+	{
+		if (allies_on_foot(units[index]) != NONE && (!test || test(units[index])))
+			return units[index];
+	}
+	return NONE;
+}
+
+/* the vehicles' passengers' HUDs of the level (a seat not the driver's with
+a health meter), up to ALLY_MAXIMUM different ones */
+static short allies_seat_huds(boolean multiplayer, long *hud_indices)
+{
+	struct scenario *scenario = global_scenario_get();
+	short count = 0, entry;
+
+	for (entry = 0; entry < scenario->vehicle_palette.count && count < ALLY_MAXIMUM; entry++)
+	{
+		struct scenario_object_palette_entry *palette =
+			TAG_BLOCK_GET_ELEMENT(&scenario->vehicle_palette, entry, struct scenario_object_palette_entry);
+		struct unit_definition *definition;
+		short seat;
+
+		if (palette->reference.index == NONE)
+			continue;
+		definition = unit_definition_get(palette->reference.index);
+		for (seat = 0; seat < definition->unit.seats.count && count < ALLY_MAXIMUM; seat++)
+		{
+			struct unit_seat *seat_definition = TAG_BLOCK_GET_ELEMENT(&definition->unit.seats, seat, struct unit_seat);
+			long hud_index;
+			short other;
+
+			if (TEST_FLAG(seat_definition->flags, _unit_seat_driver_bit) || seat_definition->seat_huds.count <= 0)
+				continue;
+			hud_index = unit_definition_get_seat_active_hud_index(definition, seat, multiplayer);
+			if (hud_index == NONE ||
+				unit_hud_interface_definition_get(hud_index)->health_meter.meter.meter_bitmap.index == NONE)
+				continue;
+			for (other = 0; other < count && hud_indices[other] != hud_index; other++)
+				;
+			if (other == count)
+				hud_indices[count++] = hud_index;
+		}
+	}
+	return count;
+}
+
+static void allies_hud_shift(struct hud_placement_definition *placement, short x, short y)
+{
+	placement->offset.x = (short)(placement->offset.x + x);
+	placement->offset.y = (short)(placement->offset.y + y);
+}
+
+short coop_allies_hud_units(boolean multiplayer, long *unit_indices, long *hud_indices,
+	struct unit_hud_interface_definition **definitions, short maximum)
+{
+	static struct unit_hud_interface_definition copies[ALLY_MAXIMUM];
+	long seat_huds[ALLY_MAXIMUM];
+	short seat_count, count, index, step_x = 0, step_y = 20;
+
+	count = allies_units(unit_indices, (short)MIN(maximum, ALLY_MAXIMUM));
+	if (!count || !(seat_count = allies_seat_huds(multiplayer, seat_huds)))
+		return 0;
+	/* (the seats' HUDs as they are, then again past them, as far apart as
+	the first two are) */
+	if (seat_count > 1)
+	{
+		struct meter_hud_element_definition const *first =
+			&unit_hud_interface_definition_get(seat_huds[0])->health_meter.meter;
+		struct meter_hud_element_definition const *second =
+			&unit_hud_interface_definition_get(seat_huds[1])->health_meter.meter;
+
+		if (first->placement.offset.x != second->placement.offset.x ||
+			first->placement.offset.y != second->placement.offset.y)
+		{
+			step_x = (short)(second->placement.offset.x - first->placement.offset.x);
+			step_y = (short)(second->placement.offset.y - first->placement.offset.y);
+		}
+	}
+	for (index = 0; index < count; index++)
+	{
+		short round = (short)(index / seat_count);
+		short x = (short)(round * seat_count * step_x), y = (short)(round * seat_count * step_y);
+		struct unit_hud_interface_definition *copy = &copies[index];
+
+		*copy = *unit_hud_interface_definition_get(seat_huds[index % seat_count]);
+		allies_hud_shift(&copy->background.placement, x, y);
+		allies_hud_shift(&copy->shield_meter.background.placement, x, y);
+		allies_hud_shift(&copy->shield_meter.meter.placement, x, y);
+		allies_hud_shift(&copy->health_meter.background.placement, x, y);
+		allies_hud_shift(&copy->health_meter.meter.placement, x, y);
+		hud_indices[index] = seat_huds[index % seat_count];
+		definitions[index] = copy;
+	}
+	return count;
 }

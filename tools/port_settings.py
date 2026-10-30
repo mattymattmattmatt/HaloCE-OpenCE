@@ -1729,11 +1729,6 @@ COOP_SETUP_SCREENS = [
         ("coop_allies", "ALLIES:", ["NONE", "1", "2", "3", "4"],
          ["No AI allies: only the players fight."] +
          ["AI marines who follow the nearest player, fight\\nbeside them and come back behind them."] * 4),
-        # (game.coop_character: coop_allies.c's coop_character_unit)
-        ("coop_character", "CO-OP CHARACTER:", ["MASTER CHIEF", "MARINE"], [
-            "Every player plays as the Master Chief, as in\\nthe campaign.",
-            "Every player plays as one of the level's marines\\n(the Chief where it has none, or on Pillar of Autumn).",
-        ]),
     ]),
     ("voice_options", "VOICE AND VOTING", "Voice chat, text chat and votes to kick a player,\\nfor this game.",
      TEAMPLAY_ROWS),
