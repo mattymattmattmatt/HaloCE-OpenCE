@@ -97,6 +97,7 @@ their handlers open opens.
 #include "../src/player_link.h" /* port: port/linux/src/player_link.c */
 #include "../src/server_master.h"
 #include "text_filter.h"
+#include "coop_allies.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -416,6 +417,10 @@ static boolean setting_write(char const *name, char const *value)
 {
 	short index;
 
+	/* (ALLIES chosen here holds for the next level's start: coop_allies.c) */
+	if (!strcmp(name, "bots.coop"))
+		coop_allies_arm();
+
 	/* (DISCORD ACCOUNT's LINK: done, not written: the master's page opened
 	in the browser, or the account forgotten, player_link.c) */
 	if (!strcmp(name, "link.action"))
@@ -474,6 +479,8 @@ static boolean setting_save(struct widget_instance *widget)
 		return FALSE;
 	if (widget->parameters.list.selected_index == setting->loaded_index)
 		return TRUE;
+	if (!strcmp(setting->setting, "bots.coop"))
+		coop_allies_arm();
 	if (!config_write(setting->setting, setting->values[widget->parameters.list.selected_index]))
 	{
 		platform_log("menus: could not write %s to config.toml", setting->setting);
@@ -5763,6 +5770,7 @@ static boolean campaign_allies_change(void)
 
 	count = count < 0 || count >= 4 ? 0 : count + 1;
 	snprintf(value, sizeof(value), "%ld", count);
+	coop_allies_arm();
 	if (!config_write("bots.coop", value))
 		platform_log("menus: could not write bots.coop to config.toml");
 	ui_play_audio_feedback_sound(SOUND_FORWARD);

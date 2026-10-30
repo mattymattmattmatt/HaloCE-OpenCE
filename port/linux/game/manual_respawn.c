@@ -56,6 +56,9 @@ void halo_input_shown_name(char const *binding, char *shown, unsigned int size);
 /* port_config.c */
 double config_real(const char *name);
 
+/* players.c: every player dead with a campaign ally to respawn beside
+(*pending), and whether one is safe to respawn beside now */
+boolean players_respawn_ally_ready(boolean *pending);
 /* director.c */
 extern long director_port_dead_cameras;
 char const *director_port_camera_name(short local_player_index);
@@ -71,6 +74,8 @@ static long manual_respawn_test_down = 0;
 
 /* waiting for the press (main.c asked, the setting on, the delay over) */
 static boolean manual_respawn_waiting_now = FALSE;
+/* waiting for an ally to be safe to respawn beside: no press taken yet */
+static boolean manual_respawn_unsafe = FALSE;
 /* the last frame main.c asked: a frame it did not ask in ends the wait */
 static unsigned long manual_respawn_asked_frame = 0;
 static unsigned long manual_respawn_frame = 0;
@@ -182,6 +187,22 @@ boolean manual_respawn_hold(
 		platform_log("manual respawn: waiting for the jump button (tick %ld)", (long)game_time_get());
 		return TRUE;
 	}
+	/* (a respawn beside a campaign ally: not until one is safe, the press
+	not taken before) */
+	{
+		boolean pending = FALSE;
+		boolean ready = players_respawn_ally_ready(&pending);
+
+		if (manual_respawn_unsafe != (pending && !ready))
+			platform_log("manual respawn: %s (tick %ld)", pending && !ready ? "waiting for a safe ally" :
+				"an ally is safe", (long)game_time_get());
+		manual_respawn_unsafe = pending && !ready;
+		if (manual_respawn_unsafe)
+		{
+			manual_respawn_pressed(TRUE);
+			return TRUE;
+		}
+	}
 	/* (not through the pause menu) */
 	if (game_time_get_paused())
 	{
@@ -226,6 +247,13 @@ void manual_respawn_draw(
 	{
 		return;
 	}
+	if (manual_respawn_unsafe)
+	{
+		(void)key;
+		usnprintf(text, NUMBEROF(text) - 1, L"WAITING FOR A SAFE SPOT TO RESPAWN");
+	}
+	else
+	{
 #ifdef HALO_ANDROID
 	(void)key;
 	usnprintf(text, NUMBEROF(text) - 1, L"TAP OR PRESS A TO RESPAWN");
@@ -263,6 +291,7 @@ void manual_respawn_draw(
 			usnprintf(text, NUMBEROF(text) - 1, L"PRESS A TO RESPAWN");
 	}
 #endif
+	}
 	text[NUMBEROF(text) - 1] = 0;
 	font = font_definition_get(font_index);
 	height = (short)(font->ascending_height + font->descending_height);
