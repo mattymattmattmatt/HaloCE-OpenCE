@@ -111,6 +111,7 @@ void event_manager_post_button(short controller_index, short button_index);
 int config_text(char const *name, char *text, unsigned int size);
 int config_write(char const *name, char const *value);
 int config_boolean(char const *name);
+long config_integer(char const *name);
 int config_default(char const *name, char *text, unsigned int size);
 char const *config_string(char const *name);
 void platform_display_apply(void);
@@ -3717,6 +3718,8 @@ VOTING), PASSWORD's and MAP SHARING's (its help_strings, tools/port_settings.py)
 #define MAP_SHARE_OPTIONS_HELP 15
 /* (LISTING's PUBLIC on a machine with a publisher key: server_master.c) */
 #define SERVER_LISTING_PUBLISHER_HELP 16
+/* (BOTS's, a multiplayer game's: bots.c) */
+#define BOT_OPTIONS_HELP 17
 
 /* whether this machine has a publisher key (read as Server Setup opens) */
 static boolean server_settings_publisher;
@@ -3861,6 +3864,8 @@ static void server_settings_update(struct widget_instance *list)
 
 			visible_set(named(list, "op_coop_options", 0), cooperative);
 			visible_set(named(list, "op_voice_options", 0), cooperative);
+			/* (BOTS, a multiplayer game's: bots.c; co-op has its ALLIES) */
+			visible_set(named(list, "op_bot_options", 0), !cooperative);
 			if (help && list->focused_child == named(list, "op_coop_options", 0))
 				help->parameters.text_box.string_list_index = COOPERATIVE_OPTIONS_HELP;
 			else if (help && list->focused_child == named(list, "op_voice_options", 0))
@@ -3868,6 +3873,8 @@ static void server_settings_update(struct widget_instance *list)
 			/* (MAP SHARING's, any game's: map_share.c) */
 			else if (help && list->focused_child == named(list, "op_map_share_options", 0))
 				help->parameters.text_box.string_list_index = MAP_SHARE_OPTIONS_HELP;
+			else if (help && list->focused_child == named(list, "op_bot_options", 0))
+				help->parameters.text_box.string_list_index = BOT_OPTIONS_HELP;
 		}
 	}
 	/* LISTING (an internet game's): PUBLIC, listed in everyone's server
@@ -5745,6 +5752,31 @@ static void coop_friendly_fire_text(struct widget_instance *button)
 	button->parameters.text_box.string_list_index = config_boolean("network.coop_own_friendly_fire") ? 0 : 1;
 }
 
+/* "port campaign allies" (the campaign pause menu's ALLIES, menu_tags.c):
+the next count of campaign allies (bots.coop: NONE, 1 to 4, then NONE
+again), from now on: port/linux/game/coop_allies.c brings one in behind the
+player, or lets one go, at its next tick */
+static boolean campaign_allies_change(void)
+{
+	long count = config_integer("bots.coop");
+	char value[8];
+
+	count = count < 0 || count >= 4 ? 0 : count + 1;
+	snprintf(value, sizeof(value), "%ld", count);
+	if (!config_write("bots.coop", value))
+		platform_log("menus: could not write bots.coop to config.toml");
+	ui_play_audio_feedback_sound(SOUND_FORWARD);
+	return TRUE;
+}
+
+/* "port campaign allies text": the button's text, ALLIES: NONE to 4 */
+static void campaign_allies_text(struct widget_instance *button)
+{
+	long count = config_integer("bots.coop");
+
+	button->parameters.text_box.string_list_index = (short)(count < 0 ? 0 : count > 4 ? 4 : count);
+}
+
 /* ---- the lobby: the game's players (up to the port's 128), its map and
 gametype, the countdown */
 
@@ -6972,6 +7004,16 @@ static struct gametype_option const gametype_options[] =
 		{ "true", "false" } },
 	{ "coop_ally_friendly_fire_spinner", _option_setting, 0, 0, 2, { 0 }, "network.coop_ally_friendly_fire",
 		{ "true", "false" } },
+	/* (the campaign's AI allies and the players' character: coop_allies.c) */
+	{ "coop_allies_spinner", _option_setting, 0, 0, 5, { 0 }, "bots.coop", { "0", "1", "2", "3", "4" } },
+	{ "coop_character_spinner", _option_setting, 0, 0, 2, { 0 }, "game.coop_character", { "chief", "marine" } },
+	/* a multiplayer game's bots (Server Setup's BOTS: tools/port_settings.py's
+	BOTS_SETUP; bots.c) */
+	{ "bots_count_spinner", _option_setting, 0, 0, 16, { 0 }, "bots.count",
+		{ "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15" } },
+	{ "bots_skill_spinner", _option_setting, 0, 0, 6, { 0 }, "bots.skill",
+		{ "recruit", "easy", "normal", "heroic", "veteran", "legendary" } },
+	{ "bots_teams_spinner", _option_setting, 0, 0, 2, { 0 }, "bots.teams", { "even", "against" } },
 	/* map sharing's (Server Setup's MAP SHARING: tools/port_settings.py's
 	MAP_SHARE_SETUP; map_share.c) */
 	{ "map_share_spinner", _option_setting, 0, 0, 2, { 0 }, "network.map_share", { "true", "false" } },
@@ -7856,6 +7898,10 @@ boolean pc_menu_event_function_invoke(
 		{
 			return coop_friendly_fire_change();
 		}
+		else if (!strcmp(name, "port campaign allies"))
+		{
+			return campaign_allies_change();
+		}
 		else if (!strcmp(name, "player profile save changes"))
 		{
 			return profile_save_changes(widget, widget_deleted);
@@ -8224,6 +8270,8 @@ void pc_menu_game_data_function_invoke(
 		profile_gamepad_layout(widget);
 	else if (!strcmp(name, "port coop friendly fire text"))
 		coop_friendly_fire_text(widget);
+	else if (!strcmp(name, "port campaign allies text"))
+		campaign_allies_text(widget);
 	else if (!strcmp(name, "port playlist edit desc"))
 		playlist_edit_description(widget);
 }

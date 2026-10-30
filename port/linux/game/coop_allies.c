@@ -52,12 +52,16 @@ ally comes back ALLY_RESPAWN_TICKS later, behind a player. Fewer wanted
 #include "objects/objects.h"
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
+#include "tag_files/tag_files.h"
 #include "units/biped_definitions.h"
 #include "units/bipeds.h"
 #include "units/units.h"
 #include "coop_allies.h"
 
+#include <string.h>
+
 long config_integer(char const *name);
+char const *config_string(char const *name);
 void platform_log(char const *format, ...);
 
 enum
@@ -96,7 +100,10 @@ static struct
 {
 	long last_tick;
 	long next_spawn_time;
+	long next_log_time;
 	short last_count;
+	short last_wanted;
+	boolean logged_variant;
 	struct coop_ally allies[ALLY_MAXIMUM * 2];
 } coop_allies;
 
@@ -241,12 +248,29 @@ static void allies_reset(void)
 	coop_allies.next_spawn_time = ALLY_LEVEL_START_TICKS;
 }
 
+/* once a while, what holds the allies back (halo.log) */
+static void allies_note(char const *why)
+{
+	long now = game_time_get();
+
+	if (now < coop_allies.next_log_time)
+		return;
+	coop_allies.next_log_time = now + 10 * TICKS_PER_SECOND;
+	platform_log("campaign allies: %s", why);
+}
+
 static void allies_spawn(long player_unit_index)
 {
 	long variant = allies_variant();
 	struct actor_starting_location location;
 	long actor_index;
 
+	if (!coop_allies.logged_variant)
+	{
+		coop_allies.logged_variant = TRUE;
+		platform_log("campaign allies: %s", variant == NONE ? "this level has no armed marine or crewman to be them" :
+			tag_get_name(variant));
+	}
 	if (variant == NONE)
 		return;
 	csmemset(&location, 0, sizeof(location));
@@ -259,16 +283,29 @@ static void allies_spawn(long player_unit_index)
 	location.command_list_index = NONE;
 	actor_index = actor_place(variant, NONE, NONE, &location, FALSE, 0);
 	if (actor_index == NONE)
+	{
+		allies_note("the game made no actor (the pool full?)");
 		return;
+	}
 	{
 		struct actor_datum *actor = actor_get(actor_index);
 
-		if (!ally_actor(actor) || !allies_bring_back(actor->meta.unit_index, player_unit_index))
+		if (!ally_actor(actor))
 		{
+			allies_note("the actor made is not one of ours");
+			actor_erase(actor_index, TRUE);
+			return;
+		}
+		/* (the place behind the player, else where it stands if it has room) */
+		if (!allies_bring_back(actor->meta.unit_index, player_unit_index) &&
+			!biped_fix_position(actor->meta.unit_index, NONE, &location.position, NULL, 2.f, FALSE, FALSE, TRUE))
+		{
+			allies_note("no room behind the player");
 			actor_erase(actor_index, TRUE);
 			return;
 		}
 		actor->meta.force_active = TRUE;
+		platform_log("campaign allies: one joined behind the player (%d wanted)", allies_wanted());
 	}
 }
 
@@ -288,6 +325,10 @@ void coop_allies_update(void)
 		return;
 
 	wanted = allies_wanted();
+	/* (more wanted, as the pause menu's ALLIES asks: at once) */
+	if (wanted > coop_allies.last_wanted)
+		coop_allies.next_spawn_time = MIN(coop_allies.next_spawn_time, MAX(now, ALLY_LEVEL_START_TICKS));
+	coop_allies.last_wanted = wanted;
 	data_iterator_new(&iterator, actor_data);
 	while ((actor = data_iterator_next(&iterator)) != NULL)
 	{
@@ -302,13 +343,21 @@ void coop_allies_update(void)
 	if (count < coop_allies.last_count)
 		coop_allies.next_spawn_time = MAX(coop_allies.next_spawn_time, now + ALLY_RESPAWN_TICKS);
 	coop_allies.last_count = count;
-	if (count >= wanted || now < coop_allies.next_spawn_time || allies_quiet())
+	if (count >= wanted || now < coop_allies.next_spawn_time)
 		return;
+	if (allies_quiet())
+	{
+		allies_note(cinematic_in_progress() ? "waiting for the cutscene to end" : "waiting for the players' controls");
+		return;
+	}
 
 	/* one at a time, behind the first player on foot */
 	player_unit_index = allies_on_foot(allies_nearest_player(NULL, NULL));
 	if (player_unit_index == NONE)
+	{
+		allies_note("waiting for a player on foot");
 		return;
+	}
 	allies_spawn(player_unit_index);
 	coop_allies.next_spawn_time = now + ALLY_RETRY_TICKS / 4;
 	coop_allies.last_count = count;
@@ -386,4 +435,22 @@ void coop_allies_leash(long actor_index)
 		ally->destination = point;
 	}
 	actor_move_to_point(actor_index, &ally->destination, ally->surface_index, NONE);
+}
+
+/* the players' unit in the campaign (game.coop_character): the level's
+marines' biped for "marine", else NONE (the Chief, the globals'). Not on The
+Pillar of Autumn, whose scripts animate the Chief's own biped (the cryo bay,
+Keyes' bridge) */
+long coop_character_unit(void)
+{
+	char const *map;
+	long variant;
+
+	if (game_engine_running() || strcmp(config_string("game.coop_character"), "marine"))
+		return NONE;
+	map = global_scenario_index != NONE ? tag_get_name(global_scenario_index) : NULL;
+	if (map && strstr(map, "a10"))
+		return NONE;
+	variant = allies_variant();
+	return variant == NONE ? NONE : actor_variant_definition_get(variant)->unit_reference.index;
 }

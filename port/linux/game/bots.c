@@ -3005,8 +3005,9 @@ void bots_update_actions(struct player_action *actions)
 	struct player_datum *player;
 	long count = 0;
 
-	/* (local games alone: no other machine sees a bot) */
-	if (!game_engine_running() || !network_game_is_splitscreen_local())
+	/* (the host's game: a local one, or one it hosts for other machines,
+	which see the bots as the host's players: network_server_manager.c) */
+	if (!game_engine_running() || !global_network_game_server_get())
 		return;
 	data_iterator_new(&iterator, player_data);
 	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
