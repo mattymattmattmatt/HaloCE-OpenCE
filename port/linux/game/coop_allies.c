@@ -348,6 +348,15 @@ static void allies_behind(long player_unit_index, real_point3d *position, real *
 		*facing = arctangent(beside->object.forward.j, beside->object.forward.i);
 }
 
+/* the player's biped on the ground: not falling (off a cliff, where an ally
+brought beside it would fall too) */
+static boolean allies_player_grounded(long player_unit_index)
+{
+	struct biped_datum *biped = biped_try_and_get(player_unit_index);
+
+	return biped && !TEST_FLAG(biped->biped.flags, _biped_airborne_bit);
+}
+
 /* moves the ally's biped beside the player, with room and a line of sight */
 static boolean allies_bring_back(long unit_index, long player_unit_index)
 {
@@ -604,6 +613,8 @@ void coop_allies_update(void)
 		allies_note("waiting for a player on foot");
 		return;
 	}
+	if (!allies_player_grounded(player_unit_index))
+		return;
 	allies_spawn(player_unit_index);
 	coop_allies.next_spawn_time = now + ALLY_RETRY_TICKS / 4;
 	coop_allies.last_count = count;
@@ -648,7 +659,8 @@ void coop_allies_leash(long actor_index)
 	}
 
 	/* (a place beside them tried at most once a second) */
-	if (now >= ally->teleport_time && (distance > ALLY_METRES(ALLY_TELEPORT_DISTANCE) ||
+	if (now >= ally->teleport_time && allies_player_grounded(player_unit_index) &&
+		(distance > ALLY_METRES(ALLY_TELEPORT_DISTANCE) ||
 		(ally->returning && now - ally->best_time > ALLY_STUCK_TICKS)))
 	{
 		ally->teleport_time = now + TICKS_PER_SECOND;
@@ -768,7 +780,7 @@ static boolean allies_order_target(long unit_index, real_point3d *point, long *s
 static void allies_order(long unit_index)
 {
 	static char const *const go[] = { "advance", "cover" };
-	static char const *const regroup[] = { "advance re", "retreat", "sighted friend player" };
+	static char const *const regroup[] = { "retreat re", "retreat", "sighted friend player" };
 	long units[ALLY_MAXIMUM * 2];
 	short count = allies_units(units, (short)NUMBEROF(units)), index;
 
