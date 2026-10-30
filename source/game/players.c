@@ -513,6 +513,9 @@ static boolean players_lost_map_started = FALSE;
 /* port: the players all died with a campaign ally alive, so the team was
 not lost (players_respawn_on_ally) */
 static boolean players_dead_on_allies;
+/* port: a solo player moved beside a campaign ally (players_respawn_on_ally):
+the teleport's one-player check below does not apply */
+static boolean players_teleport_beside_ally;
 static short over_shield_screen_flash_fade_function = 0;
 static real over_shield_screen_flash_alpha = 0.f;
 static real over_shield_screen_flash_green = 0.f;
@@ -2032,7 +2035,8 @@ static boolean player_teleport_internal(
 	match_assert(
 		"c:\\halo\\SOURCE\\game\\players.c",
 		0x4FB,
-		source_unit_index==NONE || local_player_count()>1 || game_connection()!=_game_connection_local);
+		source_unit_index==NONE || local_player_count()>1 || game_connection()!=_game_connection_local ||
+		players_teleport_beside_ally);
 	if (source_unit_index != NONE &&
 		object_get_ultimate_parent(source_unit_index) != source_unit_index)
 	{
@@ -3044,7 +3048,11 @@ static boolean players_respawn_on_ally(
 		if (player->unit_index == NONE)
 			*result = FALSE;
 		else
+		{
+			players_teleport_beside_ally = TRUE;
 			players_coop_respawn_beside(iterator.datum_index, anchor_index);
+			players_teleport_beside_ally = FALSE;
+		}
 	}
 	if (*result)
 	{

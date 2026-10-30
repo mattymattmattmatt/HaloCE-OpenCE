@@ -127,6 +127,7 @@ static struct
 	short last_wanted;
 	boolean logged_variant;
 	boolean logged_voices;
+	boolean told_orders;
 	/* (the order: hold there, else follow) */
 	boolean holding;
 	long hold_surface;
@@ -258,8 +259,9 @@ static boolean allies_say(long unit_index, char const *const *names, short count
 }
 
 /* once a level, the sounds of the vocalizations an order could use
-(halo.log): their tags and the permutations' names */
-static void allies_log_voices(long unit_index)
+(halo.log): their tags and the permutations' names (once the unit's first
+update has picked its dialogue: FALSE before) */
+static boolean allies_log_voices(long unit_index)
 {
 	static char const *const names[] =
 	{
@@ -268,13 +270,15 @@ static void allies_log_voices(long unit_index)
 	struct unit_datum *unit = unit_get(unit_index);
 	short index;
 
+	if (unit->unit.dialogue_index == NONE)
+		return FALSE;
 	for (index = 0; index < (short)NUMBEROF(names); index++)
 	{
 		short vocalization_type = dialogue_get_vocalization_type_by_name(names[index]);
 		long sound_definition_index = NONE;
 		char permutations[256] = "";
 
-		if (vocalization_type == NONE || unit->unit.dialogue_index == NONE)
+		if (vocalization_type == NONE)
 			continue;
 		unit_test_speech(unit_index, _unit_speech_none, FALSE, FALSE, NULL, &vocalization_type, &sound_definition_index);
 		if (sound_definition_index != NONE)
@@ -299,6 +303,7 @@ static void allies_log_voices(long unit_index)
 		platform_log("campaign allies: voice \"%s\": %s [%s]", names[index],
 			sound_definition_index == NONE ? "none" : tag_get_name(sound_definition_index), permutations);
 	}
+	return TRUE;
 }
 
 /* the level's marines' variant, armed, on foot; else its crewmen's */
@@ -341,6 +346,15 @@ static void allies_behind(long player_unit_index, real_point3d *position, real *
 		*position = beside->object.position;
 	if (facing)
 		*facing = arctangent(beside->object.forward.j, beside->object.forward.i);
+}
+
+/* the player's biped on the ground: not falling (off a cliff, where an ally
+brought beside it would fall too) */
+static boolean allies_player_grounded(long player_unit_index)
+{
+	struct biped_datum *biped = biped_try_and_get(player_unit_index);
+
+	return biped && !TEST_FLAG(biped->biped.flags, _biped_airborne_bit);
 }
 
 /* moves the ally's biped beside the player, with room and a line of sight */
@@ -444,11 +458,10 @@ static void allies_spawn(long player_unit_index)
 		actor->meta.force_active = TRUE;
 		platform_log("campaign allies: one joined %s (%d wanted)",
 			behind ? "behind the player" : "where the player stands (no clear room behind)", allies_wanted());
-		if (!coop_allies.logged_voices)
+		if (!coop_allies.told_orders)
 		{
-			coop_allies.logged_voices = TRUE;
+			coop_allies.told_orders = TRUE;
 			allies_tell("A Marine ally joined you. Hold the action button to send the allies where you aim");
-			allies_log_voices(actor->meta.unit_index);
 		}
 		else
 			allies_tell("A Marine ally joined you");
@@ -459,6 +472,8 @@ static void allies_spawn(long player_unit_index)
 the first player's action button 2 seconds from that second of game time
 (an order, as a person's hold), "kill:<s>" kills that player; separated by
 commas, in order */
+static short allies_units(long *unit_indices, short maximum);
+
 static void allies_test(long now)
 {
 	char const *script = getenv("HALO_ALLIES_TEST");
@@ -516,6 +531,13 @@ void coop_allies_update(void)
 	if (!allies_running())
 		return;
 	allies_test(now);
+	if (!coop_allies.logged_voices)
+	{
+		long units[1];
+
+		if (allies_units(units, 1) && allies_log_voices(units[0]))
+			coop_allies.logged_voices = TRUE;
+	}
 
 	wanted = allies_wanted();
 	/* (more wanted, as the pause menu's ALLIES asks: at once) */
@@ -591,6 +613,8 @@ void coop_allies_update(void)
 		allies_note("waiting for a player on foot");
 		return;
 	}
+	if (!allies_player_grounded(player_unit_index))
+		return;
 	allies_spawn(player_unit_index);
 	coop_allies.next_spawn_time = now + ALLY_RETRY_TICKS / 4;
 	coop_allies.last_count = count;
@@ -635,7 +659,8 @@ void coop_allies_leash(long actor_index)
 	}
 
 	/* (a place beside them tried at most once a second) */
-	if (now >= ally->teleport_time && (distance > ALLY_METRES(ALLY_TELEPORT_DISTANCE) ||
+	if (now >= ally->teleport_time && allies_player_grounded(player_unit_index) &&
+		(distance > ALLY_METRES(ALLY_TELEPORT_DISTANCE) ||
 		(ally->returning && now - ally->best_time > ALLY_STUCK_TICKS)))
 	{
 		ally->teleport_time = now + TICKS_PER_SECOND;
@@ -721,15 +746,30 @@ static boolean allies_order_target(long unit_index, real_point3d *point, long *s
 
 	unit_get_camera_position(unit_index, &origin);
 	scale_vector3d(&unit->unit.aiming_vector, ALLY_METRES(ALLY_ORDER_REACH), &ray);
+	down.i = down.j = 0.f;
 	if (!collision_test_vector(flags, &origin, &ray, unit_index, &hit))
-		return FALSE;
-	if (hit.plane.n.k < 0.6f)
+	{
+		/* (nothing within reach, as across open ground or at the sky: the
+		ground below the end of the reach) */
+		point_from_line3d(&origin, &ray, 1.f, &above);
+		down.k = -ALLY_METRES(ALLY_ORDER_REACH);
+		if (!collision_test_vector(flags, &above, &down, unit_index, &hit) || hit.plane.n.k < 0.6f)
+		{
+			platform_log("campaign allies: no ground within reach (aim %.2f %.2f %.2f)",
+				unit->unit.aiming_vector.i, unit->unit.aiming_vector.j, unit->unit.aiming_vector.k);
+			return FALSE;
+		}
+	}
+	else if (hit.plane.n.k < 0.6f)
 	{
 		point_from_line3d(&hit.point, &unit->unit.aiming_vector, -ALLY_METRES(0.75f), &above);
-		down.i = down.j = 0.f;
 		down.k = -ALLY_METRES(8.f);
 		if (!collision_test_vector(flags, &above, &down, unit_index, &hit) || hit.plane.n.k < 0.6f)
+		{
+			platform_log("campaign allies: no ground below the wall aimed at (aim %.2f %.2f %.2f)",
+				unit->unit.aiming_vector.i, unit->unit.aiming_vector.j, unit->unit.aiming_vector.k);
 			return FALSE;
+		}
 	}
 	*point = hit.point;
 	*surface_index = hit.surface_index;
@@ -740,7 +780,7 @@ static boolean allies_order_target(long unit_index, real_point3d *point, long *s
 static void allies_order(long unit_index)
 {
 	static char const *const go[] = { "advance", "cover" };
-	static char const *const regroup[] = { "advance re", "retreat", "sighted friend player" };
+	static char const *const regroup[] = { "retreat re", "retreat", "sighted friend player" };
 	long units[ALLY_MAXIMUM * 2];
 	short count = allies_units(units, (short)NUMBEROF(units)), index;
 
