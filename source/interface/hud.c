@@ -108,6 +108,7 @@ symbols in this file:
 #include "tag_files/tag_files.h"
 #include "text/draw_string.h"
 #include "coop_spectate.h" /* port: port/linux/game/coop_spectate.c */
+#include "coop_allies.h"
 #include "manual_respawn.h" /* port: port/linux/game/manual_respawn.c */
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "hud_toggle.h" /* port: port/linux/game/hud_toggle.c */
@@ -1484,6 +1485,9 @@ void hud_draw_screen(
 		/* port: who a dead network co-op player is watching */
 		if (player->unit_index == NONE && coop_spectating() && !cinematic_in_progress())
 			coop_spectate_draw(render.local_player_index);
+		/* port: whom a dead campaign player's camera watches (its allies) */
+		else if (player->unit_index == NONE && !cinematic_in_progress())
+			coop_allies_spectate_draw(render.local_player_index);
 		/* port: game.manual_respawn's prompt, for a dead campaign player
 		(in a cutscene too: the wait goes on through one) */
 		if (player->unit_index == NONE)

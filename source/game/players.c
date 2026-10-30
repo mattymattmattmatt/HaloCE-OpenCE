@@ -239,6 +239,7 @@ symbols in this file:
 #include "devices/devices.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "coop_allies.h" /* port: port/linux/game/coop_allies.c */
+#include "manual_respawn.h" /* port: port/linux/game/manual_respawn.c */
 #include "bots.h" /* port: port/linux/game/bots.c */
 #include "cutscene/cinematics.h" /* port: network co-op's first spawns */
 #include "editor/editor_stubs.h"
@@ -3023,7 +3024,9 @@ static boolean players_respawn_on_ally(
 	*result = FALSE;
 	if (!players_coop_state.respawn_wait_since)
 		players_coop_state.respawn_wait_since = game_time_get() + 1;
-	if (game_time_get() % COOP_RESPAWN_CHECK_TICKS != 0)
+	/* (game.manual_respawn: the press came once players_respawn_ally_ready
+	said so, so at once) */
+	if (game_time_get() % COOP_RESPAWN_CHECK_TICKS != 0 && !manual_respawn_applies_now())
 		return TRUE;
 	anchor_index = coop_allies_respawn_unit(players_coop_unit_safe);
 	if (anchor_index == NONE &&
@@ -3061,6 +3064,33 @@ static boolean players_respawn_on_ally(
 	}
 
 	return TRUE;
+}
+
+/* port: game.manual_respawn's question (manual_respawn.c): whether every
+player is dead with a campaign ally alive to respawn beside (*pending), and
+if so whether one is ready now (players_respawn_on_ally's rule). TRUE when
+nothing is pending. */
+boolean players_respawn_ally_ready(
+	boolean *pending)
+{
+	struct data_iterator iterator;
+	struct player_datum *player;
+
+	*pending = FALSE;
+	data_iterator_new(&iterator, player_data);
+	while ((player = data_iterator_next(&iterator)) != NULL)
+	{
+		if (player->unit_index != NONE)
+			return TRUE;
+	}
+	if (game_engine_running() || coop_allies_respawn_unit(NULL) == NONE)
+		return TRUE;
+	*pending = TRUE;
+	if (!players_coop_state.respawn_wait_since)
+		players_coop_state.respawn_wait_since = game_time_get() + 1;
+	return coop_allies_respawn_unit(players_coop_unit_safe) != NONE ||
+		(game_time_get() + 1 - players_coop_state.respawn_wait_since >= COOP_RESPAWN_FALLBACK_TICKS &&
+			coop_allies_respawn_unit(players_coop_unit_grounded) != NONE);
 }
 
 /* port: every player dead, one at least waiting to respawn, and no campaign
