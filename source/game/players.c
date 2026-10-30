@@ -5111,10 +5111,13 @@ void players_update_before_game(
 
 					/* port: the action button held on foot orders the campaign
 					allies (port/linux/game/coop_allies.c): nothing to pick up or
-					enter near (the last tick's look: player_examine_nearby_objects) */
+					enter near (the last tick's look: player_examine_nearby_objects).
+					The press is reported one tick (latched), the hold by the swap
+					weapons bit. */
 					coop_allies_order_input(iterator.datum_index,
 						TEST_FLAG(action->control_flags, _unit_control_action_bit) ||
 							TEST_FLAG(action->control_flags, _unit_control_weapon_reload_bit),
+						TEST_FLAG(action->control_flags, _unit_control_swap_weapons_bit),
 						player->action_result == _player_action_result_reload);
 
 					if (TEST_FLAG(action->control_flags, _unit_control_swap_weapons_bit) &&

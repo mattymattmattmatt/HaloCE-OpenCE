@@ -414,9 +414,11 @@ Infection and Gun Game, which are Slayer's: below).
 Campaign allies (`bots.coop`) are the campaign's: Server Setup > CO-OP
 OPTIONS > ALLIES before a co-op game, and the campaign pause menu's ALLIES
 (solo, or a co-op game's host) at any time, which brings them in behind the
-player, or takes the extras away, at once. Their health shows on the HUD as a
-vehicle's passengers' does (the level's vehicles' passenger HUDs, one
-under the other; none on a level with no vehicle that has one). Holding the
+player, or takes the extras away, at once. Each has a man's name, picked
+when it joins. Their health shows on the HUD at the left edge, below the
+player's shield and health, each its name over the health meter a vehicle's
+passenger has (the level's vehicles' first passenger HUD; none on a level with
+no vehicle that has one). Their joins, orders and voices are in halo.log. Holding the
 action (reload) button 1.5 seconds on foot, with nothing near to pick up or
 enter, sends them to the ground you aim at (80 m at most): they hold there,
 fighting within 20 m of it, until it is held again, when they follow again.

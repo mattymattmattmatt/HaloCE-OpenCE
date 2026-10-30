@@ -36,6 +36,8 @@ ally comes back ALLY_RESPAWN_TICKS later, behind a player. Fewer wanted
 (the menu) takes away the extras; 0 takes them all.
 */
 #include "cseries.h"
+#include "cseries/errors.h"
+#include "bitmaps/bitmap_group.h"
 #include "ai/actor_definitions.h"
 #include "ai/actor_placement.h"
 #include "ai/actor_types.h"
@@ -64,8 +66,18 @@ ally comes back ALLY_RESPAWN_TICKS later, behind a player. Fewer wanted
 #include "units/dialogue_definitions.h"
 #include "units/unit_definitions.h"
 #include "network_distributed.h"
+#include "game/game_globals.h"
+#include "interface/interface.h"
+#include "interface/hud_definitions.h"
+#include "interface/hud_draw.h"
+#include "rasterizer/rasterizer.h"
+#include "render/render.h"
+#include "text/draw_string.h"
+#include "text/font_group.h"
 #include "coop_allies.h"
 
+#include <ctype.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -73,6 +85,34 @@ ally comes back ALLY_RESPAWN_TICKS later, behind a player. Fewer wanted
 long config_integer(char const *name);
 char const *config_string(char const *name);
 void platform_log(char const *format, ...);
+
+static short allies_units(long *unit_indices, short maximum);
+static short allies_hold_grace(void);
+static short allies_pick_name(long unit_index);
+/* the HUD's names (allies_slot picks one unused, from the unit's datum
+index, so a revert's same allies get theirs again) */
+static char const *const allies_names[50] =
+{
+	"James", "John", "Robert", "Michael", "William", "David", "Richard", "Joseph", "Thomas", "Charles",
+	"Daniel", "Matthew", "Anthony", "Mark", "Steven", "Paul", "Andrew", "Joshua", "Kevin", "Brian",
+	"George", "Edward", "Ryan", "Jacob", "Gary", "Nicholas", "Eric", "Jonathan", "Stephen", "Larry",
+	"Justin", "Scott", "Brandon", "Frank", "Benjamin", "Gregory", "Samuel", "Raymond", "Patrick", "Alexander",
+	"Jack", "Dennis", "Jerry", "Tyler", "Aaron", "Henry", "Peter", "Adam", "Nathan", "Zachary",
+};
+
+/* to stderr (logcat) and to the game's log (halo.log, debug.txt), where a
+player's report has it */
+static void allies_log(char const *format, ...)
+{
+	char text[512];
+	va_list arguments;
+
+	va_start(arguments, format);
+	vsnprintf(text, sizeof(text), format, arguments);
+	va_end(arguments);
+	platform_log("%s", text);
+	error(_error_silent, "%s", text);
+}
 
 enum
 {
@@ -115,6 +155,8 @@ struct coop_ally
 	long teleport_time;
 	long surface_index;
 	real_point3d destination;
+	/* (its name on the HUD: allies_names) */
+	short name;
 };
 
 static struct
@@ -125,6 +167,8 @@ static struct
 	long next_report_time;
 	short last_count;
 	short last_wanted;
+	/* (every sixth report to the game's log too) */
+	short reports;
 	boolean logged_variant;
 	boolean logged_voices;
 	boolean told_orders;
@@ -133,9 +177,10 @@ static struct
 	long hold_surface;
 	real_point3d hold_point;
 	short order_ticks[ALLY_ORDER_PLAYERS];
-	boolean order_spent[ALLY_ORDER_PLAYERS];
+	boolean order_down[ALLY_ORDER_PLAYERS];
 	/* (HALO_ALLIES_TEST: the button held until this tick, the next step) */
 	long test_hold_until;
+	boolean test_pressed;
 	short test_step;
 	struct coop_ally allies[ALLY_MAXIMUM * 2];
 } coop_allies;
@@ -251,7 +296,7 @@ static boolean allies_say(long unit_index, char const *const *names, short count
 			speech_item.priority = _unit_speech_scripted;
 			ai_communication_packet_new(&speech_item.ai);
 			unit_speak(unit_index, play_type, &speech_item);
-			platform_log("campaign allies: said \"%s\" (%s)", names[index], tag_get_name(sound_definition_index));
+			allies_log("campaign allies: said \"%s\" (%s)", names[index], tag_get_name(sound_definition_index));
 			return TRUE;
 		}
 	}
@@ -272,6 +317,8 @@ static boolean allies_log_voices(long unit_index)
 
 	if (unit->unit.dialogue_index == NONE)
 		return FALSE;
+	allies_log("campaign allies: orders: the action button held %d ticks (the hold seen after %d)",
+		(int)ALLY_ORDER_TICKS, (int)allies_hold_grace());
 	for (index = 0; index < (short)NUMBEROF(names); index++)
 	{
 		short vocalization_type = dialogue_get_vocalization_type_by_name(names[index]);
@@ -300,7 +347,7 @@ static boolean allies_log_voices(long unit_index)
 				}
 			}
 		}
-		platform_log("campaign allies: voice \"%s\": %s [%s]", names[index],
+		allies_log("campaign allies: voice \"%s\": %s [%s]", names[index],
 			sound_definition_index == NONE ? "none" : tag_get_name(sound_definition_index), permutations);
 	}
 	return TRUE;
@@ -382,6 +429,8 @@ static struct coop_ally *allies_slot(long actor_index)
 	if (free_index == NONE)
 		return NULL;
 	csmemset(&coop_allies.allies[free_index], 0, sizeof(coop_allies.allies[free_index]));
+	coop_allies.allies[free_index].actor_index = NONE;
+	coop_allies.allies[free_index].name = allies_pick_name(actor_get(actor_index)->meta.unit_index);
 	coop_allies.allies[free_index].actor_index = actor_index;
 	coop_allies.allies[free_index].surface_index = NONE;
 	return &coop_allies.allies[free_index];
@@ -405,7 +454,7 @@ static void allies_note(char const *why)
 	if (now < coop_allies.next_log_time)
 		return;
 	coop_allies.next_log_time = now + 10 * TICKS_PER_SECOND;
-	platform_log("campaign allies: %s", why);
+	allies_log("campaign allies: %s", why);
 }
 
 static void allies_spawn(long player_unit_index)
@@ -417,7 +466,7 @@ static void allies_spawn(long player_unit_index)
 	if (!coop_allies.logged_variant)
 	{
 		coop_allies.logged_variant = TRUE;
-		platform_log("campaign allies: %s", variant == NONE ? "this level has no armed marine or crewman to be them" :
+		allies_log("campaign allies: %s", variant == NONE ? "this level has no armed marine or crewman to be them" :
 			tag_get_name(variant));
 	}
 	if (variant == NONE)
@@ -456,15 +505,18 @@ static void allies_spawn(long player_unit_index)
 			return;
 		}
 		actor->meta.force_active = TRUE;
-		platform_log("campaign allies: one joined %s (%d wanted)",
-			behind ? "behind the player" : "where the player stands (no clear room behind)", allies_wanted());
-		if (!coop_allies.told_orders)
 		{
+			struct coop_ally *slot = allies_slot(actor_index);
+			char const *name = slot ? allies_names[slot->name] : "A Marine";
+			char text[128];
+
+			allies_log("campaign allies: %s joined %s (%d wanted)", name,
+				behind ? "behind the player" : "where the player stands (no clear room behind)", allies_wanted());
+			snprintf(text, sizeof(text), "%s, a Marine, joined you%s", name, coop_allies.told_orders ? "" :
+				". Hold the action button to send the allies where you aim");
 			coop_allies.told_orders = TRUE;
-			allies_tell("A Marine ally joined you. Hold the action button to send the allies where you aim");
+			allies_tell(text);
 		}
-		else
-			allies_tell("A Marine ally joined you");
 	}
 }
 
@@ -472,7 +524,6 @@ static void allies_spawn(long player_unit_index)
 the first player's action button 2 seconds from that second of game time
 (an order, as a person's hold), "kill:<s>" kills that player; separated by
 commas, in order */
-static short allies_units(long *unit_indices, short maximum);
 
 static void allies_test(long now)
 {
@@ -505,13 +556,14 @@ static void allies_test(long now)
 	if (!strncmp(step, "order", 5))
 	{
 		coop_allies.test_hold_until = now + 2 * TICKS_PER_SECOND;
-		platform_log("campaign allies: test: holding the action button");
+		coop_allies.test_pressed = FALSE;
+		allies_log("campaign allies: test: holding the action button");
 		return;
 	}
 	data_iterator_new(&iterator, player_data);
 	if ((player = data_iterator_next(&iterator)) != NULL && player->unit_index != NONE)
 	{
-		platform_log("campaign allies: test: killing the player");
+		allies_log("campaign allies: test: killing the player");
 		unit_kill(player->unit_index);
 	}
 }
@@ -587,12 +639,12 @@ void coop_allies_update(void)
 				hold_nearest = MIN(hold_nearest, distance);
 				hold_farthest = MAX(hold_farthest, distance);
 			}
-			platform_log("campaign allies: %d holding, %.1f to %.1f m from the held point (%.1f to %.1f m from the "
+			(coop_allies.reports++ % 6 ? platform_log : allies_log)("campaign allies: %d holding, %.1f to %.1f m from the held point (%.1f to %.1f m from the "
 				"nearest player)", count, hold_nearest / ALLY_METRES(1.f), hold_farthest / ALLY_METRES(1.f),
 				nearest / ALLY_METRES(1.f), farthest / ALLY_METRES(1.f));
 		}
 		else
-			platform_log("campaign allies: %d with the players, %.1f to %.1f m from the nearest", count,
+			(coop_allies.reports++ % 6 ? platform_log : allies_log)("campaign allies: %d with the players, %.1f to %.1f m from the nearest", count,
 				nearest / ALLY_METRES(1.f), farthest / ALLY_METRES(1.f));
 	}
 	if (count < coop_allies.last_count)
@@ -755,7 +807,7 @@ static boolean allies_order_target(long unit_index, real_point3d *point, long *s
 		down.k = -ALLY_METRES(ALLY_ORDER_REACH);
 		if (!collision_test_vector(flags, &above, &down, unit_index, &hit) || hit.plane.n.k < 0.6f)
 		{
-			platform_log("campaign allies: no ground within reach (aim %.2f %.2f %.2f)",
+			allies_log("campaign allies: no ground within reach (aim %.2f %.2f %.2f)",
 				unit->unit.aiming_vector.i, unit->unit.aiming_vector.j, unit->unit.aiming_vector.k);
 			return FALSE;
 		}
@@ -766,7 +818,7 @@ static boolean allies_order_target(long unit_index, real_point3d *point, long *s
 		down.k = -ALLY_METRES(8.f);
 		if (!collision_test_vector(flags, &above, &down, unit_index, &hit) || hit.plane.n.k < 0.6f)
 		{
-			platform_log("campaign allies: no ground below the wall aimed at (aim %.2f %.2f %.2f)",
+			allies_log("campaign allies: no ground below the wall aimed at (aim %.2f %.2f %.2f)",
 				unit->unit.aiming_vector.i, unit->unit.aiming_vector.j, unit->unit.aiming_vector.k);
 			return FALSE;
 		}
@@ -789,54 +841,98 @@ static void allies_order(long unit_index)
 		coop_allies.holding = FALSE;
 		for (index = 0; index < NUMBEROF(coop_allies.allies); index++)
 			coop_allies.allies[index].returning = FALSE;
-		platform_log("campaign allies: ordered to regroup (%d)", count);
+		allies_log("campaign allies: ordered to regroup (%d)", count);
 		allies_tell("Allies: regrouping on you");
 		allies_say(units[0], regroup, (short)NUMBEROF(regroup));
 		return;
 	}
 	if (!allies_order_target(unit_index, &coop_allies.hold_point, &coop_allies.hold_surface))
 	{
-		platform_log("campaign allies: ordered, but no ground where the player aims");
+		allies_log("campaign allies: ordered, but no ground where the player aims");
 		allies_tell("Allies: no ground to hold there");
 		return;
 	}
 	coop_allies.holding = TRUE;
 	for (index = 0; index < NUMBEROF(coop_allies.allies); index++)
 		coop_allies.allies[index].returning = FALSE;
-	platform_log("campaign allies: ordered to hold %.1f m away (%d)",
+	allies_log("campaign allies: ordered to hold %.1f m away (%d)",
 		distance3d(&object_get(unit_index)->object.position, &coop_allies.hold_point) / ALLY_METRES(1.f), count);
 	allies_tell("Allies: moving up to hold there (hold the action button again to regroup)");
 	allies_say(units[0], go, (short)NUMBEROF(go));
 }
 
-void coop_allies_order_input(long player_index, boolean held, boolean nothing_near)
+/* the ticks the button is held before the game reports it held (the swap
+weapons bit: game globals' minimum weapon swap ticks), and a few more */
+static short allies_hold_grace(void)
+{
+	struct game_globals *globals = scenario_get_game_globals();
+	short swap_ticks = TICKS_PER_SECOND / 2;
+
+	if (globals && globals->player_control.count > 0)
+	{
+		swap_ticks = TAG_BLOCK_GET_ELEMENT(&globals->player_control, 0,
+			struct game_globals_player_control)->minimum_weapon_swap_ticks;
+	}
+	return (short)PIN(swap_ticks + 6, 6, ALLY_ORDER_TICKS - 6);
+}
+
+void coop_allies_order_input(long player_index, boolean pressed, boolean held, boolean nothing_near)
 {
 	short slot = (short)DATUM_INDEX_TO_ABSOLUTE_INDEX(player_index);
+	short *ticks;
 	long unit_index, units[1];
+	long now = game_time_get();
 
 	if (slot < 0 || slot >= ALLY_ORDER_PLAYERS)
 		return;
-	if (game_time_get() < coop_allies.test_hold_until)
-		held = TRUE;
-	if (!held)
+	ticks = &coop_allies.order_ticks[slot];
+	/* (HALO_ALLIES_TEST: as the game reports a person's hold: pressed on
+	the first tick, held only once the swap ticks have passed) */
+	if (now < coop_allies.test_hold_until)
 	{
-		coop_allies.order_ticks[slot] = 0;
-		coop_allies.order_spent[slot] = FALSE;
+		long since = now - (coop_allies.test_hold_until - 2 * TICKS_PER_SECOND);
+
+		if (!coop_allies.test_pressed)
+		{
+			coop_allies.test_pressed = TRUE;
+			pressed = TRUE;
+		}
+		held = held || since >= allies_hold_grace() - 6;
+	}
+	/* the action button reports a press once (player_queues_new.c's latched
+	controls), then, held past the swap ticks, the swap weapons bit every tick
+	(and where it is not latched, every tick: held) */
+	{
+		boolean was_down = coop_allies.order_down[slot];
+
+		coop_allies.order_down[slot] = pressed || held;
+		held = held || pressed;
+		pressed = pressed && !was_down;
+	}
+	if (pressed)
+	{
+		*ticks = 0;
+		unit_index = player_get(player_index)->unit_index;
+		/* (a press beside a weapon or a vehicle is theirs) */
+		if (!nothing_near || allies_on_foot(unit_index) == NONE || !allies_units(units, 1))
+			return;
+		*ticks = 1;
 		return;
 	}
-	if (coop_allies.order_spent[slot])
+	if (*ticks <= 0)
 		return;
+	if (!held && *ticks >= allies_hold_grace())
+	{
+		/* (let go: a tap, the reload's) */
+		*ticks = 0;
+		return;
+	}
+	if (++*ticks < ALLY_ORDER_TICKS)
+		return;
+	*ticks = 0;
 	unit_index = player_get(player_index)->unit_index;
-	/* (a hold that began beside a weapon or a vehicle is theirs) */
-	if (!nothing_near || allies_on_foot(unit_index) == NONE || !allies_units(units, 1))
-	{
-		coop_allies.order_spent[slot] = TRUE;
-		return;
-	}
-	if (++coop_allies.order_ticks[slot] < ALLY_ORDER_TICKS)
-		return;
-	coop_allies.order_spent[slot] = TRUE;
-	allies_order(unit_index);
+	if (allies_on_foot(unit_index) != NONE)
+		allies_order(unit_index);
 }
 
 boolean coop_allies_alive(void)
@@ -897,52 +993,130 @@ static short allies_seat_huds(boolean multiplayer, long *hud_indices)
 	return count;
 }
 
-static void allies_hud_shift(struct hud_placement_definition *placement, short x, short y)
+
+static short allies_pick_name(long unit_index)
 {
-	placement->offset.x = (short)(placement->offset.x + x);
-	placement->offset.y = (short)(placement->offset.y + y);
+	unsigned long hash = (unsigned long)unit_index * 2654435761UL;
+	short name = (short)((hash >> 7) % NUMBEROF(allies_names)), tries;
+
+	for (tries = 0; tries < (short)NUMBEROF(allies_names); tries++, name = (short)((name + 1) % NUMBEROF(allies_names)))
+	{
+		short index;
+
+		for (index = 0; index < NUMBEROF(coop_allies.allies); index++)
+		{
+			struct coop_ally const *ally = &coop_allies.allies[index];
+			struct actor_datum *actor;
+
+			if (ally->actor_index != NONE && ally->name == name &&
+				(actor = datum_try_and_get(actor_data, ally->actor_index)) != NULL && ally_actor(actor))
+			{
+				break;
+			}
+		}
+		if (index == NUMBEROF(coop_allies.allies))
+			break;
+	}
+	return name;
 }
 
-short coop_allies_hud_units(boolean multiplayer, long *unit_indices, long *hud_indices,
+static char const *allies_name(long unit_index)
+{
+	short index;
+
+	for (index = 0; index < NUMBEROF(coop_allies.allies); index++)
+	{
+		struct coop_ally const *ally = &coop_allies.allies[index];
+		struct actor_datum *actor;
+
+		if (ally->actor_index != NONE && (actor = datum_try_and_get(actor_data, ally->actor_index)) != NULL &&
+			actor->meta.unit_index == unit_index && ally->name >= 0 && ally->name < (short)NUMBEROF(allies_names))
+		{
+			return allies_names[ally->name];
+		}
+	}
+	return "Marine";
+}
+
+/* the allies' rows on the HUD, at the left edge below the player's shield
+and health (the top ALLY_HUD_TOP of the height) and above the touch
+buttons there (Light, at about half the height): each its name, then the
+passenger's health meter beneath */
+#define ALLY_HUD_TOP 0.22f
+#define ALLY_HUD_LEFT 12
+
+short coop_allies_hud_units(short local_player_index, boolean multiplayer, long *unit_indices, long *hud_indices,
 	struct unit_hud_interface_definition **definitions, short maximum)
 {
 	static struct unit_hud_interface_definition copies[ALLY_MAXIMUM];
 	long seat_huds[ALLY_MAXIMUM];
-	short seat_count, count, index, step_x = 0, step_y = 20;
+	short count, index, line_height = 12, meter_height = 8, top;
+	long font_index;
+	struct unit_hud_interface_definition const *seat;
+	struct bitmap_data const *bitmap = NULL;
+	real_rectangle2d const *clip = NULL;
+	rectangle2d window;
+	real_argb_color color;
 
+	(void)local_player_index;
 	count = allies_units(unit_indices, (short)MIN(maximum, ALLY_MAXIMUM));
-	if (!count || !(seat_count = allies_seat_huds(multiplayer, seat_huds)))
+	if (!count || !allies_seat_huds(multiplayer, seat_huds))
 		return 0;
-	/* (the seats' HUDs as they are, then again past them, as far apart as
-	the first two are) */
-	if (seat_count > 1)
+	seat = unit_hud_interface_definition_get(seat_huds[0]);
+	font_index = interface_get_tag_index(_interface_font_terminal);
+	if (font_index != NONE)
 	{
-		struct meter_hud_element_definition const *first =
-			&unit_hud_interface_definition_get(seat_huds[0])->health_meter.meter;
-		struct meter_hud_element_definition const *second =
-			&unit_hud_interface_definition_get(seat_huds[1])->health_meter.meter;
+		struct font_header *font = font_definition_get(font_index);
 
-		if (first->placement.offset.x != second->placement.offset.x ||
-			first->placement.offset.y != second->placement.offset.y)
-		{
-			step_x = (short)(second->placement.offset.x - first->placement.offset.x);
-			step_y = (short)(second->placement.offset.y - first->placement.offset.y);
-		}
+		line_height = (short)MAX(font->ascending_height + font->descending_height + font->leading_height, 8);
 	}
+	hud_retrieve_bitmap_and_bounding_rect(seat->health_meter.meter.meter_bitmap.index,
+		seat->health_meter.meter.sequence_index, 0, &bitmap, &clip);
+	if (bitmap)
+	{
+		meter_height = (short)(clip ? (clip->y1 - clip->y0) * bitmap->height : bitmap->height);
+		meter_height = (short)PIN(meter_height, 4, 24);
+	}
+	window = render.camera.window_bounds;
+	offset_rectangle2d(&window, (short)-render.camera.viewport_bounds.x0, (short)-render.camera.viewport_bounds.y0);
+	top = (short)((window.y1 - window.y0) * ALLY_HUD_TOP);
+	color.alpha = 1.f;
+	color.red = 0.55f;
+	color.green = 0.8f;
+	color.blue = 1.f;
 	for (index = 0; index < count; index++)
 	{
-		short round = (short)(index / seat_count);
-		short x = (short)(round * seat_count * step_x), y = (short)(round * seat_count * step_y);
 		struct unit_hud_interface_definition *copy = &copies[index];
+		short row = (short)(top + index * (line_height + meter_height + 4));
 
-		*copy = *unit_hud_interface_definition_get(seat_huds[index % seat_count]);
-		allies_hud_shift(&copy->background.placement, x, y);
-		allies_hud_shift(&copy->shield_meter.background.placement, x, y);
-		allies_hud_shift(&copy->shield_meter.meter.placement, x, y);
-		allies_hud_shift(&copy->health_meter.background.placement, x, y);
-		allies_hud_shift(&copy->health_meter.meter.placement, x, y);
-		hud_indices[index] = seat_huds[index % seat_count];
+		/* (the passenger's meter alone: its label and the shield's are not
+		this ally's) */
+		*copy = *seat;
+		copy->absolute_placement.corner = _hud_anchor_top_left;
+		copy->background.interface_bitmap.index = NONE;
+		copy->shield_meter.background.interface_bitmap.index = NONE;
+		copy->shield_meter.meter.meter_bitmap.index = NONE;
+		copy->health_meter.background.interface_bitmap.index = NONE;
+		copy->health_meter.meter.placement.offset.x = ALLY_HUD_LEFT;
+		copy->health_meter.meter.placement.offset.y = (short)(row + line_height);
+		hud_indices[index] = seat_huds[0];
 		definitions[index] = copy;
+		if (font_index != NONE)
+		{
+			rectangle2d bounds;
+			char text[32];
+			short letter;
+
+			snprintf(text, sizeof(text), "%s", allies_name(unit_indices[index]));
+			for (letter = 0; text[letter]; letter++)
+				text[letter] = (char)toupper((unsigned char)text[letter]);
+			bounds.x0 = (short)(window.x0 + ALLY_HUD_LEFT);
+			bounds.x1 = (short)(bounds.x0 + 200);
+			bounds.y0 = (short)(window.y0 + row);
+			bounds.y1 = (short)(bounds.y0 + line_height);
+			draw_string_set_draw_mode(font_index, NONE, 0, 0, &color);
+			rasterizer_draw_string(&bounds, NULL, NULL, 0, text);
+		}
 	}
 	return count;
 }
