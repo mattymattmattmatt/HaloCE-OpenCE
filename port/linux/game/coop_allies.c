@@ -101,6 +101,7 @@ static struct
 	long last_tick;
 	long next_spawn_time;
 	long next_log_time;
+	long next_report_time;
 	short last_count;
 	short last_wanted;
 	boolean logged_variant;
@@ -297,7 +298,9 @@ static void allies_spawn(long player_unit_index)
 			return;
 		}
 		/* (the place behind the player, else where it stands if it has room) */
-		if (!allies_bring_back(actor->meta.unit_index, player_unit_index) &&
+		boolean behind = allies_bring_back(actor->meta.unit_index, player_unit_index);
+
+		if (!behind &&
 			!biped_fix_position(actor->meta.unit_index, NONE, &location.position, NULL, 2.f, FALSE, FALSE, TRUE))
 		{
 			allies_note("no room behind the player");
@@ -305,7 +308,8 @@ static void allies_spawn(long player_unit_index)
 			return;
 		}
 		actor->meta.force_active = TRUE;
-		platform_log("campaign allies: one joined behind the player (%d wanted)", allies_wanted());
+		platform_log("campaign allies: one joined %s (%d wanted)",
+			behind ? "behind the player" : "where the player stands (no clear room behind)", allies_wanted());
 	}
 }
 
@@ -339,6 +343,26 @@ void coop_allies_update(void)
 			actor_erase(iterator.datum_index, FALSE);
 			count--;
 		}
+	}
+	/* (every 10 seconds, how near they keep: halo.log) */
+	if (count && now >= coop_allies.next_report_time)
+	{
+		real nearest = REAL_MAX, farthest = 0.f;
+
+		coop_allies.next_report_time = now + 10 * TICKS_PER_SECOND;
+		data_iterator_new(&iterator, actor_data);
+		while ((actor = data_iterator_next(&iterator)) != NULL)
+		{
+			real distance;
+
+			if (!ally_actor(actor) || actor->meta.erase_next_tick)
+				continue;
+			allies_nearest_player(&object_get(actor->meta.unit_index)->object.position, &distance);
+			nearest = MIN(nearest, distance);
+			farthest = MAX(farthest, distance);
+		}
+		platform_log("campaign allies: %d with the players, %.1f to %.1f m from the nearest", count,
+			nearest / ALLY_METRES(1.f), farthest / ALLY_METRES(1.f));
 	}
 	if (count < coop_allies.last_count)
 		coop_allies.next_spawn_time = MAX(coop_allies.next_spawn_time, now + ALLY_RESPAWN_TICKS);
@@ -450,7 +474,17 @@ long coop_character_unit(void)
 		return NONE;
 	map = global_scenario_index != NONE ? tag_get_name(global_scenario_index) : NULL;
 	if (map && strstr(map, "a10"))
+	{
+		platform_log("co-op character: the Master Chief on The Pillar of Autumn (its scripts animate him)");
 		return NONE;
+	}
 	variant = allies_variant();
-	return variant == NONE ? NONE : actor_variant_definition_get(variant)->unit_reference.index;
+	if (variant == NONE)
+	{
+		platform_log("co-op character: no armed marine on this level: the Master Chief");
+		return NONE;
+	}
+	platform_log("co-op character: a player spawns as %s",
+		tag_get_name(actor_variant_definition_get(variant)->unit_reference.index));
+	return actor_variant_definition_get(variant)->unit_reference.index;
 }
