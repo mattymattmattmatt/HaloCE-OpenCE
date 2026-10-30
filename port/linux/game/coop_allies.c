@@ -87,6 +87,7 @@ struct coop_ally
 	boolean returning;
 	real best_distance;
 	long best_time;
+	long teleport_time;
 	long surface_index;
 	real_point3d destination;
 };
@@ -334,20 +335,19 @@ void coop_allies_leash(long actor_index)
 		return;
 	now = game_time_get();
 
-	if (distance > ALLY_METRES(ALLY_TELEPORT_DISTANCE) ||
-		(ally->returning && now - ally->best_time > ALLY_STUCK_TICKS))
+	/* (a place beside them tried at most once a second) */
+	if (now >= ally->teleport_time && (distance > ALLY_METRES(ALLY_TELEPORT_DISTANCE) ||
+		(ally->returning && now - ally->best_time > ALLY_STUCK_TICKS)))
 	{
+		ally->teleport_time = now + TICKS_PER_SECOND;
 		if (allies_bring_back(actor->meta.unit_index, player_unit_index))
 		{
 			ally->returning = FALSE;
 			ally->surface_index = NONE;
 			actor_move_halt(actor_index);
+			return;
 		}
-		else
-		{
-			ally->best_time = now;
-		}
-		return;
+		ally->best_time = now;
 	}
 
 	fighting = actor->state.action == _actor_action_fight || actor->state.action == _actor_action_uncover ||
