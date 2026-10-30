@@ -48,13 +48,11 @@ struct network_game_server
 };
 
 /* the world the lobby asks */
-static boolean local_game;
 static long wanted;
 static short teams_setting;
 static long sends;
 static short next_color;
 
-static boolean network_game_is_splitscreen_local(void) { return local_game; }
 static long bots_wanted_count(void) { return wanted; }
 static short bots_teams(void) { return teams_setting; }
 static boolean network_game_player_slot_held(long player_index) { (void)player_index; return FALSE; }
@@ -89,7 +87,6 @@ static void lobby(short game_engine_index, long maximum)
 	server.game.maximum_players = (byte)maximum;
 	for (index = 0; index < HALO_PORT_MAXIMUM_NETWORK_PLAYERS; index++)
 		network_game_invalidate_player(&server.game.players[index]);
-	local_game = TRUE;
 	teams_setting = _bots_teams_even;
 	sends = 0;
 }
@@ -244,22 +241,15 @@ int main(int argc, char **argv)
 		CHECK(sends == 2, "the move sent %ld times", sends - 1);
 		return 0;
 	}
-	/* a game other machines may join (system link, internet): none, and any
-	there leave */
-	CASE("never-network")
+	/* a game other machines may join (system link, internet): the host's
+	bots join it as a local game's */
+	CASE("hosted-network")
 	{
 		lobby(game_engine_slayer, 16);
 		player(0, 0);
 		wanted = 6;
-		local_game = FALSE;
 		network_game_server_port_bots(&server);
-		CHECK(bots_in(&team0, &team1) == 0, "%ld bots in a network game", bots_in(&team0, &team1));
-		CHECK(sends == 0, "a network game's lobby sent for bots");
-		local_game = TRUE;
-		network_game_server_port_bots(&server);
-		local_game = FALSE;
-		network_game_server_port_bots(&server);
-		CHECK(bots_in(&team0, &team1) == 0, "%ld bots stayed in a network game", bots_in(&team0, &team1));
+		CHECK(bots_in(&team0, &team1) == 6, "%ld bots in a hosted network game, not 6", bots_in(&team0, &team1));
 		return 0;
 	}
 	/* Slayer alone (the other gametypes' goals are not the bots' yet): none
