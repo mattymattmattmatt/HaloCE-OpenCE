@@ -421,29 +421,7 @@ _network["categories"] = [
      "What the Server Browser lists and its order: the\nsame settings as its Filters screen."),
     ("DISCORD ACCOUNT:", "network_setup/discord_account",
      "Link a Discord account, which lets you join\nservers that block VPNs while you use one."),
-    ("BOTS:", "network_setup/bots",
-     "Computer players in local Slayer games, and\nAI marines fighting beside you in the campaign."),
 ]
-# (ten places now: a little closer together, the help a little lower)
-_network.update({"spacing": 28, "help_top": 356, "help_height": 54})
-
-# Network Setup's bots (port/linux/game/bots.c, coop_allies.c): the local
-# Slayer game's computer players, and the campaign's allied marines
-SCREENS["network_setup/bots"] = {
-    "screen": "bots_settings_screen", "header": _network["header"], "spacing": 30,
-    "rows": [
-        ("BOTS:", "bots.count", [("NONE", "0")] + [(str(n), str(n)) for n in range(1, 16)],
-         "Computer players who join a local (split screen)\nSlayer game's lobby, as far as it has room.", None),
-        ("BOT SKILL:", "bots.skill",
-         [("RECRUIT", "recruit"), ("EASY", "easy"), ("NORMAL", "normal"), ("HEROIC", "heroic"),
-          ("VETERAN", "veteran"), ("LEGENDARY", "legendary")],
-         "How soon the bots react, how well they aim and\nhow far they see.", None),
-        ("BOT TEAMS:", "bots.teams", [("EVEN", "even"), ("AGAINST YOU", "against")],
-         "Team games: bots on both teams, evening them, or\nall on the team the players are not on.", None),
-        ("CAMPAIGN ALLIES:", "bots.coop", [("NONE", "0")] + [(str(n), str(n)) for n in range(1, 5)],
-         "AI marines who follow the nearest player in the\ncampaign, fight beside them and come back.", None),
-    ],
-}
 SCREENS["network_setup/map_sharing"] = {
     "screen": "map_sharing_settings_screen", "header": _network["header"], "spacing": 30,
     "rows": [
@@ -1320,12 +1298,13 @@ def title_backdrop(width: float) -> str:
 # hold each number of buttons, one frame each (the Xbox's 2-button box is
 # 159 units high, and each button 35 more)
 PAUSE_BOX_BUTTONS = [3, 4]
-# the campaign pause box, tall enough for five rows (SETTINGS added) or six
-# (network co-op's FRIENDLY FIRE too) at the PC version's pause menu's pitch
-# (30) with the prompts still under the last row: the stock box is 159, and
-# those rows need 36 and 66 more (menu_tags.c's pause_campaign_patch); the
-# mission objectives' box beside it grows with it
-PAUSE_BOX_EXTRA_HEIGHTS = [195, 225]
+# the campaign pause box, tall enough for five rows (SETTINGS added), six
+# (ALLIES too, or network co-op's FRIENDLY FIRE) or seven (a co-op host's
+# both) at the PC version's pause menu's pitch (30) with the prompts still
+# under the last row: the stock box is 159, and those rows need 36, 66 and
+# 96 more (menu_tags.c's pause_campaign_patch); the mission objectives' box
+# beside it grows with it
+PAUSE_BOX_EXTRA_HEIGHTS = [195, 225, 255]
 
 
 def pause_box_height(buttons: int) -> int:
@@ -1523,7 +1502,7 @@ def _server_settings() -> list:
     game's)"""
     base = f"{MT}/server_settings"
     # (twelve rows: closer together, the help lower)
-    spec = {"screen": "server_settings_screen", "spacing": 24, "help_top": 366,
+    spec = {"screen": "server_settings_screen", "spacing": 22, "help_top": 366,
             "header": ("header_server_settings", f"{base}/header_server_settings")}
     rows, extra = [], []
     extra += _value_row(base, "server_name", 0, "ss edit server name")
@@ -1586,6 +1565,23 @@ def _server_settings() -> list:
                                              ("font", "ui\\large_ui"), ("color", "#FF2896FF"), ("text_x", 13),
                                              ("text_y", 4)], [])
     rows.append((f"{base}/op_{key}", None, SETUP_OPTIONS_PLACE - 1))
+    # BOTS (bots.c), a multiplayer game's, a screen of its own as map
+    # sharing's, below the gametype's rows (menu_functions.c's
+    # server_settings_update hides it in co-op)
+    key, _, _, _ = BOTS_SETUP
+    target = f"{base}/{key}/{key}_screen"
+    extra += _widget(f"{base}/op_{key}", [("width", 512), ("height", 28),
+                                         ("flags", "pass_unhandled_to_focused_child"),
+                                         ("bitmap", "bitmaps/option_bkds"), ("color", "#FF2896FF")],
+                     [f'<on event="a" open="{target}"/>', f'<on event="start" open="{target}"/>',
+                      '<on event="left_mouse" run="mouse emit accept event"/>',
+                      f'<child widget="{base}/{key}_label"/>'])
+    extra += _widget(f"{base}/{key}_label", [("type", "text"), ("controller", 1), ("width", 300), ("height", 22),
+                                             ("string_list", f"{base}/labels"),
+                                             ("string_index", 12 + len(COOP_SETUP_SCREENS)),
+                                             ("font", "ui\\large_ui"), ("color", "#FF2896FF"), ("text_x", 13),
+                                             ("text_y", 4)], [])
+    rows.append((f"{base}/op_{key}", None, BOTS_SETUP_PLACE))
     # co-op's options, in the place of the gametype's rows, which co-op hides
     # as multiplayer hides co-op's (menu_functions.c's server_settings_update):
     # rows opening their screens, as the gametype's options' do
@@ -1634,7 +1630,7 @@ def _server_settings() -> list:
                                          "PLAYER OPTIONS:", "ITEM OPTIONS:", "VEHICLE OPTIONS:", "INDICATOR OPTIONS:",
                                          "TEAMPLAY OPTIONS:", "LISTING:",
                                          *(f"{title}:" for _, title, _, _ in COOP_SETUP_SCREENS), "PASSWORD:",
-                                         f"{MAP_SHARE_SETUP[1]}:"])
+                                         f"{MAP_SHARE_SETUP[1]}:", f"{BOTS_SETUP[1]}:"])
     extra += _strings(f"{base}/help_strings", [
         "",
         "The name the game shows in the lists of games.\\nEnter changes it.",
@@ -1658,11 +1654,13 @@ def _server_settings() -> list:
         # (LISTING's PUBLIC, on a machine with a publisher key: menu_functions.c's
         # server_settings_update)
         "Listed for everyone through the brokers, and on\\nthe master servers with your publisher key.",
+        # (BOTS's: menu_functions.c's BOT_OPTIONS_HELP)
+        BOTS_SETUP[2],
     ])
     lines = _screen(base, spec, rows, ["server settings update"],
                     ['<on event="created" run="server settings init"/>'], extra)
     # (co-op's options' screens, and map sharing's)
-    for key, title, _, screen_rows in [*COOP_SETUP_SCREENS, MAP_SHARE_SETUP]:
+    for key, title, _, screen_rows in [*COOP_SETUP_SCREENS, MAP_SHARE_SETUP, BOTS_SETUP]:
         lines += _setup_option_screen(f"{base}/{key}", key, screen_rows, fit=True)
     # (no Defaults: the bar is START and CANCEL; B cancels the name's edit
     # first)
@@ -1726,6 +1724,16 @@ COOP_SETUP_SCREENS = [
             "Revert the checkpoint after everyone dies. A changed\\nteam or missing save uses respawn only.",
             "Respawn at checkpoint positions after everyone dies.\\nThe world keeps its progress.",
         ]),
+        # (bots.coop: port/linux/game/coop_allies.c; also the campaign pause
+        # menu's ALLIES, menu_tags.c)
+        ("coop_allies", "ALLIES:", ["NONE", "1", "2", "3", "4"],
+         ["No AI allies: only the players fight."] +
+         ["AI marines who follow the nearest player, fight\\nbeside them and come back behind them."] * 4),
+        # (game.coop_character: coop_allies.c's coop_character_unit)
+        ("coop_character", "CO-OP CHARACTER:", ["MASTER CHIEF", "MARINE"], [
+            "Every player plays as the Master Chief, as in\\nthe campaign.",
+            "Every player plays as one of the level's marines\\n(the Chief where it has none, or on Pillar of Autumn).",
+        ]),
     ]),
     ("voice_options", "VOICE AND VOTING", "Voice chat, text chat and votes to kick a player,\\nfor this game.",
      TEAMPLAY_ROWS),
@@ -1747,9 +1755,22 @@ MAP_SHARE_SETUP = ("map_share_options", "MAP SHARING",
 # (Server Setup's place of its options' rows, co-op's or the gametype's: after
 # MAP SHARING's)
 SETUP_OPTIONS_PLACE = 6
+# Server Setup's bots (port/linux/game/bots.c), a multiplayer game's (co-op
+# has ALLIES instead), laid out as map sharing's, below the gametype's rows
+BOTS_SETUP = ("bot_options", "BOTS", "Computer players who join this Slayer game (and\\nSWAT, Infection and Gun Game).", [
+    ("bots_count", "BOTS:", ["NONE"] + [str(n) for n in range(1, 16)],
+     ["No computer players."] + ["Computer players who join the lobby with the\\nplayers, as far as the game has room."] * 15),
+    ("bots_skill", "BOT SKILL:", ["RECRUIT", "EASY", "NORMAL", "HEROIC", "VETERAN", "LEGENDARY"],
+     ["How soon the bots react, how well they aim and\\nhow far they see."] * 6),
+    ("bots_teams", "BOT TEAMS:", ["EVEN", "AGAINST PLAYERS"], [
+        "Team games: the bots even the teams with the\\nplayers.",
+        "Team games: the bots all take the team the\\nplayers are not on.",
+    ]),
+])
+BOTS_SETUP_PLACE = 12
 # (their screens' titles)
 TITLES.update({f"{MT}/server_settings/{key}/header_{key}": title
-               for key, title, _, _ in [*COOP_SETUP_SCREENS, MAP_SHARE_SETUP]})
+               for key, title, _, _ in [*COOP_SETUP_SCREENS, MAP_SHARE_SETUP, BOTS_SETUP]})
 # (the rows of a co-op options screen in one place, the one shown: PER
 # PLAYER's and MULTIPLIER's, by EXTRA ENEMIES')
 SETUP_OPTION_SAME_PLACE = set()

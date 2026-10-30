@@ -1567,8 +1567,9 @@ is). In a team game they even the teams with the players or, for bots.teams
 "against", all take the team the players are not on; the players may change
 teams in the lobby, and the bots follow. They leave when the setting asks
 for fewer, or the game is another gametype. Not once the game has been
-started, nor in a game other machines may join (system link and internet
-games: no bots there, which would need the clients told) */
+started. A hosted game's (system link, internet) too: the clients are told
+of the bots as of any player (the pregame's game data), and see them as the
+host's players in the game (port/linux/game/network_distributed.c) */
 static void network_game_server_port_bots(
 	struct network_game_server *server)
 {
@@ -1582,7 +1583,7 @@ static void network_game_server_port_bots(
 
 	if (server->state != _network_game_server_state_pregame || server->sent_start_game_message)
 		return;
-	if (network_game_is_splitscreen_local() && server->game.variant.game_engine_index == game_engine_slayer)
+	if (server->game.variant.game_engine_index == game_engine_slayer)
 		wanted = PIN(bots_wanted_count(), 0, BOTS_MAXIMUM);
 	for (bot_index = 0; bot_index < BOTS_MAXIMUM; bot_index++)
 		slot_of_bot[bot_index] = NONE;

@@ -6,5 +6,7 @@
 void coop_allies_update(void);
 /* actor_update, after the actor's action chose where to go and before it moves */
 void coop_allies_leash(long actor_index);
+/* player_spawn: the campaign players' unit (game.coop_character), else NONE */
+long coop_character_unit(void);
 
 #endif

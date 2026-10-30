@@ -238,6 +238,7 @@ symbols in this file:
 #include "data.h"
 #include "devices/devices.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
+#include "coop_allies.h" /* port: port/linux/game/coop_allies.c */
 #include "bots.h" /* port: port/linux/game/bots.c */
 #include "cutscene/cinematics.h" /* port: network co-op's first spawns */
 #include "editor/editor_stubs.h"
@@ -1455,7 +1456,11 @@ static void player_spawn(
 				}
 				else
 				{
-					unit_definition_index = player_information->player_unit.index;
+					/* port: or the level's marine (game.coop_character:
+					port/linux/game/coop_allies.c) */
+					unit_definition_index = coop_character_unit();
+					if (unit_definition_index == NONE)
+						unit_definition_index = player_information->player_unit.index;
 				}
 
 				object_placement_data_new(

@@ -622,11 +622,17 @@ static const struct config_setting config_settings[] =
 		"In team games: \"even\" puts the bots on both teams, evening them with\n"
 		"the players; \"against\" puts them all on the team the players are not on." },
 	{ "bots.coop", _config_integer, "0", "HALO_COOP_ALLIES", _environment_value, _platform_all,
-		"Campaign allies: 0 to 4 AI marines (or crewmen, on a level with no\n"
-		"marines) who follow the nearest player, fight from near them and come\n"
-		"back beside them when killed, left behind or stuck, in solo, split\n"
-		"screen and hosted co-op campaigns (port/linux/game/coop_allies.c).\n"
-		"Levels with neither (Keyes) get none. 0: none, as in the stock game." },
+		"Campaign allies: 0 to 4 AI marines (crewmen on a level with no marines;\n"
+		"none on a level with neither, Keyes) who follow the nearest player, fight\n"
+		"from near them, and come back behind them when killed, left behind or\n"
+		"stuck, in solo, split screen and hosted co-op campaigns. Server Setup's\n"
+		"CO-OP OPTIONS and the campaign pause menu's ALLIES set it; a change takes\n"
+		"effect at once (port/linux/game/coop_allies.c)." },
+	{ "game.coop_character", _config_string, "\"chief\"", "HALO_COOP_CHARACTER", _environment_value, _platform_all,
+		"Who the players are in the campaign: \"chief\" (the Master Chief) or\n"
+		"\"marine\" (the level's marine biped; the Chief on a level without one,\n"
+		"and on The Pillar of Autumn, whose scripts animate the Chief). Server\n"
+		"Setup's CO-OP OPTIONS sets it; from the next spawn." },
 	{ "display.viewmodel_shield", _config_boolean, "false", "HALO_VIEWMODEL_SHIELD", _environment_value, _platform_all,
 		"The energy shield's flare on the first-person arms too, as on the body\n"
 		"(the stock game draws it on the body only)." },
@@ -2276,6 +2282,7 @@ static const struct
 	{ "network.voice_mode", { "off", "team_proximity", "team_enemy_proximity", "team_global",
 		"team_global_enemy_proximity", NULL }, NULL },
 	{ "network.coop_team_wipe", { "auto", "revert", "respawn", NULL }, NULL },
+	{ "game.coop_character", { "chief", "marine", NULL }, NULL },
 	{ "network.coop_friendly_fire", { "off", "on", "shields_only", "explosives_only", NULL }, NULL },
 	{ "network.shield_effects", { "stock", "glow", "light_show", "overshield", "glow_overshield",
 		"light_show_overshield", "players", NULL }, NULL },
