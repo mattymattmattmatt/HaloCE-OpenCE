@@ -897,7 +897,7 @@ void hud_render_unit_interface(
 		passengers' (port/linux/game/coop_allies.c) */
 		if (unit_count == 1 && unit->object.parent_object_index == NONE)
 		{
-			unit_count += coop_allies_hud_units(local_player_count() > 1, &unit_indices[1], &unit_hud_indices[1],
+			unit_count += coop_allies_hud_units(local_player_index, local_player_count() > 1, &unit_indices[1], &unit_hud_indices[1],
 				&hud_overrides[1], (short)(NUMBEROF(unit_indices) - 1));
 		}
 
