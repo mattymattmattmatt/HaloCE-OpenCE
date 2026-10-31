@@ -127,8 +127,10 @@ def test_the_link_exports_what_the_page_calls():
 def test_the_memory_layout_agrees_with_the_sources():
     platform = (ROOT / "port/linux/src/platform.h").read_text()
     base = int(re.search(r"#define PLATFORM_CONTIGUOUS_BASE (0x[0-9A-Fa-f]+)", platform).group(1), 16)
-    sizes = re.search(r"#if defined\(HALO_ARM64_GUEST\) \|\| defined\(HALO_WEB\).*?#define PLATFORM_CONTIGUOUS_SIZE "
-                      r"(0x[0-9A-Fa-f]+)", platform, re.S)
+    # (the web build's size, in the #if or #elif that names it: the fork's
+    # Android branch, whose window moves, comes first)
+    sizes = re.search(r"^#(?:el)?if [^\n]*defined\(HALO_WEB\)[^\n]*\n(?:(?!#el|#endif).)*?"
+                      r"#define PLATFORM_CONTIGUOUS_SIZE (0x[0-9A-Fa-f]+)", platform, re.S | re.M)
     assert sizes, "platform.h gives the web build the 128 MB window"
     assert web_build.WEB_MEMORY_BYTES == base + int(sizes.group(1), 16)
     main = (ROOT / "port/web/src/web_main.c").read_text()
@@ -197,13 +199,14 @@ def test_the_menus_name_known_platforms_and_match_their_generator():
 
     for path in sorted((ROOT / "port/assets/menus/ce").glob("*.xml")):
         for value in re.findall(r'platform="([^"]*)"', path.read_text()):
-            assert value.split() and set(value.split()) <= {"desktop", "android", "web"}, (path.name, value)
+            assert value.split() and set(value.split()) <= {"desktop", "android", "switch", "ps5", "web"}, (path.name, value)
     for name, lines in [*port_settings.settings_files().items(), *port_settings.multiplayer_files().items()]:
         assert (ROOT / "port/assets/menus/ce" / name).read_text() == "\n".join(lines), name
     # the rows a browser has no use for are not on its screens; internet
-    # play's is (port/web/src/web_p2p.c)
+    # play's is (port/web/src/web_p2p.c). (The Switch has them all, and the
+    # PS5 some.)
     network = (ROOT / "port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit."
                "network_setup.xml").read_text()
     for row in ("op_allow_upnp", "op_join_from_clipboard", "op_auto"):
-        assert re.search(rf'<child widget="[^"]*/{row}"[^>]*platform="desktop android"', network), row
-    assert re.search(r'<child widget="[^"]*/op_online"[^>]*platform="desktop android web"', network)
+        assert re.search(rf'<child widget="[^"]*/{row}"[^>]*platform="desktop android switch( ps5)?"', network), row
+    assert re.search(r'<child widget="[^"]*/op_online"[^>]*platform="desktop android switch web( ps5)?"', network)

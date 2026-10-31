@@ -20,6 +20,7 @@ struct object_bounds
 	long epoch;
 	real_point3d center;
 	real radius;
+	long type;
 };
 
 static struct object_bounds object_bounds[MAXIMUM_OBJECTS_PER_MAP];
@@ -27,6 +28,7 @@ static long object_bounds_epoch = 1;
 
 void object_bounds_cache_update(
 	long object_index,
+	short type,
 	real_point3d const *center,
 	real radius)
 {
@@ -36,6 +38,7 @@ void object_bounds_cache_update(
 	bounds->epoch = object_bounds_epoch;
 	bounds->center = *center;
 	bounds->radius = radius;
+	bounds->type = type;
 }
 
 void object_bounds_cache_invalidate(
@@ -57,15 +60,20 @@ boolean object_bounds_cache_out_of_reach(
 		!point_in_sphere(point, &bounds->center, bounds->radius + radius);
 }
 
-/* whether the vector from the point is known to miss the object's bounding
-sphere (collision's own test on the copy); FALSE when it is not known */
-boolean object_bounds_cache_missed_by_vector(
+/* whether the vector is known to pass the object by, as collision's vector
+test would find it (the type not among the flags', or the bounding sphere
+missed: the same test on the copy); FALSE when it is not known. Only for an
+object in a cluster's list, which has no siblings to be tested with it. */
+boolean object_bounds_cache_vector_misses(
 	long object_index,
+	unsigned long flags,
+	short first_type_bit,
 	real_point3d const *point,
 	real_vector3d const *vector)
 {
 	struct object_bounds const *bounds = &object_bounds[DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index)];
 
 	return bounds->object_index == object_index && bounds->epoch == object_bounds_epoch &&
-		!fast_vector_intersects_sphere(point, vector, &bounds->center, bounds->radius);
+		(!TEST_FLAG(flags, bounds->type + first_type_bit) ||
+			!fast_vector_intersects_sphere(point, vector, &bounds->center, bounds->radius));
 }

@@ -1,0 +1,27 @@
+audioin-probe-26076.txt: writing to this file and the kernel log
+system software 13.590.001 (0x13590001)
+
+=== 1. the users ===
+sceUserServiceInitialize: 0x00000000
+sceUserServiceGetForegroundUser: 0x00000000, user 372994645
+sceUserServiceGetLoginUserIdList: 0x00000000
+  user 372994645: "thelinkin3000"
+  user 727659102: "Invitado1"
+
+=== 2. the module ===
+sceKernelGetModuleList (at the start): 0x00000000, 2 modules
+  0x0000 eboot.bin                                sceAudioInOpen 0x80020003 0, its NID 0x80020003 0, scePadInit 0x80020003 0
+  0x0014 libc.prx                                 sceAudioInOpen 0x80020003 0, its NID 0x80020003 0, scePadInit 0x80020003 0
+sceKernelLoadStartModule("/system/common/lib/libSceAudioIn.sprx"): 0x80020002, its start 0x00000000
+sceKernelLoadStartModule("/system/priv/lib/libSceAudioIn.sprx"): 0x80020002, its start 0x00000000
+sceKernelLoadStartModule("libSceAudioIn.sprx"): 0x0000006d, its start 0x00000000
+sceKernelGetModuleList (after sceKernelLoadStartModule): 0x00000000, 2 modules
+  0x0000 eboot.bin                                sceAudioInOpen 0x80020003 0, its NID 0x80020003 0, scePadInit 0x80020003 0
+  0x0014 libc.prx                                 sceAudioInOpen 0x80020003 0, its NID 0x80020003 0, scePadInit 0x80020003 0
+sceSysmoduleLoadModuleInternal(0x80000002): 0x00000000
+sceKernelGetModuleList (after sceSysmoduleLoadModuleInternal): 0x00000000, 2 modules
+  0x0000 eboot.bin                                sceAudioInOpen 0x80020003 0, its NID 0x80020003 0, scePadInit 0x80020003 0
+  0x0014 libc.prx                                 sceAudioInOpen 0x80020003 0, its NID 0x80020003 0, scePadInit 0x80020003 0
+the module or its functions cannot be had: nothing more to try
+
+=== done ===

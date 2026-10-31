@@ -306,17 +306,18 @@
 		<frame png="ce/shell/main_menu/settings_select/player_setup/player_profile_edit/profile_options__6.png" width="512" height="256"/>
 		<frame png="ce/shell/main_menu/settings_select/player_setup/player_profile_edit/profile_options__7.png" width="512" height="256"/>
 		<frame png="ce/shell/main_menu/settings_select/player_setup/player_profile_edit/profile_options__8.png" width="512" height="256"/>
-		<frame map="ui\shell\main_menu\settings_select\player_setup\player_profile_edit\controller_edit\config_controller" index="4" width="279" height="279" y="34"/>
-		<frame map="ui\shell\main_menu\settings_select\player_setup\player_profile_edit\controller_edit\config_controller" index="5" width="279" height="279" y="34"/>
-		<frame map="ui\shell\main_menu\settings_select\player_setup\player_profile_edit\controller_edit\config_controller" index="6" width="279" height="279" y="34"/>
-		<frame map="ui\shell\main_menu\settings_select\player_setup\player_profile_edit\controller_edit\config_controller" index="7" width="279" height="279" y="34"/>
-		<frame map="ui\shell\main_menu\settings_select\player_setup\player_profile_edit\controller_edit\config_controller" index="8" width="279" height="279" y="34"/>
 	</bitmap>
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/header_profile_video_settings">
 		<frame png="ce/shell/main_menu/settings_select/player_setup/player_profile_edit/video_settings/header_profile_video_settings__0.png" width="512" height="64"/>
 	</bitmap>
 	<bitmap name="main_menu/solo_level_select/header_load_level">
 		<frame png="ce/shell/main_menu/solo_level_select/header_load_level__0.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/gameplay/header_gameplay">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/gameplay/header_gameplay.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="main_menu/theater/header_theater">
+		<frame png="ce/port/main_menu/theater/header_theater.png" width="512" height="64"/>
 	</bitmap>
 	<bitmap name="main_menu/mods/header_mods">
 		<frame png="ce/port/main_menu/mods/header_mods.png" width="512" height="64"/>
@@ -395,6 +396,10 @@
 		<frame png="ce/port/main_menu/menu_mods__0.png" width="256" height="64"/>
 		<frame png="ce/port/main_menu/menu_mods__1.png" width="256" height="64"/>
 	</bitmap>
+	<bitmap name="main_menu/menu_theater">
+		<frame png="ce/port/main_menu/menu_theater__0.png" width="256" height="64"/>
+		<frame png="ce/port/main_menu/menu_theater__1.png" width="256" height="64"/>
+	</bitmap>
 	<bitmap name="mods/status">
 		<frame png="ce/port/mods/status__0.png" width="24" height="24"/>
 		<frame png="ce/port/mods/status__1.png" width="24" height="24"/>
@@ -404,6 +409,42 @@
 		<frame png="ce/port/mods/status_small__0.png" width="16" height="16"/>
 		<frame png="ce/port/mods/status_small__1.png" width="16" height="16"/>
 		<frame png="ce/port/mods/status_small__2.png" width="16" height="16"/>
+	</bitmap>
+	<bitmap name="controllers/xbox_series_overlay">
+		<frame png="ce/port/controllers/xbox_series_overlay__0.png" width="216" height="236"/>
+	</bitmap>
+	<bitmap name="controllers/xbox_series_overlay_small">
+		<frame png="ce/port/controllers/xbox_series_overlay_small__0.png" width="266" height="202"/>
+	</bitmap>
+	<bitmap name="controllers/dualsense_overlay">
+		<frame png="ce/port/controllers/dualsense_overlay__0.png" width="216" height="236"/>
+	</bitmap>
+	<bitmap name="controllers/dualsense_overlay_small">
+		<frame png="ce/port/controllers/dualsense_overlay_small__0.png" width="266" height="202"/>
+	</bitmap>
+	<bitmap name="controllers/switch_pro_overlay">
+		<frame png="ce/port/controllers/switch_pro_overlay__0.png" width="216" height="236"/>
+	</bitmap>
+	<bitmap name="controllers/switch_pro_overlay_small">
+		<frame png="ce/port/controllers/switch_pro_overlay_small__0.png" width="266" height="202"/>
+	</bitmap>
+	<bitmap name="hints/switch_l">
+		<frame png="ce/port/hints/switch_l__0.png" width="14" height="14"/>
+	</bitmap>
+	<bitmap name="hints/switch_r">
+		<frame png="ce/port/hints/switch_r__0.png" width="14" height="14"/>
+	</bitmap>
+	<bitmap name="hints/ps5_l1">
+		<frame png="ce/port/hints/ps5_l1__0.png" width="14" height="14"/>
+	</bitmap>
+	<bitmap name="hints/ps5_r1">
+		<frame png="ce/port/hints/ps5_r1__0.png" width="14" height="14"/>
+	</bitmap>
+	<bitmap name="hints/switch_dpad">
+		<frame png="ce/port/hints/switch_dpad__0.png" width="14" height="14"/>
+	</bitmap>
+	<bitmap name="hints/ps5_dpad">
+		<frame png="ce/port/hints/ps5_dpad__0.png" width="14" height="14"/>
 	</bitmap>
 	<bitmap name="blank">
 		<frame png="ce/port/blank__0.png" width="4" height="4"/>

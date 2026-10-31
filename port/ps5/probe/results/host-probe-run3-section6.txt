@@ -1,0 +1,119 @@
+host probe (PPSA99103), run 3, section 6: started from the home screen by the user, who did section 6's steps.
+The report file was overwritten by run 4; these lines are the probe's own, recovered from the kernel log
+(build/ps5/klog/all.klog; klogsrv sent each line twice and interleaved with system lines, so they are de-duplicated).
+Sections 1 to 5 of run 3 printed what run 4 printed (host-probe.txt); run 3 then crashed in getcwd (klog-crashes.txt).
+
+=== 6. leaving and returning ===
+sceUserServiceInitialize: 0x00000000
+sceUserServiceGetInitialUser: 0x00000000, user 372994645
+scePadInit: 0x00000000
+the pad: handle 0x031d0700
+sceSystemServiceReceiveEvent and sceSystemServiceGetStatus are declared by hand (OpenOrbis's PS4 declarations), each given a 16 KB buffer; only the event's type and the status's first 8 bytes are read
+for 90 s: watch the grays for 10 s; press the PS button, stay in the system's menu for 10 s, return to the title; hold the PS button for the Quick Menu, close it; wait
+  0.000 s: the pad: connected 1, intercepted 0 (buttons 0x00000000)
+  0.000 s: sceSystemServiceReceiveEvent: 0x80a10004
+  0.000 s: sceSystemServiceGetStatus: 0x00000000; events waiting 0, then bytes 00 00 00 00 (isSystemUiOverlaid first)
+  1.003 s: 62 frames in 1.003 s, intervals min 8.05 ms, median 16.69 ms, max 16.79 ms; monotonic 97684.184, realtime 1792280914.451
+  2.004 s: 60 frames in 1.001 s, intervals min 16.67 ms, median 16.69 ms, max 16.71 ms; monotonic 97685.185, realtime 1792280915.452
+  3.005 s: 60 frames in 1.001 s, intervals min 16.64 ms, median 16.69 ms, max 16.73 ms; monotonic 97686.186, realtime 1792280916.453
+  4.006 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97687.187, realtime 1792280917.454
+  5.007 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 97688.188, realtime 1792280918.455
+  6.008 s: 60 frames in 1.001 s, intervals min 16.59 ms, median 16.69 ms, max 16.79 ms; monotonic 97689.189, realtime 1792280919.456
+  6.526 s: the pad: connected 1, intercepted 1 (buttons 0x80000000)
+  6.526 s: sceSystemServiceGetStatus: 0x00000000; events waiting 0, then bytes 01 00 00 00 (isSystemUiOverlaid first)
+  7.010 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 97690.190, realtime 1792280920.457
+  8.011 s: 60 frames in 1.001 s, intervals min 16.63 ms, median 16.68 ms, max 16.79 ms; monotonic 97691.191, realtime 1792280921.458
+  9.012 s: 60 frames in 1.001 s, intervals min 16.64 ms, median 16.68 ms, max 16.78 ms; monotonic 97692.192, realtime 1792280922.459
+ 10.013 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 97693.193, realtime 1792280923.460
+ 11.014 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 97694.194, realtime 1792280924.461
+ 12.016 s: 60 frames in 1.001 s, intervals min 16.64 ms, median 16.69 ms, max 16.73 ms; monotonic 97695.195, realtime 1792280925.462
+ 13.017 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 97696.196, realtime 1792280926.463
+ 14.018 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97697.197, realtime 1792280927.464
+ 15.019 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 97698.198, realtime 1792280928.465
+ 16.020 s: 60 frames in 1.001 s, intervals min 16.63 ms, median 16.69 ms, max 16.75 ms; monotonic 97699.199, realtime 1792280929.466
+ 17.022 s: 60 frames in 1.001 s, intervals min 16.64 ms, median 16.69 ms, max 16.73 ms; monotonic 97700.200, realtime 1792280930.467
+ 17.839 s: sceSystemServiceGetStatus: 0x00000000; events waiting 0, then bytes 00 00 00 00 (isSystemUiOverlaid first)
+ 17.873 s: the pad: connected 1, intercepted 0 (buttons 0x00000000)
+ 18.023 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 97701.201, realtime 1792280931.468
+ 19.024 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 97702.202, realtime 1792280932.469
+ 19.758 s: the pad: connected 1, intercepted 1 (buttons 0x80000000)
+ 19.775 s: sceSystemServiceGetStatus: 0x00000000; events waiting 0, then bytes 01 00 00 00 (isSystemUiOverlaid first)
+ 19.875 s: sceSystemServiceGetStatus: 0x00000000; events waiting 0, then bytes 00 01 00 00 (isSystemUiOverlaid first)
+ 20.025 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.71 ms; monotonic 97703.203, realtime 1792280933.470
+ 21.026 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97704.204, realtime 1792280934.471
+ 22.027 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.74 ms; monotonic 97705.205, realtime 1792280935.472
+ 23.029 s: 60 frames in 1.001 s, intervals min 16.64 ms, median 16.69 ms, max 16.74 ms; monotonic 97706.206, realtime 1792280936.473
+ 23.546 s: the pad: connected 1, intercepted 0 (buttons 0x00000000)
+ 23.746 s: the pad: connected 1, intercepted 1 (buttons 0x80000000)
+ 23.780 s: the pad: connected 1, intercepted 0 (buttons 0x00000000)
+ 23.780 s: sceSystemServiceGetStatus: 0x00000000; events waiting 0, then bytes 00 00 00 00 (isSystemUiOverlaid first)
+ 24.030 s: 60 frames in 1.001 s, intervals min 16.59 ms, median 16.68 ms, max 16.83 ms; monotonic 97707.207, realtime 1792280937.474
+ 25.031 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 97708.208, realtime 1792280938.475
+ 26.032 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.68 ms, max 16.73 ms; monotonic 97709.209, realtime 1792280939.476
+ 27.033 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 97710.210, realtime 1792280940.477
+ 28.035 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 97711.211, realtime 1792280941.478
+ 29.036 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 97712.212, realtime 1792280942.479
+ 30.037 s: 60 frames in 1.001 s, intervals min 16.63 ms, median 16.69 ms, max 16.75 ms; monotonic 97713.213, realtime 1792280943.480
+ 31.038 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97714.214, realtime 1792280944.481
+ 32.039 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 97715.215, realtime 1792280945.482
+ 33.041 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97716.216, realtime 1792280946.483
+ 34.042 s: 60 frames in 1.001 s, intervals min 16.64 ms, median 16.69 ms, max 16.73 ms; monotonic 97717.217, realtime 1792280947.484
+ 35.043 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.73 ms; monotonic 97718.218, realtime 1792280948.485
+ 36.044 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.68 ms, max 16.74 ms; monotonic 97719.219, realtime 1792280949.486
+ 37.045 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97720.220, realtime 1792280950.487
+ 38.047 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 97721.221, realtime 1792280951.488
+ 39.048 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.71 ms; monotonic 97722.222, realtime 1792280952.489
+ 40.049 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97723.223, realtime 1792280953.490
+ 41.050 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97724.224, realtime 1792280954.491
+ 42.051 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97725.225, realtime 1792280955.492
+ 43.052 s: 60 frames in 1.001 s, intervals min 16.64 ms, median 16.69 ms, max 16.73 ms; monotonic 97726.226, realtime 1792280956.493
+ 44.054 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.71 ms; monotonic 97727.227, realtime 1792280957.494
+ 45.055 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.71 ms; monotonic 97728.228, realtime 1792280958.495
+ 46.056 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 97729.229, realtime 1792280959.496
+ 47.057 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97730.230, realtime 1792280960.497
+ 48.058 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97731.231, realtime 1792280961.498
+ 49.060 s: 60 frames in 1.001 s, intervals min 16.59 ms, median 16.69 ms, max 16.79 ms; monotonic 97732.232, realtime 1792280962.499
+ 50.061 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 97733.233, realtime 1792280963.500
+ 51.062 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97734.234, realtime 1792280964.501
+ 52.063 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 97735.235, realtime 1792280965.502
+ 53.064 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 97736.236, realtime 1792280966.503
+ 54.066 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 97737.237, realtime 1792280967.504
+ 55.067 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.73 ms; monotonic 97738.238, realtime 1792280968.505
+ 56.068 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97739.239, realtime 1792280969.506
+ 57.069 s: 60 frames in 1.001 s, intervals min 16.67 ms, median 16.69 ms, max 16.71 ms; monotonic 97740.240, realtime 1792280970.507
+ 58.070 s: 60 frames in 1.001 s, intervals min 16.64 ms, median 16.69 ms, max 16.73 ms; monotonic 97741.241, realtime 1792280971.508
+ 59.071 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97742.242, realtime 1792280972.509
+ 60.073 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.70 ms; monotonic 97743.243, realtime 1792280973.510
+ 61.074 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97744.244, realtime 1792280974.511
+ 62.075 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 97745.245, realtime 1792280975.512
+ 63.076 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 97746.246, realtime 1792280976.513
+ 64.077 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97747.247, realtime 1792280977.514
+ 65.079 s: 60 frames in 1.001 s, intervals min 16.67 ms, median 16.69 ms, max 16.71 ms; monotonic 97748.248, realtime 1792280978.515
+ 66.080 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 97749.249, realtime 1792280979.516
+ 67.081 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 97750.250, realtime 1792280980.517
+ 68.082 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97751.251, realtime 1792280981.518
+ 69.083 s: 60 frames in 1.001 s, intervals min 16.67 ms, median 16.69 ms, max 16.70 ms; monotonic 97752.252, realtime 1792280982.519
+ 70.085 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.68 ms, max 16.72 ms; monotonic 97753.253, realtime 1792280983.520
+ 71.086 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97754.254, realtime 1792280984.521
+ 72.087 s: 60 frames in 1.001 s, intervals min 16.67 ms, median 16.69 ms, max 16.71 ms; monotonic 97755.255, realtime 1792280985.522
+ 73.088 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97756.256, realtime 1792280986.523
+ 74.089 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97757.257, realtime 1792280987.524
+ 75.090 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97758.258, realtime 1792280988.525
+ 76.092 s: 60 frames in 1.001 s, intervals min 16.67 ms, median 16.69 ms, max 16.70 ms; monotonic 97759.259, realtime 1792280989.526
+ 77.093 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.71 ms; monotonic 97760.260, realtime 1792280990.527
+ 78.094 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97761.261, realtime 1792280991.528
+ 79.095 s: 60 frames in 1.001 s, intervals min 16.67 ms, median 16.69 ms, max 16.71 ms; monotonic 97762.262, realtime 1792280992.529
+ 80.096 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 97763.263, realtime 1792280993.530
+ 81.098 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.71 ms; monotonic 97764.264, realtime 1792280994.531
+ 82.099 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97765.265, realtime 1792280995.532
+ 83.100 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 97766.266, realtime 1792280996.533
+ 84.101 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.71 ms; monotonic 97767.267, realtime 1792280997.534
+ 85.102 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97768.268, realtime 1792280998.535
+ 86.104 s: 60 frames in 1.001 s, intervals min 16.64 ms, median 16.69 ms, max 16.73 ms; monotonic 97769.269, realtime 1792280999.536
+ 87.105 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97770.270, realtime 1792281000.537
+ 88.106 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.71 ms; monotonic 97771.271, realtime 1792281001.538
+ 89.107 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 97772.272, realtime 1792281002.539
+90 s: 5396 frames presented in all; the swapchain never reported out of date
+after the 90 s: 10 of 10 frames presented
+scePadClose: 0x00000000
+=== 3. getcwd (last) ===

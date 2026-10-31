@@ -1230,11 +1230,11 @@ static void get_local_player_input_blob(
 						constants->look_function.count>1);
 					look_delta.yaw = evaluate_piecewise_linear_function(
 						constants->look_function.count,
-						constants->look_function.address,
+						TAG_BLOCK_ADDRESS(constants->look_function),
 						clamped_yaw) * yaw_spin_scale * look_yaw_rate;
 					look_delta.pitch = evaluate_piecewise_linear_function(
 						constants->look_function.count,
-						constants->look_function.address,
+						TAG_BLOCK_ADDRESS(constants->look_function),
 						clamped_pitch) * pitch_spin_scale * look_pitch_rate;
 					{
 						/* port: the touch controls' swipe (port/linux/src/xinput_sdl.c),
@@ -1242,9 +1242,12 @@ static void get_local_player_input_blob(
 						zoom, the stun and the magnetism below act on it as on the
 						stick's, so that it slows over a target and follows a moving
 						one (input.touch_aim_assist); the swipe inverted as the stick
-						is, the gyroscope as the phone turns */
+						is, the phone's gyroscope as the phone turns, and on the
+						Switch the controller's gyroscope with its own horizontal
+						and vertical invert */
 						extern int halo_linux_touch_look(short gamepad_index, real *yaw, real *pitch, real *gyro_yaw,
 							real *gyro_pitch);
+						extern int halo_linux_gyro_zoom_only(void);
 						real touch_yaw;
 						real touch_pitch;
 						real gyro_yaw;
@@ -1256,8 +1259,14 @@ static void get_local_player_input_blob(
 						{
 							touching = TRUE;
 							if (input_abstraction_port_look_inverted(gamepad_index))
-							{
 								touch_pitch = -touch_pitch;
+							/* (input.gyro_aim = "zoom": the gyroscope's turn only
+							while zoomed in, for fine aiming; read and dropped
+							otherwise, so that zooming in does not jump) */
+							if (control->zoom_level == NONE && halo_linux_gyro_zoom_only())
+							{
+								gyro_yaw = 0.f;
+								gyro_pitch = 0.f;
 							}
 							look_delta.yaw += (touch_yaw + gyro_yaw) / touch_scale;
 							look_delta.pitch += (touch_pitch + gyro_pitch) / touch_scale;

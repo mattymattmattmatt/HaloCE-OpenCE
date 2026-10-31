@@ -54,6 +54,9 @@ int touch_input_move(float *forward, float *strafe);
 call to yaw and pitch and to gyro_yaw and gyro_pitch, in radians at `scale`
 radians per pixel */
 void touch_input_look(float scale, float *yaw, float *pitch, float *gyro_yaw, float *gyro_pitch);
+/* the Gyro Aim mode (input.gyro_aim: 0 off, 1 on, 2 only while zoomed in)
+for the overlay, which runs the phone's gyroscope (Android's) */
+void touch_input_gyro_mode(int mode);
 
 /* whether the swipe gets the stick's aim assist (input.touch_aim_assist) */
 int touch_input_aim_assist(void);
@@ -68,6 +71,14 @@ port/linux/game/touch_postgame.c), as the touch controls would: on a
 touchscreen, with input.touch_controls "on", or "auto" while no controller
 is connected */
 int touch_input_screen_buttons(void);
+
+/* a replay's buttons on the screen (port/linux/game/network_replay_playback.c),
+for the touch controls to press: count of them, each
+TOUCH_REPLAY_TARGET_FIELDS ints (x0, y0, x1, y1 in ten-thousandths of the
+screen, and the game's controller button, input.h's, it holds down) */
+#define TOUCH_REPLAY_MAXIMUM_TARGETS 16
+#define TOUCH_REPLAY_TARGET_FIELDS 5
+void touch_input_replay_targets(const int *targets, int count);
 #endif
 
 #endif

@@ -346,7 +346,10 @@ def main():
                     machine.connect()
                     selector.register(machine.tcp, selectors.EVENT_READ | selectors.EVENT_WRITE, machine)
                     next_connect_time = now + 1.0 / options.join_rate
-            for key, events in selector.select(timeout=0.005):
+            # (Windows' select refuses an empty set: every machine closed or
+            # still waiting to connect)
+            ready = selector.select(timeout=0.005) if selector.get_map() else (time.sleep(0.005) or [])
+            for key, events in ready:
                 machine = key.data
                 if machine.state == "connecting" and events & selectors.EVENT_WRITE:
                     error = machine.tcp.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
@@ -361,7 +364,13 @@ def main():
                             machine.state = "closed"
                         continue
                     selector.modify(machine.tcp, selectors.EVENT_READ, machine)
-                    machine.joined()
+                    try:
+                        machine.joined()
+                    except OSError as error:
+                        # (a host that took the connection and then reset it)
+                        log("%s: %s" % (machine.name, error))
+                        machine.close(selector)
+                        continue
                 if events & selectors.EVENT_READ and machine.state != "closed":
                     try:
                         if not machine.receive() or machine.state == "closed":

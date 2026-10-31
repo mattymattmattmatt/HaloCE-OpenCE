@@ -13,18 +13,29 @@
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/options_menu" type="column_list" width="640" height="480" flags="pass_unhandled_to_focused_child up_down_tabs_children" description="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/help">
 		<data input="port settings help"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_overshield_effect" x="54" y="73"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_shield_glow" x="54" y="95"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_shield_glow_intensity" x="54" y="117"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_hdr" x="54" y="139"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_overshield_effect" x="54" y="73" platform="desktop android web"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_shield_glow" x="54" y="95" platform="desktop android web"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_shield_glow" x="54" y="73" platform="switch ps5"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_shield_glow_intensity" x="54" y="117" platform="desktop android web"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_shield_glow_intensity" x="54" y="95" platform="switch ps5"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_hdr" x="54" y="139" platform="desktop android web"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_hdr_output" x="54" y="161" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_hdr_tone_mapping" x="54" y="183"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_hdr_tone_mapping" x="54" y="183" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_hdr_tone_mapping" x="54" y="161" platform="android web"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_hdr_paper_white" x="54" y="205" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_hdr_peak_brightness" x="54" y="227" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_gore_level" x="54" y="249"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_gore_duration" x="54" y="271"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_gore_corpse_bleed" x="54" y="293"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_manual_respawn" x="54" y="315"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_gore_level" x="54" y="249" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_gore_level" x="54" y="183" platform="android web"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_gore_level" x="54" y="117" platform="switch ps5"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_gore_duration" x="54" y="271" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_gore_duration" x="54" y="205" platform="android web"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_gore_duration" x="54" y="139" platform="switch ps5"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_gore_corpse_bleed" x="54" y="293" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_gore_corpse_bleed" x="54" y="227" platform="android web"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_gore_corpse_bleed" x="54" y="161" platform="switch ps5"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_manual_respawn" x="54" y="315" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_manual_respawn" x="54" y="249" platform="android web"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_manual_respawn" x="54" y="183" platform="switch ps5"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_hdr_calibration" x="54" y="337" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/button_bar" y="414"/>
 	</widget>
@@ -33,7 +44,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/button_ok" x="380" y="1"/>
 		<child widget="common_button_cancel" x="510" y="1"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_overshield_effect" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_overshield_effect" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF" platform="desktop android web">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/overshield_effect_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/overshield_effect_spinner" x="320" y="1"/>
 	</widget>
@@ -60,7 +71,7 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/shield_glow_intensity_spinner" type="spinner" left="3" top="2" width="147" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="DEFAULT|LIGHT SHOW" setting="display.shield_glow_intensity" values="default|light_show" font="ui\large_ui" color="#FF2896FF" align="center" text_y="1" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -6 19 0" footer_bounds="7 150 19 156">
 		<on event="created" run="port setting load"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_hdr" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_hdr" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF" platform="desktop android web">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/hdr_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/hdr_spinner" x="320" y="1"/>
 	</widget>
@@ -78,7 +89,7 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/hdr_output_spinner" type="spinner" left="3" top="2" width="147" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="display.hdr_output" values="true|false" font="ui\large_ui" color="#FF2896FF" align="center" text_y="1" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -6 19 0" footer_bounds="7 150 19 156">
 		<on event="created" run="port setting load"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_hdr_tone_mapping" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_hdr_tone_mapping" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF" platform="desktop android web">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/hdr_tone_mapping_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/hdr_tone_mapping_spinner" x="320" y="1"/>
 	</widget>

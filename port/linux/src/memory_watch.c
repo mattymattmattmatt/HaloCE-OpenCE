@@ -35,7 +35,7 @@ faults, so the renderer's device installs it again, chained to that one.
 #include <unistd.h>
 
 #define WATCH_PAGE_SIZE 0x1000UL
-#define WATCH_PAGE_COUNT (PLATFORM_CONTIGUOUS_SIZE / WATCH_PAGE_SIZE)
+#define WATCH_PAGE_COUNT (PLATFORM_CONTIGUOUS_MAXIMUM / WATCH_PAGE_SIZE)
 
 /* (each page: 0 not watched, 1 watched and read-only, 2 made writable by a
 watched write. A fault on a page at 2 is a write another thread made as

@@ -1,0 +1,28 @@
+glslang-probe.txt: writing to this file and the kernel log
+system software 13.590.001 (0x13590001)
+
+=== 1. glslang_initialize_process ===
+before: flexible memory available 433.0 MB; direct memory's largest free block 12270.0 MB; the platform heap (malloc, wrapped as the RADV link wraps it) holds 16.0 MB, at most 16.0 MB, 0 fallbacks to libc
+glslang_initialize_process: 1 in 4 us
+after: flexible memory available 433.0 MB; direct memory's largest free block 12270.0 MB; the platform heap (malloc, wrapped as the RADV link wraps it) holds 16.0 MB, at most 16.0 MB, 0 fallbacks to libc
+
+=== 2. the six shaders, ten compiles each, and 3. their SPIR-V written ===
+the first compile of all (pass.vert, cold): 160911 us
+pass.vert: 677 bytes of GLSL, 302 words of SPIR-V; first 160911 us, then min 1339 us, median 1361 us (of 9)
+/app0/spirv/pass_vert.spv: 302 words written
+pass.frag: 328 bytes of GLSL, 158 words of SPIR-V; first 1368 us, then min 1278 us, median 1301 us (of 9)
+/app0/spirv/pass_frag.spv: 158 words written
+vs_typical.vert: 6366 bytes of GLSL, 4415 words of SPIR-V; first 4240 us, then min 3971 us, median 4012 us (of 9)
+/app0/spirv/vs_typical_vert.spv: 4415 words written
+ps_typical.frag: 4100 bytes of GLSL, 2339 words of SPIR-V; first 3374 us, then min 3005 us, median 3023 us (of 9)
+/app0/spirv/ps_typical_frag.spv: 2339 words written
+vs_large.vert: 11374 bytes of GLSL, 8845 words of SPIR-V; first 7349 us, then min 7055 us, median 7140 us (of 9)
+/app0/spirv/vs_large_vert.spv: 8845 words written
+ps_large.frag: 8568 bytes of GLSL, 6046 words of SPIR-V; first 6093 us, then min 5726 us, median 5793 us (of 9)
+/app0/spirv/ps_large_frag.spv: 6046 words written
+
+=== 4. memory after ===
+after all compiles: flexible memory available 433.0 MB; direct memory's largest free block 12238.0 MB; the platform heap (malloc, wrapped as the RADV link wraps it) holds 48.0 MB, at most 48.0 MB, 0 fallbacks to libc
+after glslang_finalize_process: flexible memory available 433.0 MB; direct memory's largest free block 12238.0 MB; the platform heap (malloc, wrapped as the RADV link wraps it) holds 48.0 MB, at most 48.0 MB, 0 fallbacks to libc
+
+=== done ===

@@ -102,28 +102,63 @@ bool SDL_ShowSimpleMessageBox(SDL_MessageBoxFlags flags, const char *title, cons
 	return host_sdl_show_simple_message_box((unsigned int)flags, title, message) != 0;
 }
 
-/* (up to three buttons, their ids those of the guest's) */
-bool SDL_ShowMessageBox(const SDL_MessageBoxData *data, int *buttonid)
-{
-	const char *labels[3] = { NULL, NULL, NULL };
-	int default_index = -1;
-	int index;
-	int chosen;
+#define MESSAGE_BOX_BUTTONS 8
 
-	if (!data || data->numbuttons < 1 || data->numbuttons > 3)
-		return false;
-	for (index = 0; index < data->numbuttons; index++)
+/* the host's struct host_message_box (port/android/host/host.h): 32-bit
+members only, and one pointer to it, so that every argument of the call has
+a register (on x86-64, six: tools/check_host_imports.py) */
+struct message_box
+{
+	unsigned int flags;
+	unsigned int title;
+	unsigned int message;
+	int button_count;
+	int button_flags[MESSAGE_BOX_BUTTONS];
+	int button_ids[MESSAGE_BOX_BUTTONS];
+	/* the buttons' texts one after another, each NUL terminated */
+	unsigned int button_texts;
+	unsigned int button_texts_size;
+	/* the host's answer */
+	int chosen;
+};
+
+typedef char message_box_size_check[sizeof(struct message_box) == 92 ? 1 : -1];
+
+bool SDL_ShowMessageBox(const SDL_MessageBoxData *data, int *button)
+{
+	struct message_box box;
+	char texts[1024];
+	size_t used = 0;
+	int count = data->numbuttons < MESSAGE_BOX_BUTTONS ? data->numbuttons : MESSAGE_BOX_BUTTONS;
+	int index;
+
+	memset(&box, 0, sizeof(box));
+	for (index = 0; index < count; index++)
 	{
-		labels[index] = data->buttons[index].text;
-		if (data->buttons[index].flags & SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT)
-			default_index = index;
+		const char *text = data->buttons[index].text ? data->buttons[index].text : "";
+		size_t length = strlen(text) + 1;
+
+		if (used + length > sizeof(texts))
+		{
+			count = index;
+			break;
+		}
+		box.button_flags[index] = (int)data->buttons[index].flags;
+		box.button_ids[index] = data->buttons[index].buttonID;
+		memcpy(texts + used, text, length);
+		used += length;
 	}
-	chosen = host_sdl_show_message_box((unsigned int)data->flags, data->title, data->message, default_index,
-		labels[0], labels[1], labels[2]);
-	if (chosen < 0 || chosen >= data->numbuttons)
+	box.flags = (unsigned int)data->flags;
+	box.title = (unsigned int)(uintptr_t)(data->title ? data->title : "");
+	box.message = (unsigned int)(uintptr_t)(data->message ? data->message : "");
+	box.button_count = count;
+	box.button_texts = (unsigned int)(uintptr_t)texts;
+	box.button_texts_size = (unsigned int)used;
+	box.chosen = -1;
+	if (!host_sdl_show_message_box(&box))
 		return false;
-	if (buttonid)
-		*buttonid = data->buttons[chosen].buttonID;
+	if (button)
+		*button = box.chosen;
 	return true;
 }
 
@@ -138,9 +173,14 @@ void SDL_Delay(Uint32 milliseconds)
 
 /* ---------- video */
 
+/* the last window made: the game makes one (guest_desktop.c's
+SDL_GetKeyboardFocus) */
+SDL_Window *guest_sdl_window;
+
 SDL_Window *SDL_CreateWindow(const char *title, int width, int height, SDL_WindowFlags flags)
 {
-	return (SDL_Window *)host_sdl_create_window(title, width, height, (long long)flags);
+	guest_sdl_window = (SDL_Window *)host_sdl_create_window(title, width, height, (long long)flags);
+	return guest_sdl_window;
 }
 
 bool SDL_GetWindowSizeInPixels(SDL_Window *window, int *width, int *height)

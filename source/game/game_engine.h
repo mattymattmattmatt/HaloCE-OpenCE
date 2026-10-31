@@ -771,4 +771,20 @@ real game_engine_get_damage_multiplier(
 	long damaging_player_index,
 	long damaged_player_index);
 
+/* port: (game_engine_ctf.c) a team's flag as the bots see it: where it is, who carries it, whether it is home,
+and where home is; FALSE for a team with no flag this game */
+boolean game_engine_ctf_flag_state(long team_index, real_point3d *position, long *carrier_player_index,
+	boolean *at_home, real_point3d *home);
+/* port: whether touching one's own flag away from home returns it */
+boolean game_engine_ctf_touch_returns(void);
+/* port: whether a capture needs the capturer's own flag at home */
+boolean game_engine_ctf_home_to_score(void);
+
+/* port: (game_engine_king.c) the hill as the bots see it: its points, its height, its middle and its number;
+FALSE while there is none */
+boolean game_engine_king_hill(real_point3d *points, long maximum, long *point_count, real *bottom, real *top,
+	real_point3d *center, long *hill_id);
+/* port: whether a point is on the hill, as a player's middle is counted */
+boolean game_engine_king_point_on_hill(real_point3d const *position);
+
 #endif // __GAME_ENGINE_H

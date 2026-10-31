@@ -29,6 +29,10 @@ ui_widget.c ask this file for their names, descriptions and pictures.
 indices fit before the campaigns' (custom_edition_maps.c) */
 #define CUSTOM_EDITION_MAPS_MAXIMUM 8192
 
+/* a subfolder of custom_maps, named on a map that was found in one (empty
+when the map is in the maps folder itself). One level of folders. */
+#define CUSTOM_EDITION_MAP_CATEGORY_LENGTH 64
+
 /* ---------- structures */
 
 struct bitmap_data;
@@ -77,6 +81,12 @@ them). Scans for maps the first time. */
 short custom_edition_maps_count(
 	boolean campaign);
 short custom_edition_maps_display_index_of(
+	boolean campaign,
+	short index);
+
+/* The subfolder of the map at `index`, or "" when it is in the maps folder
+itself. NULL when `index` is past the list. */
+char const *custom_edition_maps_category(
 	boolean campaign,
 	short index);
 

@@ -17,5 +17,9 @@ success, or 0 with the reason (for the player) in error. Called from any
 thread */
 int xiso_extract_maps(const char *image_path, const char *destination, xiso_progress_proc progress, void *context,
 	char *error, int error_size);
+/* the loading screen's picture (default.xbe's) written to <destination>/maps/loading.tga when the maps folder has
+none: maps extracted before the extraction wrote it, whose loading screen's light then swept over black; nonzero if
+it was written. Nothing else of the image is read */
+int xiso_write_missing_loading_picture(const char *image_path, const char *destination);
 
 #endif

@@ -41,9 +41,15 @@ static int64_t look_ns;
 /* the gyroscope's turn, apart: the profile's invert is the swipe's only */
 static float gyro_delta[2];
 static int64_t gyro_ns;
+/* the game's Gyro Aim (input.gyro_aim): 0 off, 1 on, 2 only while zoomed in,
+which the overlay polls to run the phone's gyroscope */
+static volatile int gyro_mode;
 static int rumble_amplitude;
 static int64_t rumble_ns;
 static volatile int touch_scene;
+/* the fingers that tap together to open the overlay menu, the overlay's
+General option; touch_input.c counts them in the menus */
+static volatile int menu_fingers = 3;
 /* the overlay's devices (host_touch_devices): a touchscreen, a game
 controller (a stick or a hat, not a phone's few gamepad keys) */
 #define HOST_TOUCH_DEVICE_TOUCHSCREEN 1
@@ -54,6 +60,13 @@ its changes, which the overlay polls */
 #define TOUCH_BUTTONS 16
 static int32_t touch_bindings[TOUCH_BUTTONS];
 static int touch_bindings_serial;
+/* a replay's buttons on the screen (host_touch_targets): their count, then
+TOUCH_TARGET_FIELDS each, and a count of their changes, which the overlay
+polls */
+#define TOUCH_MAXIMUM_TARGETS 16
+#define TOUCH_TARGET_FIELDS 5
+static int32_t touch_targets[1 + TOUCH_MAXIMUM_TARGETS * TOUCH_TARGET_FIELDS];
+static int touch_targets_serial;
 
 static int64_t now_ns(void)
 {
@@ -135,6 +148,33 @@ JNIEXPORT void JNICALL Java_com_halo_decomp_TouchControls_nativeGyro(
 	gyro_delta[1] += dy;
 	gyro_ns = now_ns();
 	pthread_mutex_unlock(&touch_lock);
+}
+
+/* the guest's, when its settings change: the Gyro Aim mode (xinput_sdl.c,
+which applies its sensitivity, invert and zoom itself) */
+void host_touch_gyro_mode(int mode)
+{
+	gyro_mode = mode;
+}
+
+JNIEXPORT jint JNICALL Java_com_halo_decomp_TouchControls_nativeGyroMode(JNIEnv *env, jclass cls)
+{
+	(void)env;
+	(void)cls;
+	return gyro_mode;
+}
+
+JNIEXPORT void JNICALL Java_com_halo_decomp_TouchControls_nativeMenuFingers(JNIEnv *env, jclass cls, jint fingers)
+{
+	(void)env;
+	(void)cls;
+	if (fingers == 3 || fingers == 4)
+		menu_fingers = fingers;
+}
+
+int host_touch_menu_fingers(void)
+{
+	return menu_fingers;
 }
 
 JNIEXPORT void JNICALL Java_com_halo_decomp_TouchControls_nativeLookReset(JNIEnv *env, jclass cls)
@@ -224,6 +264,40 @@ JNIEXPORT jint JNICALL Java_com_halo_decomp_TouchControls_nativeBindings(JNIEnv 
 	pthread_mutex_unlock(&touch_lock);
 	if (controls && (*env)->GetArrayLength(env, controls) >= TOUCH_BUTTONS)
 		(*env)->SetIntArrayRegion(env, controls, 0, TOUCH_BUTTONS, (const jint *)copy);
+	return serial;
+}
+
+/* the guest's, when a replay's buttons change: count of them, each x0, y0,
+x1, y1 (ten-thousandths of the screen) and the game's controller button
+(port/linux/game/network_replay_playback.c) */
+void host_touch_targets(const int32_t *targets, int count)
+{
+	if (count < 0)
+		count = 0;
+	if (count > TOUCH_MAXIMUM_TARGETS)
+		count = TOUCH_MAXIMUM_TARGETS;
+	pthread_mutex_lock(&touch_lock);
+	touch_targets[0] = count;
+	memcpy(touch_targets + 1, targets, (size_t)count * TOUCH_TARGET_FIELDS * sizeof(*targets));
+	touch_targets_serial++;
+	pthread_mutex_unlock(&touch_lock);
+}
+
+/* the replay's buttons into targets (when it is not null: their count, then
+TOUCH_TARGET_FIELDS each); returns their count of changes */
+JNIEXPORT jint JNICALL Java_com_halo_decomp_TouchControls_nativeTargets(JNIEnv *env, jclass cls,
+	jintArray targets)
+{
+	int32_t copy[1 + TOUCH_MAXIMUM_TARGETS * TOUCH_TARGET_FIELDS];
+	int serial;
+
+	(void)cls;
+	pthread_mutex_lock(&touch_lock);
+	memcpy(copy, touch_targets, sizeof(copy));
+	serial = touch_targets_serial;
+	pthread_mutex_unlock(&touch_lock);
+	if (targets && (*env)->GetArrayLength(env, targets) >= (jsize)(sizeof(copy) / sizeof(copy[0])))
+		(*env)->SetIntArrayRegion(env, targets, 0, (jsize)(sizeof(copy) / sizeof(copy[0])), (const jint *)copy);
 	return serial;
 }
 

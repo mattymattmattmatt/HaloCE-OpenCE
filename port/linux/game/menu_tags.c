@@ -360,7 +360,7 @@ static char const *const port_function_names[] =
 	"color picker menu initialize", "color picker menu dispose", "color picker select color",
 	"player profile list initialize", "player profile list dispose", "request del player profile",
 	"final del player profile",
-	"ss copy invite", "join controller to mp game", "mp level list initialize", "mp level list dispose",
+	"ss copy invite", "ss invite qr back", "join controller to mp game", "mp level list initialize", "mp level list dispose",
 	"mp level select", "mp profiles list initialize", "mp profiles list dispose", "mp profile set for game",
 	"port lobby preview join",
 	"port setup edit",
@@ -397,11 +397,18 @@ static char const *const port_function_names[] =
 	"new campaign decision",
 	/* (the main menu's Mods: menu_functions.c) */
 	"port mods init", "port mods close", "port mods toggle", "port mods move up", "port mods move down",
-	"port mods save",
-	"port controller init", "port controller close", "port controller defaults", "port controller save", "port controller bind", "port controller left", "port controller right",
+	"port mods save", "port mods accept",
+	/* (the main menu's news: menu_functions.c) */
+	"port news init", "port news close", "port news up", "port news down", "port news page up",
+	"port news page down",
+	/* (the main menu's Theater: menu_functions.c) */
+	"port theater record", "port theater export", "port theater watch", "port theater delete",
+	/* (the server browser's buttons' shortcuts: menu_functions.c) */
+	"port browser refresh", "port browser filters", "port browser mode previous", "port browser mode next",
+	"port browser column previous", "port browser column next", "port browser sort decreasing",
+	"port browser sort increasing",
 	/* (a dedicated server's map vote: menu_functions.c) */
 	"port map vote open", "port map vote choose",
-	"port controller clear", "port controller cancel",
 };
 
 /* the PC version's game data functions that the Xbox's have not, from
@@ -420,9 +427,11 @@ static char const *const port_game_data_input_names[] =
 	row; the Xbox's read only player_ui's gametype, not Server Setup's) */
 	"game settings lists text update", "get edit game settings name", "mp edit profile set rule text",
 	"port password update",
-	/* (the profile settings' picture: the Xbox's of the button settings,
-	on Gamepad Setup's row) */
+	/* (the profile settings' picture: on Gamepad Setup's row, the
+	button-layout overlay in its place) */
 	"port gamepad layout preview",
+	/* (the main menu's line under the version number: the renderer, and its driver) */
+	"port renderer textbox",
 	/* (the main menu's Mods) */
 	"port mods update",
 	/* (network co-op's pause menu's FRIENDLY FIRE: its text, ON or OFF) */
@@ -431,7 +440,13 @@ static char const *const port_game_data_input_names[] =
 	"port campaign allies text",
 	/* (the gametype editor's description, with OPENCE OPTIONS' row) */
 	"port playlist edit desc",
-	"port controller update",
+	/* (the main menu's news) */
+	"port news update",
+	/* (the main menu's Theater) */
+	"port theater update",
+	/* (Gamepad Setup's BUTTON LAYOUT, and the profile settings' picture of
+	it: a controller, and what the layout puts on its buttons) */
+	"port gamepad layout overlay",
 	/* (a dedicated server's map vote's screen) */
 	"port map vote update",
 	/* (HDR Calibration's patterns, drawn by the renderer) */
@@ -916,7 +931,7 @@ static void *bitmap_build(struct halo_menu_bitmap const *source, long tag_index)
 				problem(source->file, source->line, "the map's bitmap has no such frame:", data->map);
 				return group;
 			}
-			memcpy(bitmap, (struct bitmap_data *)group_source->bitmaps.address + data->index, sizeof(*bitmap));
+			memcpy(bitmap, (struct bitmap_data *)TAG_BLOCK_ADDRESS(group_source->bitmaps) + data->index, sizeof(*bitmap));
 			bitmap->cache_block_index = NONE;
 			bitmap->base_address = NULL;
 			/* (scaled to a size of the file's: the texture stays the map's,
@@ -987,7 +1002,7 @@ static void *bitmap_build(struct halo_menu_bitmap const *source, long tag_index)
 static void conditional_add(struct ui_widget_definition *definition, long tag_index, long flags)
 {
 	struct ui_widget_conditional_reference *conditionals =
-		(struct ui_widget_conditional_reference *)definition->conditional_widgets.address;
+		(struct ui_widget_conditional_reference *)TAG_BLOCK_ADDRESS(definition->conditional_widgets);
 	struct ui_widget_conditional_reference *grown;
 	long count = definition->conditional_widgets.count, index;
 
@@ -1547,7 +1562,7 @@ static boolean tag_name_ends(long tag_index, char const *end)
 else NONE */
 static long pause_quit_button(struct ui_widget_definition const *list, long quit_function)
 {
-	struct ui_widget_child_reference const *children = list->child_widgets.address;
+	struct ui_widget_child_reference const *children = TAG_BLOCK_ADDRESS(list->child_widgets);
 	long child;
 
 	for (child = 0; child < list->child_widgets.count; child++)
@@ -1559,7 +1574,7 @@ static long pause_quit_button(struct ui_widget_definition const *list, long quit
 		if (children[child].widget_tag.index == NONE)
 			continue;
 		button = tag_get(UI_WIDGET_DEFINITION_TAG, children[child].widget_tag.index);
-		handlers = button->event_handlers.address;
+		handlers = TAG_BLOCK_ADDRESS(button->event_handlers);
 		for (handler = 0; handler < button->event_handlers.count; handler++)
 		{
 			if (handlers[handler].function == quit_function &&
@@ -1605,7 +1620,7 @@ static void *pause_button_texts(struct cache_file_tag_instance *instances, struc
 	}
 	/* (the game's memcpy asserts on a NULL source, even for nothing) */
 	if (model->event_handlers.count)
-		memcpy(handlers, model->event_handlers.address, model->event_handlers.count * sizeof(*handlers));
+		memcpy(handlers, TAG_BLOCK_ADDRESS(model->event_handlers), model->event_handlers.count * sizeof(*handlers));
 	for (handler = 0; handler < model->event_handlers.count; handler++)
 	{
 		handlers[handler].flags = FLAG(_event_handler_run_function_bit);
@@ -1653,7 +1668,7 @@ how much taller the list grew for them (growth) */
 static long pause_list_patch(struct cache_file_tag_instance *instances, struct ui_widget_definition *list, long quit,
 	boolean host, short *growth)
 {
-	struct ui_widget_child_reference *children = list->child_widgets.address;
+	struct ui_widget_child_reference *children = TAG_BLOCK_ADDRESS(list->child_widgets);
 	long count = list->child_widgets.count, added = (host || build.coop ? 2 : 1) + (pause_allies_row ? 1 : 0), child;
 	struct ui_widget_child_reference *grown = allocate((count + added) * sizeof(struct ui_widget_child_reference));
 	struct ui_widget_definition const *model = tag_get(UI_WIDGET_DEFINITION_TAG, children[quit].widget_tag.index);
@@ -1735,7 +1750,7 @@ static long pause_list_patch(struct cache_file_tag_instance *instances, struct u
 /* the Xbox's own box: a widget of the three pausebox2 pieces */
 static boolean pause_box_stock(struct ui_widget_definition const *box)
 {
-	struct ui_widget_child_reference const *pieces = box->child_widgets.address;
+	struct ui_widget_child_reference const *pieces = TAG_BLOCK_ADDRESS(box->child_widgets);
 
 	return box->child_widgets.count == 3 && tag_name_ends(pieces[0].widget_tag.index, "\\pausebox2_left") &&
 		tag_name_ends(pieces[1].widget_tag.index, "\\pausebox2_left_center") &&
@@ -1753,7 +1768,7 @@ the number of buttons; the box's height */
 static short pause_box_redraw(struct ui_widget_definition const *box, long buttons)
 {
 	static char const *const names[] = { "pause/pausebox_left", "pause/pausebox_center", "pause/pausebox_right" };
-	struct ui_widget_child_reference const *pieces = box->child_widgets.address;
+	struct ui_widget_child_reference const *pieces = TAG_BLOCK_ADDRESS(box->child_widgets);
 	short height = (short)PAUSE_BOX_HEIGHT(PAUSE_BOX_FIRST_BUTTONS);
 	long piece;
 
@@ -1767,7 +1782,7 @@ static short pause_box_redraw(struct ui_widget_definition const *box, long butto
 		if (bitmap == NONE)
 			continue;
 		group = bitmap_group_get(build.bitmap_tags[bitmap]);
-		sequence = group->sequences.address;
+		sequence = TAG_BLOCK_ADDRESS(group->sequences);
 		/* (one frame: the one for the number of buttons) */
 		sequence->first_bitmap_index = (short)PIN(buttons - PAUSE_BOX_FIRST_BUTTONS, 0, group->bitmaps.count - 1);
 		sequence->bitmap_count = 1;
@@ -2067,7 +2082,7 @@ static void pause_patch(struct cache_file_tag_instance *instances)
 	rebuilt = pause_rebuild(screens, quit_function, host || build.coop ? 2 : 1);
 	for (screen = 0; screen < screens->count; screen++)
 	{
-		long screen_tag = ((struct tag_reference const *)screens->address)[screen].index;
+		long screen_tag = ((struct tag_reference const *)TAG_BLOCK_ADDRESS_AT(screens))[screen].index;
 		struct ui_widget_definition *definition;
 		struct ui_widget_child_reference *children;
 		long child, list_child = NONE, box_child = NONE;
@@ -2076,7 +2091,7 @@ static void pause_patch(struct cache_file_tag_instance *instances)
 		if (screen_tag == NONE)
 			continue;
 		definition = tag_get(UI_WIDGET_DEFINITION_TAG, screen_tag);
-		children = definition->child_widgets.address;
+		children = TAG_BLOCK_ADDRESS(definition->child_widgets);
 		for (child = 0; child < definition->child_widgets.count && list_child == NONE; child++)
 		{
 			struct ui_widget_definition *list;

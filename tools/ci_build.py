@@ -4,23 +4,32 @@
 
     python tools/ci_build.py linux debug
     python tools/ci_build.py android release
+    python tools/ci_build.py linux_arm64 release   (on a 64-bit ARM computer)
+    python tools/ci_build.py linux_x86_64 release  (on a 64-bit x86 computer)
     python tools/ci_build.py linux profile
     python tools/ci_build.py web release
+    python tools/ci_build.py ps5 release
 
-Builds are portable (any x86-64 processor), so they run on other
-computers. Debug builds skip link-time and profile-guided optimisation,
+Builds are portable (any x86-64 processor; any ARMv8.0 one for
+linux_arm64 and android), so they run on other computers. Debug builds skip link-time and profile-guided optimisation,
 which only make the build slower; release builds use both, as a local
 release build does (profile-guided optimisation needs clang 22 or later,
 and is skipped with an older one). A profile build is a debug build with
 configure.py --profile, so that the profiling build is built too. CI_COMPILER_LAUNCHER (ccache, say) is
-passed on as --compiler-launcher. A build of the main branch gets the run's
-number (HALO_BUILD_NUMBER), which its release is named after and the
-self-updater compares (and the web site's version.json names).
+passed on as --compiler-launcher. A build of a release tag, v<number>, gets
+that number (HALO_BUILD_NUMBER), which its release is named after
+(build-<number>) and the self-updater compares (and the web site's
+version.json names).
 
 The web build (port/web/README.md) needs Emscripten (emcc on the PATH, as
 emsdk_env.sh puts it); dist/halo-web-<config>/ is the whole site, which a
 static host serves as it is: the workflow publishes the release build's to
 GitHub Pages.
+
+The PS5 build (port/ps5/README.md) needs PS5_Vulkan's toolchain, set up as
+its README and tools/ps5_build.py say; dist/halo-ps5-<config>/ is the
+release as a player installs it: the title's folder, PPSA99500/, and beside
+it README.txt, COPYING and licenses/ (tools/ps5_build.py's RELEASE_LICENSES).
 
     python tools/ci_build.py sums release/
 
@@ -43,12 +52,23 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # what each port's build leaves, and what goes into dist/
 OUTPUTS = {
-    # (and the SDL3 the portable build brings, tools/linux_build.py, with its
-    # zlib license, as the release carries the other libraries')
+    # (and the SDL3 the portable build and the desktop guest builds bring,
+    # tools/linux_build.py and tools/linux_guest_build.py, with its zlib
+    # license, as the release carries the other libraries')
     "linux": ["build/linux/halo", "build/linux/libSDL3.so.0", "build/linux/SDL3-LICENSE.txt"],
+    "linux_arm64": ["build/linux_arm64/halo", "build/linux_arm64/libSDL3.so.0",
+                    "build/linux_arm64/SDL3-LICENSE.txt"],
+    "linux_x86_64": ["build/linux_x86_64/halo", "build/linux_x86_64/libSDL3.so.0",
+                     "build/linux_x86_64/SDL3-LICENSE.txt"],
     "windows": ["build/windows/halo.exe", "build/windows/SDL3.dll"],
     "android": [],  # the APK, below
+    # the Switch is a host and a guest, and both are wanted: the NRO is the
+    # program the console runs, and the ELF is the ILP32 game image it loads
+    # from the card. A release with only the NRO is a release that cannot
+    # start.
+    "switch": ["build/switch/halo.nro", "build/switch/halo_guest.elf"],
     "web": [],  # the site, below
+    "ps5": [],  # the title's folder and what goes beside it, below
 }
 APKS = {
     "debug": "port/android/app/build/outputs/apk/debug/app-debug.apk",
@@ -96,14 +116,24 @@ def main() -> int:
         configure += ["--lto=off", "--pgo=off"]
     if args.config == "profile":
         configure.append("--profile")
+    if args.platform == "linux_x86_64":
+        # (not this computer's default build, which configure.py generates
+        # only when asked)
+        configure.append("--linux-x86-64")
+    if args.platform == "ps5":
+        # (the same: the checkouts are configure.py's defaults, or
+        # PS5_VULKAN's)
+        configure.append("--ps5")
     launcher = os.environ.get("CI_COMPILER_LAUNCHER")
     if launcher:
         configure += ["--compiler-launcher", launcher]
-    # a build of main knows its number, which names its release (build-<n>),
-    # for the self-updater (port/linux/src/updater.c, and the Android app);
-    # other builds have none, and never look for updates
-    if os.environ.get("GITHUB_REF") == "refs/heads/main" and os.environ.get("GITHUB_RUN_NUMBER", "").isdigit():
-        os.environ["HALO_BUILD_NUMBER"] = os.environ["GITHUB_RUN_NUMBER"]
+    # a build of a release tag (v<n>) knows its number, which names its
+    # release (build-<n>), for the self-updaters (port/linux/src/updater.c,
+    # port/switch/host/host_update.c, the Android app); other builds have
+    # none, and never look for updates
+    ref = os.environ.get("GITHUB_REF", "")
+    if ref.startswith("refs/tags/v") and ref[len("refs/tags/v"):].isdigit():
+        os.environ["HALO_BUILD_NUMBER"] = str(int(ref[len("refs/tags/v"):]))
         print(f"build number {os.environ['HALO_BUILD_NUMBER']}", flush=True)
     run(configure)
 
@@ -115,6 +145,18 @@ def main() -> int:
             shutil.rmtree(dist)
         shutil.copytree(ROOT / "build/web/site", dist)
         print(f"build/web/site -> {dist.relative_to(ROOT)}", flush=True)
+        return 0
+    if args.platform == "ps5":
+        # the title's folder whole, and the release's README, COPYING and
+        # licenses/ beside it (tools/ps5_build.py: the brokers, the notice and
+        # the rest are in the folder, the licences in licenses/)
+        run(["ninja", "ps5"])
+        dist = ROOT / "dist" / f"halo-ps5-{args.config}"
+        if dist.exists():
+            shutil.rmtree(dist)
+        shutil.copytree(ROOT / "build/ps5/title/PPSA99500", dist / "PPSA99500")
+        shutil.copytree(ROOT / "build/ps5/release", dist, dirs_exist_ok=True)
+        print(f"build/ps5/title/PPSA99500, build/ps5/release -> {dist.relative_to(ROOT)}", flush=True)
         return 0
     if args.platform == "android":
         # the native part, then the app around it (Gradle's variant of the
@@ -128,7 +170,9 @@ def main() -> int:
         run(["ninja", args.platform])
         outputs = OUTPUTS[args.platform]
 
-    dist = ROOT / "dist" / f"halo-{args.platform}-{args.config}"
+    # (halo-linux-arm64-release and halo-linux-x86_64-release, the names the
+    # self-updater asks for: the target's first underscore only)
+    dist = ROOT / "dist" / f"halo-{args.platform.replace('_', '-', 1)}-{args.config}"
     if dist.exists():
         shutil.rmtree(dist)
     dist.mkdir(parents=True)
@@ -174,6 +218,12 @@ def main() -> int:
     # (port/assets/icons/lucide, drawn into the menus' bitmaps), whose ISC
     # license asks copies to carry its notice
     shutil.copy2(ROOT / "port/assets/icons/lucide/LICENSE", dist / "lucide-LICENSE.txt")
+    # the controllers of Gamepad Setup's button-layout overlay
+    # (port/assets/menus/controllers, AL2009man's Gamepad Asset Pack, drawn
+    # into the menus' bitmaps), whose MIT license asks copies to carry its
+    # notice
+    shutil.copy2(ROOT / "port/assets/menus/controllers/Gamepad-Asset-Pack-LICENSE.txt",
+                 dist / "Gamepad-Asset-Pack-LICENSE.txt")
     # internet play's MQTT brokers, a file beside the game (network.brokers_file;
     # Android's APK has its own copy)
     if args.platform != "android":
@@ -184,6 +234,20 @@ def main() -> int:
         masters = ROOT / "port/assets/network/masters.txt"
         if masters.exists():
             shutil.copy2(masters, dist / "masters.txt")
+    # the controller buttons' pictures, Kenney's Input Prompts (every port has
+    # a replay's button prompts, port/assets/buttons/kenney; the Switch all
+    # its buttons, port/assets/buttons/platforms), CC0: not required, but
+    # credited (the PS5's release has it in licenses/: tools/ps5_build.py)
+    shutil.copy2(ROOT / "port/assets/buttons/platforms/Kenney-LICENSE.txt", dist / "Kenney-LICENSE.txt")
+    if args.platform == "switch":
+        # the link page's QR code (port/third_party/qrcodegen, Project
+        # Nayuki's, in the Switch's build alone), whose MIT license asks
+        # copies to carry its notice
+        shutil.copy2(ROOT / "port/third_party/qrcodegen/LICENSE", dist / "qrcodegen-LICENSE.txt")
+    if args.platform == "switch":
+        # and the Switch's menus' title font (port/switch/host/host_ui.c),
+        # under the same license
+        shutil.copy2(ROOT / "port/assets/fonts/OpenCE-OFL.txt", dist / "OpenCE-OFL.txt")
     if args.platform in ("linux", "windows"):
         # the dedicated server's examples: init.txt's commands and gametype
         # files (docs/dedicated_server.md, "Files")

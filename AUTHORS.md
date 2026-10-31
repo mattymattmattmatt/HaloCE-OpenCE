@@ -14,6 +14,12 @@
 - **The menus' mouse cursor** (the blue arrow the menus show for the
   mouse): by pugzysixtyfour (`port/assets/cursor`).
 
+## Data
+
+- **The Switch's shared shader keys** (`keys.dkk`, which the Switch's
+  updater downloads so a console compiles the campaign's and the stock
+  multiplayer maps' shaders from its first start): collected by puginatux.
+
 ## Third-party art
 
 - **Voice chat's speaker icons** (who talks, and who is muted, in the lobby,

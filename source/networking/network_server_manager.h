@@ -44,6 +44,9 @@ boolean network_game_server_reset_to_pregame(
 void network_game_server_pause_countdown(
 	struct network_game_server *server,
 	boolean pause_countdown);
+/* the lobby's START NOW: unpause and start this machine's countdown at once */
+void network_game_server_countdown_hurry(
+	struct network_game_server *server);
 /* port: drop the joins a finished game left waiting, so the next one
 starts with none (network_test.c's host) */
 void network_game_server_port_clear_queued_players(
@@ -143,5 +146,10 @@ void network_game_server_change_game_variant(
 /* ---------- globals */
 
 /* ---------- public code */
+
+/* port: one bot joins or leaves a local (split screen) or system link Slayer, CTF or King of the Hill game in progress (the console's add_bot and drop_bot:
+hs.c); team_index 0 red, 1 blue, NONE for a game without teams; what came of it in said */
+boolean network_game_server_port_bot_add(long team_index, char *said, long said_size);
+boolean network_game_server_port_bot_drop(long team_index, char *said, long said_size);
 
 #endif // __NETWORK_SERVER_MANAGER_H

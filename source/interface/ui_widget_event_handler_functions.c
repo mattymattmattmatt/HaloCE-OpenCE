@@ -912,6 +912,7 @@ symbols in this file:
 #include "bungie_net/network/transport.h"
 #include "bungie_net/network/transport_endpoint_winsock.h"
 #include "cseries/errors.h"
+#include "game/game.h"
 #include "game/game_engine.h"
 #include "game/players.h"
 #include "interface/marketing_and_strategic_business_development.h"
@@ -2441,6 +2442,21 @@ static boolean network_game_remove_local_player(
 		main_goto_main_menu();
 		return TRUE;
 	}
+	/* port: a split-screen game on this machine alone has no one else in it.
+	LEAVE GAME, once the match is going, leaves it for every local player
+	and returns to the main menu. One player's quit would leave the others
+	in a match that cannot be left. Not in the lobby: that leave is another
+	function, and ending the session here would throw a game away as it is
+	created. */
+	if (network_game_is_splitscreen_local() && game_in_progress())
+	{
+		short controller_index;
+
+		for (controller_index = 0; controller_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS; controller_index++)
+			network_game_client_local_player_quit(controller_index);
+		network_game_client_all_local_players_have_quit();
+		return TRUE;
+	}
 	network_game_client_local_player_quit(event->controller_index);
 	/* port: a split screen player who quit, the others staying, is not
 	joined to the next game */
@@ -2892,9 +2908,17 @@ static boolean network_game_start_faster(
 	boolean *widget_deleted)
 {
 	void *client = global_network_game_client_get();
+	void *server = global_network_game_server_get();
 	short machine_index;
 	long player_index;
 
+	/* port: the second player's profile screen pauses the countdown, and
+	coming back to the lobby does not run its "net server allow start".
+	While the countdown is paused this request is ignored. The host applies
+	it here: the message below only shortens a countdown that is already
+	running, and only if this controller is already a player. */
+	if (server)
+		network_game_server_countdown_hurry(server);
 	if (client)
 	{
 		struct network_game *game = network_game_client_get_game(client);
@@ -4823,6 +4847,15 @@ static boolean player_profile_change_controller_settings(
 		case _button_preset_swap_a_and_left_trigger: profile->controller_settings.button_preset = _button_preset_swap_a_and_left_trigger; return TRUE;
 		case _button_preset_swap_b_and_left_trigger: profile->controller_settings.button_preset = _button_preset_swap_b_and_left_trigger; return TRUE;
 		case _button_preset_swap_b_and_right_thumb: profile->controller_settings.button_preset = _button_preset_swap_b_and_right_thumb; return TRUE;
+		/* port: the later games' layouts (the Xbox's own menus list only the five above) */
+		case _button_preset_boxer:
+		case _button_preset_green_thumb:
+		case _button_preset_bumper_jumper:
+		case _button_preset_reclaimer:
+		case _button_preset_fishsticks:
+		case _button_preset_recon:
+			profile->controller_settings.button_preset = (byte)option_spinner->data3C.selected_index;
+			return TRUE;
 		default: error(2, "unknown button config option selected"); return TRUE;
 		}
 	}

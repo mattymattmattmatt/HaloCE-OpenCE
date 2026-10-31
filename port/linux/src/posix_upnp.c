@@ -74,16 +74,24 @@ static unsigned short swap_short(unsigned short value)
 forwarding to it is one no copy of the game running uses */
 static int port_unused(unsigned short port)
 {
-	struct sockaddr_in address;
+	/* (Winsock's sockaddr_in, which posix_socket_bind takes: a 16-bit
+	family, then the port and the address. The system's own is the same on
+	Linux and Windows, but not on the Switch and the PS5, whose BSD one
+	starts with an 8-bit length, which their posix_socket_bind turns round
+	from Winsock's: given the system's, it read the family wrong and the
+	bind always failed) */
+	unsigned char address[16];
+	unsigned short family = AF_INET;
 	int socket = posix_socket(AF_INET, SOCK_DGRAM, 0);
 	int unused;
 
 	if (socket < 0)
 		return 0;
-	memset(&address, 0, sizeof(address));
-	address.sin_family = AF_INET;
-	address.sin_port = port;
-	unused = posix_socket_bind(socket, &address, sizeof(address)) == 0;
+	memset(address, 0, sizeof(address));
+	address[0] = (unsigned char)family;
+	address[1] = (unsigned char)(family >> 8);
+	memcpy(address + 2, &port, sizeof(port));
+	unused = posix_socket_bind(socket, address, sizeof(address)) == 0;
 	posix_socket_close(socket);
 	return unused;
 }

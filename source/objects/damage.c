@@ -140,6 +140,7 @@ symbols in this file:
 #include "units/units.h"
 #include "units/vehicles.h"
 #include "gore.h"
+#include "biped_ragdoll.h" /* port: port/linux/game/biped_ragdoll.c */
 
 /* network_game_globals.c's */
 boolean network_game_distributed_client(void);
@@ -1091,7 +1092,11 @@ static void object_damage_aftermath(
 				{
 					if (object->object.type == _object_type_biped)
 					{
-						biped_accelerate(object_index, &acceleration);
+						/* port: a body's ragdoll is pushed hardest nearest
+						the epicenter, in place of the body where the ragdoll
+						moves it (port/linux/game/biped_ragdoll.c) */
+						if (!biped_ragdoll_accelerate(object_index, &damage->epicenter, &acceleration))
+							biped_accelerate(object_index, &acceleration);
 					}
 					else if (object->object.type == _object_type_vehicle)
 					{

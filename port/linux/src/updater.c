@@ -4,8 +4,8 @@ UPDATER.C
 The desktop ports' self-updater (Linux and Windows; the Android app updates
 itself in Java, port/android).
 
-A build of the main branch made by GitHub Actions knows its build number
-(HALO_BUILD_NUMBER, the workflow's run number, which names its release:
+A release's build, made by GitHub Actions for a pushed tag v<number>, knows
+its build number (HALO_BUILD_NUMBER, the tag's number, which names its release:
 build-<number>); other builds have none and never look for updates. When
 update.auto in config.toml is true (the default), the game asks GitHub for
 the latest release when it starts, on a thread of its own: the game starts
@@ -28,8 +28,26 @@ update.h's: posix_update.c on Linux, win32_update.c on Windows.
 #include "platform.h"
 #include "port_config.h"
 #include "update.h"
+#include "server_mode.h"
 
-#if !defined(HALO_ANDROID) && !defined(HALO_WEB)
+/* the release's build that this one updates to (halo-<platform>-<release|
+debug>.zip); a build without one never looks for updates */
+#if defined(HALO_ANDROID) || defined(HALO_WEB)
+/* (none: the Android app updates itself, the site through its service
+worker) */
+#elif defined(_WIN32)
+#define UPDATE_PLATFORM "windows"
+#elif defined(__aarch64__)
+/* the 64-bit ARM build (port/linux/host) */
+#define UPDATE_PLATFORM "linux-arm64"
+#elif defined(__x86_64__)
+/* the 64-bit x86 build (port/linux/host, as the 64-bit ARM one) */
+#define UPDATE_PLATFORM "linux-x86_64"
+#else
+#define UPDATE_PLATFORM "linux"
+#endif
+
+#ifdef UPDATE_PLATFORM
 
 #include "zlib_prefixed.h"
 
@@ -46,12 +64,10 @@ update.h's: posix_update.c on Linux, win32_update.c on Windows.
 #define HALO_BUILD_FLAVOR "release"
 #endif
 
-#define UPDATE_REPOSITORY "OpenCommunityEdition/OpenCE"
+#define UPDATE_REPOSITORY "thelinkin3000/halo-ce-universal"
 #ifdef _WIN32
-#define UPDATE_PLATFORM "windows"
 #define PATH_SEPARATOR "\\"
 #else
-#define UPDATE_PLATFORM "linux"
 #define PATH_SEPARATOR "/"
 #endif
 #define UPDATE_ASSET "halo-" UPDATE_PLATFORM "-" HALO_BUILD_FLAVOR ".zip"
@@ -739,6 +755,9 @@ void updater_start(void)
 	}
 }
 
+/* (the builds with a dedicated server alone: server_mode.h's HALO_SERVER_BUILD,
+which the PS5's guest is not) */
+#if HALO_SERVER_BUILD
 /* ---------- a dedicated server's (server.auto_update: server_director.c) */
 
 /* looks for a new version on a thread of its own, unless a look is under
@@ -883,6 +902,7 @@ int updater_server_install_poll(char *error, int size)
 	snprintf(error, (size_t)size, "no install was started");
 	return -1;
 }
+#endif
 
 /* whether the game runs under gamescope (the Steam Deck's Game Mode), where
 a system dialog such as SDL's message box crashes the game. gamescope sets
@@ -1020,10 +1040,11 @@ int updater_server_install_poll(char *error, int size)
 	return -1;
 }
 
-#ifdef HALO_WEB
+#ifndef HALO_ANDROID
 #include <SDL3/SDL.h>
 
-/* (the site updates itself: port/web/site/sw.js) */
+/* (nothing to ask about: the site updates itself, port/web/site/sw.js, and
+the other builds without UPDATE_PLATFORM are updated otherwise) */
 void updater_poll(SDL_Window *window)
 {
 	(void)window;

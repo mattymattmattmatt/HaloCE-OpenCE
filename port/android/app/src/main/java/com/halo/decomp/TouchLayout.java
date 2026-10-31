@@ -26,6 +26,8 @@ final class TouchLayout {
     static final float MAX_OPACITY = 1f;
     static final float MIN_SENSITIVITY = 0.25f;
     static final float MAX_SENSITIVITY = 4f;
+    static final int MIN_MENU_FINGERS = 3;
+    static final int MAX_MENU_FINGERS = 4;
     /** the Options button's radius, before a finger's width (minimumRadius) */
     static final float OPTIONS_RADIUS = 34;
     /**
@@ -82,11 +84,18 @@ final class TouchLayout {
     private float minimumRadius;
 
     boolean rumbleEnabled = true;
+    /**
+     * the overlay's gyroscope aiming as it was before the game's Gyro Aim
+     * (Gamepads, input.gyro_aim) took its place: kept only so that layout
+     * files of either kind still read and write
+     */
     boolean gyroscopeEnabled = false;
     /** how solid the controls are drawn, MIN_OPACITY..MAX_OPACITY */
     float opacity = 1f;
     /** the move stick goes where the thumb lands in the lower left, not at its place */
     boolean floatingStick = false;
+    /** the fingers that tap together to open the overlay menu, MIN_MENU_FINGERS..MAX_MENU_FINGERS */
+    int menuFingers = 3;
     /** a finger that holds a button also aims when it swipes */
     boolean buttonsAim = true;
     /** where the Options button is, in logical units; NaN until it is dragged (TouchControls then places it) */
@@ -273,6 +282,7 @@ final class TouchLayout {
         values.setProperty("gyroscope", Boolean.toString(gyroscopeEnabled));
         values.setProperty("opacity", Float.toString(opacity));
         values.setProperty("floating-stick", Boolean.toString(floatingStick));
+        values.setProperty("menu-fingers", Integer.toString(menuFingers));
         values.setProperty("buttons-aim", Boolean.toString(buttonsAim));
         if (optionsMoved()) {
             values.setProperty("options.x", Float.toString(optionsX * GRID_WIDTH / width));
@@ -323,6 +333,10 @@ final class TouchLayout {
                 layout.floatingStick = readBoolean(values, "floating-stick");
             }
             if (version >= 4) {
+                int fingers = Integer.parseInt(values.getProperty("menu-fingers"));
+                if (fingers < MIN_MENU_FINGERS || fingers > MAX_MENU_FINGERS)
+                    throw new IllegalArgumentException("Invalid menu fingers");
+                layout.menuFingers = fingers;
                 layout.buttonsAim = readBoolean(values, "buttons-aim");
                 // (no place: Options where it always was)
                 String x = values.getProperty("options.x");

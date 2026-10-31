@@ -23,9 +23,12 @@ def mirror_uploads(tmp_path_factory):
     renderer = (ROOT / "port/linux/src/d3d8_gl.c").read_text()
     mirror = renderer[renderer.index("#define MIRROR_SEGMENT_SIZE"):
                       renderer.index("/* the smallest and largest index of an index range")]
-    present = function(renderer, "D3DDevice_Present")
+    # (the fork's renderer rotates the ring in frame_end_buffers, between #ifdef lines: those are left out)
+    present = function(renderer, "frame_end_buffers" if "static void frame_end_buffers(void)" in renderer
+                       else "D3DDevice_Present")
     rotation = present[present.index("host_gl_fence_frame("):
                        present.index("if (xgpu_capabilities.atomic_counters && device.ring_test_count")]
+    rotation = "".join(line for line in rotation.splitlines(True) if not line.lstrip().startswith("#"))
     directory = tmp_path_factory.mktemp("android-mirror-regression")
     target = ["--target=i686-pc-windows-msvc", "-fuse-ld=lld"] if os.name == "nt" else ["-m32"]
     binaries = {}

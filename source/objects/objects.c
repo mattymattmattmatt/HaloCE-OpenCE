@@ -58,7 +58,7 @@ OBJECTS.C
 #include "structures/structure_bsp_definitions.h"
 #include "units/units.h"
 /* port: object_bounds_cache.c's */
-void object_bounds_cache_update(long object_index, real_point3d const *center, real radius);
+void object_bounds_cache_update(long object_index, short type, real_point3d const *center, real radius);
 /* port: port/linux/game/first_person_legs.c's */
 void first_person_legs_reset(void);
 
@@ -3092,7 +3092,7 @@ void object_compute_node_matrices(
 		object->object.bounding_sphere_radius *= object->object.scale;
 	}
 	/* port: (and in the packed copy collision reads: object_bounds_cache.c) */
-	object_bounds_cache_update(object_index, &object->object.bounding_sphere_center, object->object.bounding_sphere_radius);
+	object_bounds_cache_update(object_index, object->object.type, &object->object.bounding_sphere_center, object->object.bounding_sphere_radius);
 
 	return;
 }
@@ -3225,11 +3225,11 @@ void object_render_debug(
 		real_vector3d velocity;
 		real_matrix4x3 world_matrix;
 		
-		char* model_name = strrchr(object_definition->object.model.name, '\\');
+		char* model_name = strrchr(TAG_REFERENCE_NAME(object_definition->object.model), '\\');
 		object_get_world_matrix(object_index, &world_matrix);
 		object_get_velocities(object_index, &velocity, NULL);
 
-		model_name = model_name ? &model_name[1] : object_definition->object.model.name;
+		model_name = model_name ? &model_name[1] : TAG_REFERENCE_NAME(object_definition->object.model);
 		
 		render_debug_string_at_point(0, &world_matrix.position, model_name, global_real_argb_orange);
 		render_debug_matrix(TRUE, &world_matrix, object->object.bounding_sphere_radius);

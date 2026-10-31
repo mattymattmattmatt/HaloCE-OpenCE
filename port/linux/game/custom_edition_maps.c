@@ -5,11 +5,14 @@ Lists Custom Edition maps for the menus (custom_edition_maps.h).
 
 Whenever a map list opens, the custom_maps folder and then the Halo Custom
 Edition install's maps folder are scanned for CE caches (.map; OpenSauce
-caches are refused by the loader, so not listed). Multiplayer maps join the
-level list after the Xbox levels, and the map lists' CUSTOM MULTIPLAYER;
-campaign maps (solo scenarios) are the map lists' CUSTOM SINGLEPLAYER,
-played alone or as network co-op. The stock campaign levels get display
-indices here too, so the menus can show them the same way.
+caches are refused by the loader, so not listed). One level of subfolders
+is scanned too: a map there is still named custom_maps\<file>, and the
+menus list the subfolder as its own row. A folder inside a folder is not
+listed. Multiplayer maps join the level list after the Xbox levels, and
+the map lists' CUSTOM MULTIPLAYER; campaign maps (solo scenarios) are the
+map lists' CUSTOM SINGLEPLAYER, played alone or as network co-op. The stock
+campaign levels get display indices here too, so the menus can show them
+the same way.
 
 A map's level name is custom_maps\<name> (CUSTOM_EDITION_LEVEL_NAME_PREFIX),
 which the cache loader reads from the custom maps folders alone: a map named
@@ -30,6 +33,14 @@ Each map can have, beside it in its folder:
   is shown.
 - <name>.txt, its description, line by line (the Xbox descriptions use
   lines of about 20 characters).
+
+A scan costs little more than listing the folders, however many maps there
+are: each folder is listed once, whole, before its maps are looked at, so a
+description is opened only if the listing has it (a description looked for
+and not there cost a lookup that fails, on the Switch 10 ms or so, for
+nearly every map); and a map's kind (campaign, multiplayer, neither) is kept
+across scans by its path, size and time (identity_cache), so a map list
+opened again opens only the maps that are new or have changed since.
 */
 
 /* ---------- headers */
@@ -43,12 +54,14 @@ Each map can have, beside it in its folder:
 #include "cache/cache_files.h"
 #include "main/main.h"
 #include "saved games/player_profile.h"
+#include "scenario/scenario_definitions.h"
 #include "text/unicode.h"
 #include "bmp_files.h"
 #include "custom_edition_cache.h"
 #include "custom_edition_maps.h"
 #include "map_share.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -119,9 +132,11 @@ typedef char verify_campaign_display_indices[
 
 struct custom_edition_map
 {
-	/* file name without extension, and the folder it was found in */
+	/* file name without extension, and the maps folder it was found in
+	(d:\custom_maps\). category is the subfolder, or empty in that folder. */
 	char name[MAXIMUM_MAP_NAME_LENGTH + 1];
 	char folder[32];
+	char category[CUSTOM_EDITION_MAP_CATEGORY_LENGTH];
 	/* saved_game_file_remember_last_used_multiplayer_map writes
 	MAXIMUM_FILENAME_LENGTH+1 characters of a level name */
 	char level_name[MAXIMUM_FILENAME_LENGTH + 1];
@@ -165,6 +180,94 @@ static struct
 static wchar_t const default_description[] = L"Halo Custom\r\nEdition map";
 
 /* ---------- private code */
+
+/* ---------- the maps' kinds, kept across scans */
+
+/* room for every map the lists hold, twice over (a hash table: half full at
+most) */
+#define IDENTITY_CACHE_SIZE 32768
+
+/* a map file's kind, as its cache header says: its scenario type, or NONE
+for a file that is no Custom Edition cache; by its path's hash, and its size
+and time, which a file that changed does not keep */
+struct identity_cache_entry
+{
+	uint64_t key;
+	uint64_t time;
+	unsigned long size;
+	short scenario_type;
+	boolean used;
+};
+
+static struct identity_cache_entry identity_cache[IDENTITY_CACHE_SIZE];
+static long identity_cache_count;
+
+/* a name's hash, whatever its case (FNV-1a) */
+static uint64_t name_hash(
+	char const *first,
+	char const *second)
+{
+	uint64_t hash = 0xcbf29ce484222325ULL;
+	char const *part;
+	short index;
+
+	for (index = 0; index < 2; index++)
+	{
+		for (part = index ? second : first; part && *part; part++)
+		{
+			char character = *part;
+
+			if (character >= 'A' && character <= 'Z')
+				character = (char)(character - 'A' + 'a');
+			hash ^= (unsigned char)character;
+			hash *= 0x100000001b3ULL;
+		}
+	}
+
+	return hash;
+}
+
+/* the kind of the map file at `path`, `size` bytes and last written at
+`time`: kept, or read and kept */
+static short identity_cached(
+	char const *path,
+	unsigned long size,
+	uint64_t time)
+{
+	uint64_t key = name_hash(path, NULL);
+	long slot = (long)(key % IDENTITY_CACHE_SIZE);
+	struct identity_cache_entry *entry;
+
+	for (;;)
+	{
+		entry = &identity_cache[slot];
+		if (!entry->used || entry->key == key)
+			break;
+		slot = (slot + 1) % IDENTITY_CACHE_SIZE;
+	}
+	if (entry->used && entry->size == size && entry->time == time)
+	{
+		return entry->scenario_type;
+	}
+	if (!entry->used)
+	{
+		/* (full: forgotten, all of it, and filled again) */
+		if (identity_cache_count >= IDENTITY_CACHE_SIZE / 2)
+		{
+			csmemset(identity_cache, 0, sizeof(identity_cache));
+			identity_cache_count = 0;
+			entry = &identity_cache[key % IDENTITY_CACHE_SIZE];
+		}
+		identity_cache_count++;
+	}
+	entry->key = key;
+	entry->size = size;
+	entry->time = time;
+	entry->used = TRUE;
+	entry->scenario_type = custom_edition_cache_file_scenario_type(path);
+
+	return entry->scenario_type;
+}
 
 static void custom_edition_maps_forget(
 	void)
@@ -240,11 +343,39 @@ static void display_name_make(
 	return;
 }
 
+/* <folder><category\><name><extension> in path. FALSE when it does not fit. */
+static boolean custom_edition_map_beside(
+	struct custom_edition_map const *map,
+	char const *extension,
+	char *path,
+	long path_size)
+{
+	long length = csstrlen(map->folder) + csstrlen(map->name) + csstrlen(extension);
+
+	if (map->category[0])
+		length += csstrlen(map->category) + 1;
+	if (length >= path_size)
+		return FALSE;
+	if (map->category[0])
+		csprintf(path, "%s%s\\%s%s", map->folder, map->category, map->name, extension);
+	else
+		csprintf(path, "%s%s%s", map->folder, map->name, extension);
+
+	return TRUE;
+}
+
 /* Reads <name>.txt into map->description: line ends become \r\n (as in the
 menus' strings), tabs become spaces, and non-ASCII characters become '?'.
-A missing or empty file gives the default description. */
+A missing or empty file gives the default description; `found` is which
+of the two names the folder's listing has (DESCRIPTION_OWN_NAME, the map's
+name; DESCRIPTION_BASE_NAME, a map named for its hash, its name without it),
+and none is not looked for. */
+#define DESCRIPTION_OWN_NAME 1
+#define DESCRIPTION_BASE_NAME 2
+
 static void custom_edition_map_description_read(
-	struct custom_edition_map *map)
+	struct custom_edition_map *map,
+	short found)
 {
 	char path[MAXIMUM_FILENAME_LENGTH + 1];
 	byte text[MAXIMUM_DESCRIPTION_FILE_BYTES];
@@ -253,10 +384,11 @@ static void custom_edition_map_description_read(
 	long text_index = 0;
 	short length = 0;
 
-	csprintf(path, "%s%s%s", map->folder, map->name, DESCRIPTION_EXTENSION);
-	stream = fopen(path, "rb");
+	stream = NULL;
+	if ((found & DESCRIPTION_OWN_NAME) && custom_edition_map_beside(map, DESCRIPTION_EXTENSION, path, sizeof(path)))
+		stream = fopen(path, "rb");
 	/* (a map named for its hash: its description named without it too) */
-	if (!stream && map_share_name_hashed(map->name))
+	if (!stream && (found & DESCRIPTION_BASE_NAME) && map_share_name_hashed(map->name))
 	{
 		csprintf(path, "%s%.*s%s", map->folder, (int)map_share_name_base_length(map->name), map->name,
 			DESCRIPTION_EXTENSION);
@@ -316,17 +448,29 @@ static void custom_edition_map_description_read(
 	return;
 }
 
-/* Adds the file `name`.`extension` from `folder` if it is a CE map that
-isn't listed yet. */
+/* Adds the file `name`.`extension` in `directory` (`root`, or its subfolder
+`category`) if it is a CE map that isn't listed yet. The copy in
+custom_maps itself is scanned first, so it wins over a subfolder and over
+the install. The file is identified where the listing found it, once (by
+name, as the loader finds a map, it was looked for twice, a campaign's
+then a multiplayer map's, each search a lookup in the folder and the
+file's opening). */
 static void custom_edition_map_add(
-	char const *folder,
+	char const *root,
+	char const *directory,
+	char const *category,
 	char const *name,
-	char const *extension)
+	char const *extension,
+	unsigned long size,
+	uint64_t time,
+	short descriptions)
 {
 	struct custom_edition_maps_globals *globals = &custom_edition_maps_globals;
 	struct custom_edition_map *map;
+	char path[MAXIMUM_FILENAME_LENGTH + 1];
 	boolean campaign;
 	short map_index;
+	short scenario_type;
 
 	if (csstrcasecmp(extension, "map"))
 	{
@@ -336,6 +480,8 @@ static void custom_edition_map_add(
 	{
 		if (!csstrcasecmp(globals->maps[map_index].name, name))
 		{
+			error(_error_silent, "custom edition: the map '%s' is already listed; the copy in '%s%s%s' is skipped",
+				name, root, category[0] ? category : "", category[0] ? "\\" : "");
 			return;
 		}
 	}
@@ -343,12 +489,20 @@ static void custom_edition_map_add(
 	{
 		if (!csstrcasecmp(globals->campaigns[map_index].name, name))
 		{
+			error(_error_silent, "custom edition: the map '%s' is already listed; the copy in '%s%s%s' is skipped",
+				name, root, category[0] ? category : "", category[0] ? "\\" : "");
 			return;
 		}
 	}
 	/* campaign maps go to co-op; anything that isn't multiplayer either is skipped */
-	campaign = custom_edition_cache_campaign(name);
-	if (!campaign && !custom_edition_cache_multiplayer(name))
+	if (csstrlen(directory) + csstrlen(name) + 1 + csstrlen(extension) > MAXIMUM_FILENAME_LENGTH)
+	{
+		return;
+	}
+	csprintf(path, "%s%s.%s", directory, name, extension);
+	scenario_type = identity_cached(path, size, time);
+	campaign = scenario_type == _scenario_type_solo;
+	if (!campaign && scenario_type != _scenario_type_multiplayer)
 	{
 		return;
 	}
@@ -386,13 +540,15 @@ static void custom_edition_map_add(
 	}
 	csmemset(map, 0, sizeof(*map));
 	csstrcpy(map->name, name);
-	csstrncpy(map->folder, folder, sizeof(map->folder) - 1);
+	csstrncpy(map->folder, root, sizeof(map->folder) - 1);
+	csstrncpy(map->category, category, sizeof(map->category) - 1);
 	csprintf(map->level_name, "%s%s", CUSTOM_EDITION_LEVEL_NAME_PREFIX, name);
 	display_name_make(name, map->display_name);
-	custom_edition_map_description_read(map);
+	custom_edition_map_description_read(map, descriptions);
 	/* (named for its hash by a build of before: its name given back,
-	map_share_files.c) */
-	map_share_map_found(folder, name);
+	map_share_files.c; custom_maps' own files alone, not a subfolder's) */
+	if (!category[0])
+		map_share_map_found(root, name);
 
 	return;
 }
@@ -404,6 +560,163 @@ static int custom_edition_map_compare(
 	return (int)csstrcasecmp(
 		((struct custom_edition_map const *)first)->name,
 		((struct custom_edition_map const *)second)->name);
+}
+
+/* The files in `directory` (the maps folder, or one subfolder of it).
+`category` is that subfolder's name, or empty for the maps folder itself.
+A folder is listed through a handle of its own, never with
+find_files_start and find_files_next: those keep their place in one
+global, and as the game starts a thread of the menus' deletes the files
+of folders with them (perform_filesystem_initialization in ui_widget.c,
+directory_create_or_delete_contents). A listing here at the same time
+takes that one's place, and the thread then deletes the files of this
+folder: the maps. */
+static void custom_edition_maps_scan_files(
+	char const *root,
+	char const *directory,
+	char const *category)
+{
+	/* the folder's files, whole (the maps among them looked at after) */
+	struct listed_file
+	{
+		char name[sizeof(((WIN32_FIND_DATAA *)0)->cFileName) + 1];
+		char *extension;
+		unsigned long size;
+		uint64_t time;
+	} *files = NULL;
+	long file_count = 0, file_room = 0;
+	/* the hashes of the names its descriptions have (<name>.txt) */
+	uint64_t *descriptions = NULL;
+	long description_count = 0;
+	char pattern[MAXIMUM_FILENAME_LENGTH + 1];
+	WIN32_FIND_DATAA data;
+	HANDLE find;
+	long index;
+
+	if (csstrlen(directory) + 3 > MAXIMUM_FILENAME_LENGTH)
+	{
+		error(_error_silent, "custom edition: the folder '%s' is too long to list", directory);
+		return;
+	}
+	csprintf(pattern, "%s*.*", directory);
+	find = FindFirstFileA(pattern, &data);
+	if (find == INVALID_HANDLE_VALUE)
+		return;
+	do
+	{
+		struct listed_file *file;
+		char *extension;
+
+		if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+			continue;
+		if (file_count == file_room)
+		{
+			long room = file_room ? file_room * 2 : 256;
+			struct listed_file *more = realloc(files, (size_t)room * sizeof(*files));
+
+			if (!more)
+				break;
+			files = more;
+			file_room = room;
+		}
+		file = &files[file_count];
+		csmemcpy(file->name, data.cFileName, sizeof(data.cFileName));
+		file->name[sizeof(data.cFileName)] = 0;
+		extension = strrchr(file->name, '.');
+		if (!extension)
+			continue;
+		*extension++ = 0;
+		file->extension = extension;
+		file->size = data.nFileSizeLow;
+		file->time = ((uint64_t)data.ftLastWriteTime.dwHighDateTime << 32) | data.ftLastWriteTime.dwLowDateTime;
+		file_count++;
+	} while (FindNextFileA(find, &data));
+	CloseHandle(find);
+
+	descriptions = file_count ? malloc((size_t)file_count * sizeof(*descriptions)) : NULL;
+	for (index = 0; descriptions && index < file_count; index++)
+	{
+		if (!csstrcasecmp(files[index].extension, DESCRIPTION_EXTENSION + 1))
+			descriptions[description_count++] = name_hash(files[index].name, NULL);
+	}
+	for (index = 0; index < file_count; index++)
+	{
+		struct listed_file const *file = &files[index];
+		short found = 0;
+		long other;
+
+		if (csstrcasecmp(file->extension, "map"))
+			continue;
+		/* (its description, and for a map named for its hash, the one named
+		without it) */
+		{
+			uint64_t own = name_hash(file->name, NULL);
+			uint64_t base = 0;
+
+			if (map_share_name_hashed(file->name))
+			{
+				char base_name[sizeof(file->name)];
+				short length = map_share_name_base_length(file->name);
+
+				csmemcpy(base_name, file->name, length);
+				base_name[length] = 0;
+				base = name_hash(base_name, NULL);
+			}
+			for (other = 0; other < description_count; other++)
+			{
+				if (descriptions[other] == own)
+					found |= DESCRIPTION_OWN_NAME;
+				if (base && descriptions[other] == base)
+					found |= DESCRIPTION_BASE_NAME;
+			}
+		}
+		custom_edition_map_add(root, directory, category, file->name, file->extension, file->size, file->time, found);
+	}
+	free(descriptions);
+	free(files);
+
+	return;
+}
+
+/* `root`, then one level of its subfolders. A folder inside a folder is
+not listed. */
+static void custom_edition_maps_scan_root(
+	char const *root)
+{
+	char pattern[MAXIMUM_FILENAME_LENGTH + 1];
+	WIN32_FIND_DATAA data;
+	HANDLE find;
+
+	custom_edition_maps_scan_files(root, root, "");
+	if (csstrlen(root) + 3 > MAXIMUM_FILENAME_LENGTH)
+		return;
+	csprintf(pattern, "%s*.*", root);
+	find = FindFirstFileA(pattern, &data);
+	if (find == INVALID_HANDLE_VALUE)
+		return;
+	do
+	{
+		char name[sizeof(data.cFileName) + 1];
+		char directory[MAXIMUM_FILENAME_LENGTH + 1];
+
+		if (!(data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+			continue;
+		csmemcpy(name, data.cFileName, sizeof(data.cFileName));
+		name[sizeof(data.cFileName)] = 0;
+		if (!strcmp(name, ".") || !strcmp(name, ".."))
+			continue;
+		if (csstrlen(name) >= CUSTOM_EDITION_MAP_CATEGORY_LENGTH ||
+			csstrlen(root) + csstrlen(name) + 1 > MAXIMUM_FILENAME_LENGTH)
+		{
+			error(_error_silent, "custom edition: the folder '%s' is too long to list", name);
+			continue;
+		}
+		csprintf(directory, "%s%s\\", root, name);
+		custom_edition_maps_scan_files(root, directory, name);
+	} while (FindNextFileA(find, &data));
+	CloseHandle(find);
+
+	return;
 }
 
 /* Versions of a map listed (its name the same but for the hash a version's
@@ -459,6 +772,7 @@ static void custom_edition_maps_look_for(
 	struct custom_edition_maps_globals *globals = &custom_edition_maps_globals;
 	char const *folders[] = { CUSTOM_EDITION_MAP_DIRECTORY, CUSTOM_EDITION_INSTALL_MAP_DIRECTORY };
 	short folder_index;
+	unsigned long started = GetTickCount();
 
 	custom_edition_maps_forget();
 	globals->looked_for = TRUE;
@@ -470,48 +784,17 @@ static void custom_edition_maps_look_for(
 	/* the game's custom_maps first, so its copy wins */
 	for (folder_index = 0; folder_index < NUMBEROF(folders); folder_index++)
 	{
-		char pattern[MAXIMUM_FILENAME_LENGTH + 1];
-		WIN32_FIND_DATAA data;
-		HANDLE find;
-
 		/* (the install's only when there is one) */
 		if (folder_index && !custom_edition_install_present())
 			continue;
-		/* A folder is listed through a handle of its own, never with
-		find_files_start and find_files_next: those keep their place in one
-		global, and as the game starts a thread of the menus' deletes the
-		files of folders with them (perform_filesystem_initialization in
-		ui_widget.c, directory_create_or_delete_contents). A listing here at
-		the same time takes that one's place, and the thread then deletes
-		the files of this folder: the maps. */
-		csprintf(pattern, "%s*.*", folders[folder_index]);
-		find = FindFirstFileA(pattern, &data);
-		if (find == INVALID_HANDLE_VALUE)
-			continue;
-		do
-		{
-			char name[sizeof(data.cFileName) + 1];
-			char *extension;
-
-			if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-				continue;
-			csmemcpy(name, data.cFileName, sizeof(data.cFileName));
-			name[sizeof(data.cFileName)] = 0;
-			extension = strrchr(name, '.');
-			if (extension)
-			{
-				*extension++ = 0;
-				custom_edition_map_add(folders[folder_index], name, extension);
-			}
-		} while (FindNextFileA(find, &data));
-		CloseHandle(find);
+		custom_edition_maps_scan_root(folders[folder_index]);
 	}
 	qsort(globals->maps, globals->map_count, sizeof(globals->maps[0]), custom_edition_map_compare);
 	qsort(globals->campaigns, globals->campaign_count, sizeof(globals->campaigns[0]), custom_edition_map_compare);
 	custom_edition_maps_tell_versions_apart(globals->maps, globals->map_count);
 	custom_edition_maps_tell_versions_apart(globals->campaigns, globals->campaign_count);
-	error(_error_silent, "custom edition: %d multiplayer maps for the level list, %d campaign maps", globals->map_count,
-		globals->campaign_count);
+	error(_error_silent, "custom edition: %d multiplayer maps for the level list, %d campaign maps (%lu ms)",
+		globals->map_count, globals->campaign_count, GetTickCount() - started);
 
 	return;
 }
@@ -529,7 +812,8 @@ static struct bitmap_data *custom_edition_map_picture_read(
 	FILE *stream;
 	long size = 0;
 
-	csprintf(path, "%s%s%s", map->folder, map->name, PICTURE_EXTENSION);
+	if (!custom_edition_map_beside(map, PICTURE_EXTENSION, path, sizeof(path)))
+		return NULL;
 	stream = fopen(path, "rb");
 	/* (a map named for its hash: its picture named without it too) */
 	if (!stream && map_share_name_hashed(map->name))
@@ -782,6 +1066,24 @@ short custom_edition_maps_display_index_of(
 {
 	return index < 0 || index >= custom_edition_maps_count(campaign) ? NONE :
 		(campaign ? FIRST_CUSTOM_CAMPAIGN_DISPLAY_INDEX : FIRST_DISPLAY_INDEX) + index;
+}
+
+char const *custom_edition_maps_category(
+	boolean campaign,
+	short index)
+{
+	struct custom_edition_maps_globals *globals = &custom_edition_maps_globals;
+	struct custom_edition_map *maps;
+	short count;
+
+	if (!globals->looked_for)
+		custom_edition_maps_look_for();
+	maps = campaign ? globals->campaigns : globals->maps;
+	count = campaign ? globals->campaign_count : globals->map_count;
+	if (index < 0 || index >= count)
+		return NULL;
+
+	return maps[index].category;
 }
 
 char const *custom_edition_maps_level_name(

@@ -67,6 +67,7 @@ same datum index (identifier and all), so that any message can name one:
 #include "network_distributed.h"
 #include "profile_sections.h"
 #include "gore.h" /* port: gore pieces are local cosmetics, never synced (port/linux/game/gore.c) */
+#include "biped_ragdoll.h"
 
 #include <math.h>
 
@@ -357,6 +358,12 @@ static long objects_host_told_count;
 rest (NONE: not since it was told of), to send it to every client
 (REST_STATE_REPEATS) */
 static boolean objects_host_state_moving[MAXIMUM_TRACKED_OBJECTS];
+/* the host, recording a replay: a checksum of each object's state as the
+replay recorder was last sent it (distributed_recorder_state_new), 0 for
+none. An object at rest is sent every client again and again (as it came
+to rest, and in its turn round them all), for a client that lost one; the
+recorder loses none, so it is sent one only when it differs */
+static unsigned long objects_recorder_states[MAXIMUM_TRACKED_OBJECTS];
 static long objects_host_rest_times[MAXIMUM_TRACKED_OBJECTS];
 /* ... what each unit's inventory was last sent as (in all, and its weapons
 and grenades), when to every client, and when its ammunition alone last
@@ -1374,7 +1381,8 @@ static void distributed_host_find_viewers(
 	struct data_iterator iterator;
 	struct player_datum *player;
 
-	objects_host_viewers.count = distributed_client_machines(objects_host_viewers.indices,
+	/* (and the replay recorder, which has no players: network_replay.c) */
+	objects_host_viewers.count = distributed_viewing_machines(objects_host_viewers.indices,
 		HALO_PORT_MAXIMUM_NETWORK_MACHINES);
 	objects_host_viewers.player_unit_count = 0;
 	data_iterator_new(&iterator, player_data);
@@ -1495,6 +1503,41 @@ enum
 	_host_state_to_all,
 };
 
+/* (the replay recorder) whether a state of the object at absolute_index
+differs from the one it was last sent, which it notes; a moving one
+(always_new) is sent every time, and noted */
+static boolean distributed_recorder_state_new(
+	long absolute_index,
+	struct distributed_object_state const *state,
+	boolean always_new)
+{
+	/* (FNV-1a over what the state says: not the pad, nor the client's tick) */
+	unsigned long hash = 2166136261UL;
+	byte const *parts[3];
+	short sizes[3];
+	short part;
+	short index;
+	boolean changed;
+
+	parts[0] = (byte const *)&state->object_index;
+	sizes[0] = sizeof(state->object_index);
+	parts[1] = &state->flags;
+	sizes[1] = sizeof(state->flags);
+	parts[2] = (byte const *)&state->position;
+	sizes[2] = (short)(sizeof(*state) - offsetof(struct distributed_object_state, position));
+	for (part = 0; part < 3; part++)
+	{
+		for (index = 0; index < sizes[part]; index++)
+			hash = (hash ^ parts[part][index]) * 16777619UL;
+	}
+	hash |= 1;
+	if (absolute_index < 0 || absolute_index >= MAXIMUM_TRACKED_OBJECTS)
+		return TRUE;
+	changed = always_new || objects_recorder_states[absolute_index] != hash;
+	objects_recorder_states[absolute_index] = hash;
+	return changed;
+}
+
 /* whether an object at rest is due to every client again: it came to rest
 this tick, or REST_STATE_REPEAT_TICKS after one of its sends */
 static boolean distributed_host_rest_state_due(
@@ -1517,6 +1560,9 @@ static void distributed_host_send_states(
 	/* (one come to rest may be in its turn too) */
 	static struct distributed_object_state states[MAXIMUM_TRACKED_OBJECTS + RESTING_STATES_PER_TICK];
 	static byte kinds[MAXIMUM_TRACKED_OBJECTS + RESTING_STATES_PER_TICK];
+	/* (each state's object's absolute index, for the replay recorder) */
+	static long absolute_indices[MAXIMUM_TRACKED_OBJECTS + RESTING_STATES_PER_TICK];
+	long recorder = distributed_recorder_machine();
 	struct distributed_object_state_message message;
 	short limit = MIN(MAXIMUM_ENTRIES_PER_MESSAGE, DATAGRAM_ENTRIES(struct distributed_object_state));
 	short resting = 0;
@@ -1543,6 +1589,7 @@ static void distributed_host_send_states(
 		if (at_rest && !distributed_host_rest_state_due(absolute_index))
 			continue;
 		distributed_state_from_object(object_index, &states[state_count]);
+		absolute_indices[state_count] = absolute_index;
 		kinds[state_count++] = at_rest ? _host_state_to_all : _host_state_moving;
 	}
 	/* those at rest from the cursor on, round to it */
@@ -1557,6 +1604,7 @@ static void distributed_host_send_states(
 		resting++;
 		objects_host_resting_cursor = (absolute_index + 1) % told_count;
 		distributed_state_from_object(object_index, &states[state_count]);
+		absolute_indices[state_count] = absolute_index;
 		kinds[state_count++] = _host_state_to_all;
 	}
 	for (machine_number = 0; machine_number < objects_host_viewers.count; machine_number++)
@@ -1590,6 +1638,14 @@ static void distributed_host_send_states(
 				{
 					continue;
 				}
+			}
+			/* (the replay recorder: one at rest only when it differs from
+			the last it was sent) */
+			if (machine_index == recorder &&
+				!distributed_recorder_state_new(absolute_indices[index], &states[index],
+					kinds[index] == _host_state_moving))
+			{
+				continue;
 			}
 			*state = states[index];
 			/* (its own vehicle where it had it: at which of its ticks) */
@@ -2419,7 +2475,8 @@ static void distributed_client_create(
 			if (!TEST_FLAG(change->flags, _distributed_object_carried_bit) &&
 				existing->object.parent_object_index == NONE &&
 				TEST_FLAG(existing->object.flags, _object_connected_to_map_bit) &&
-				!distributed_client_own_object(existing_index))
+				!distributed_client_own_object(existing_index) &&
+				!biped_ragdoll_active(existing_index))
 			{
 				distributed_object_move(existing_index, &change->position, &forward, &up,
 					&change->translational_velocity, &change->angular_velocity);
@@ -2804,8 +2861,11 @@ void network_objects_handle_states(
 			object_reconnect_to_map(state->object_index, NULL);
 			object_set_visibility(state->object_index, TRUE);
 		}
+		/* (nor a body this machine's ragdoll moves: where it lies is drawn,
+		not played, biped_ragdoll.c) */
 		if (object->object.parent_object_index != NONE ||
-			!TEST_FLAG(object->object.flags, _object_connected_to_map_bit))
+			!TEST_FLAG(object->object.flags, _object_connected_to_map_bit) ||
+			biped_ragdoll_active(state->object_index))
 		{
 			continue;
 		}
@@ -3631,6 +3691,7 @@ void network_objects_new_game(
 		objects_host_told[absolute_index] = NONE;
 		objects_host_state_moving[absolute_index] = FALSE;
 		objects_host_rest_times[absolute_index] = NONE;
+		objects_recorder_states[absolute_index] = 0;
 		objects_host_inventories[absolute_index].carried_time = NONE;
 		objects_host_inventories[absolute_index].ammunition_time = NONE;
 		objects_client_has[absolute_index] = NONE;

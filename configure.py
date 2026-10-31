@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # root build script: writes build.ninja for the native ports (Linux, Windows,
-# Android) and the web port
+# Android, Switch, PS5) and the web port
 
 import argparse
 import io
@@ -12,7 +12,10 @@ from types import SimpleNamespace
 
 from tools import ninja_syntax
 from tools.android_build import android_configure_inputs, generate_android_build
+from tools.linux_guest_build import generate_linux_guest_builds, linux_guest_configure_inputs, native_linux_guest
 from tools.linux_build import check_profile_options, generate_linux_build, linux_configure_inputs
+from tools.ps5_build import generate_ps5_build, ps5_configure_inputs
+from tools.switch_build import generate_switch_build, switch_configure_inputs
 from tools.web_build import generate_web_build, web_configure_inputs
 from tools.windows_build import generate_windows_build, windows_configure_inputs
 
@@ -90,6 +93,79 @@ parser.add_argument(
     help="clang with the arm64_32 target for the Android guest (default: clang)",
 )
 parser.add_argument(
+    "--android-vulkan-validation",
+    action="store_true",
+    help="put the Vulkan validation layer in the Android APK (debug.vk_validation; adds about 30 MB)",
+)
+parser.add_argument(
+    "--devkitpro",
+    type=str,
+    help="devkitPro for `ninja switch` (default: DEVKITPRO, or /opt/devkitpro)",
+)
+parser.add_argument(
+    "--linux-arm64-cc",
+    type=str,
+    help="clang (with the arm64_32 target) for `ninja linux_arm64`, the 64-bit ARM Linux build (default: clang)",
+)
+parser.add_argument(
+    "--linux-arm64-gl",
+    choices=["gles", "desktop"],
+    default="gles",
+    help="the renderer of `ninja linux_arm64`: OpenGL ES 3 (the default, as on Android) or desktop OpenGL 4.5",
+)
+parser.add_argument(
+    "--linux-x86-64",
+    action="store_true",
+    help="generate `ninja linux_x86_64`, the 64-bit x86 Linux build, on a 64-bit x86 Linux computer, whose default "
+    "build is the x86 one: configure.py then downloads its musl and SDL3 (once, to build/linux_x86_64/third_party). "
+    "--linux-x86-64-cc asks for it too",
+)
+parser.add_argument(
+    "--linux-x86-64-cc",
+    type=str,
+    help="clang (with the x32 target) for `ninja linux_x86_64`, the 64-bit x86 Linux build (default: clang)",
+)
+parser.add_argument(
+    "--linux-x86-64-movable-window",
+    action="store_true",
+    help="build `ninja linux_x86_64`'s guest image to take the Xbox window wherever its host puts it "
+    "(HALO_MOVABLE_WINDOW), as the PS5 needs: its console loads a system module at 0x80000000",
+)
+parser.add_argument(
+    "--ps5",
+    action="store_true",
+    help="generate `ninja ps5`, the PS5 title (port/ps5/README.md): configure.py then downloads its musl, SDL3 "
+    "and glslang (once, to build/ps5/third_party) and resolves pacbrew's SDL2 through PS5_Vulkan. "
+    "--ps5-vulkan asks for it too",
+)
+parser.add_argument(
+    "--ps5-vulkan",
+    metavar="PATH",
+    help="the PS5_Vulkan checkout `ninja ps5` builds with, set up by its tools/setup-native-dependencies.sh "
+    "(default: PS5_VULKAN, then ~/projects/ps5-deps/PS5_Vulkan)",
+)
+parser.add_argument(
+    "--ps5-mesa",
+    metavar="PATH",
+    help="the PS5_Mesa checkout, for Vulkan's headers (default: PS5_Mesa beside PS5_Vulkan)",
+)
+parser.add_argument(
+    "--ps5-llvm-config",
+    metavar="PATH",
+    help="the llvm-config of the clang that compiles the PS5 host, clang 22 (default: /usr/bin/llvm-config-22)",
+)
+parser.add_argument(
+    "--ps5-hostdeps",
+    metavar="ENV",
+    help="a script that puts meson's and LLVM's tools on the path for the PS5 build "
+    "(default: ~/projects/ps5-deps/hostdeps/env.sh)",
+)
+parser.add_argument(
+    "--ps5-guest-cc",
+    type=str,
+    help="clang (with the x32 target) for the PS5 build's guest image (default: --ps5-llvm-config's clang, clang 22)",
+)
+parser.add_argument(
     "--web-emcc",
     type=str,
     help="Emscripten's emcc for `ninja web` (default: emcc on the PATH, then EMSDK's or ~/emsdk's)",
@@ -145,6 +221,19 @@ sln = SimpleNamespace(
     port_pgo_profile=args.pgo_profile,
     android_ndk=args.android_ndk,
     android_guest_cc=args.android_guest_cc,
+    android_vulkan_validation=args.android_vulkan_validation,
+    devkitpro=args.devkitpro,
+    linux_arm64_cc=args.linux_arm64_cc,
+    linux_arm64_gl=args.linux_arm64_gl,
+    linux_x86_64=args.linux_x86_64,
+    linux_x86_64_cc=args.linux_x86_64_cc,
+    linux_x86_64_movable_window=args.linux_x86_64_movable_window,
+    ps5=args.ps5,
+    ps5_vulkan=args.ps5_vulkan,
+    ps5_mesa=args.ps5_mesa,
+    ps5_llvm_config=args.ps5_llvm_config,
+    ps5_hostdeps=args.ps5_hostdeps,
+    ps5_guest_cc=args.ps5_guest_cc,
     web_emcc=args.web_emcc,
 )
 if not is_windows():
@@ -171,7 +260,10 @@ n.newline()
 
 generate_linux_build(n, sln)
 generate_android_build(n, sln)
+generate_linux_guest_builds(n, sln)
 generate_windows_build(n, sln)
+generate_switch_build(n, sln)
+generate_ps5_build(n, sln)
 generate_web_build(n, sln)
 
 n.comment("Reconfigure on change")
@@ -189,15 +281,20 @@ n.build(
         Path("tools/ninja_syntax.py"),
         *linux_configure_inputs(),
         *android_configure_inputs(),
+        *linux_guest_configure_inputs(),
         *windows_configure_inputs(),
+        *switch_configure_inputs(),
+        *ps5_configure_inputs(),
         *web_configure_inputs(),
     ],
 )
 n.newline()
 
 # the build for this computer, where it could be generated (the Windows
-# build is left out when SDL cannot be fetched, for instance)
-default = "windows" if is_windows() or sln.windows_cross else "linux"
+# build is left out when SDL cannot be fetched, for instance): on 64-bit x86
+# Linux the x86 build, not the guest build (linux_x86_64)
+native_guest = native_linux_guest()
+default = "windows" if is_windows() or sln.windows_cross else native_guest.name if native_guest and native_guest.default else "linux"
 if f"\nbuild {default}: " in out.getvalue():
     n.comment("Default rule: the build for this computer")
     n.default(default)

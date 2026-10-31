@@ -1084,62 +1084,16 @@ static void hud_message_to_all(
 	return;
 }
 
-static void set_local_player_controls_from_player_profile(
-	short local_player_index)
+/* port: the buttons of the game's controls in a button preset, set in
+preferences (the menus' picture of each layout reads them too:
+menu_functions.c) */
+void player_ui_button_preset_preferences(
+	short button_preset,
+	struct game_input_preferences *result)
 {
-	struct game_input_preferences preferences = { 0 };
-	real pitch_rate_table[NUMBER_OF_LOOK_SENSITIVITY_SETTINGS] =
-	{
-		40.0f, 50.0f, 60.0f, 70.0f, 80.0f,
-		90.0f, 100.0f, 110.0f, 120.0f, 130.0f
-	};
-	real yaw_rate_table[NUMBER_OF_LOOK_SENSITIVITY_SETTINGS] =
-	{
-		80.0f, 100.0f, 120.0f, 140.0f, 160.0f,
-		180.0f, 200.0f, 220.0f, 240.0f, 260.0f
-	};
-	struct player_profile_controller_settings *controls;
-	long look_sensitivity;
-	long yaw_index;
-	short pitch_index;
-	short controller_index;
+	struct game_input_preferences preferences = *result;
 
-	match_assert(
-		"c:\\halo\\SOURCE\\interface\\player_ui.c",
-		0x396,
-		(local_player_index>=0) && (local_player_index<MAXIMUM_NUMBER_OF_LOCAL_PLAYERS));
-
-	controls = &player_ui_globals.local_players[local_player_index].profile.controller_settings;
-	look_sensitivity = controls->look_sensitivity;
-	yaw_index = look_sensitivity - 1;
-	if (look_sensitivity - 1 < 0)
-	{
-		pitch_index = 0;
-	}
-	else
-	{
-		if (yaw_index > NUMBER_OF_LOOK_SENSITIVITY_SETTINGS - 1)
-			pitch_index = NUMBER_OF_LOOK_SENSITIVITY_SETTINGS - 1;
-		else
-			pitch_index = (short)yaw_index;
-	}
-
-	if (yaw_index < 0)
-	{
-		yaw_index = 0;
-	}
-	else
-	{
-		if (yaw_index > NUMBER_OF_LOOK_SENSITIVITY_SETTINGS - 1)
-			yaw_index = NUMBER_OF_LOOK_SENSITIVITY_SETTINGS - 1;
-	}
-
-	preferences.pitch_rate = pitch_rate_table[pitch_index];
-	preferences.yaw_rate = yaw_rate_table[(short)yaw_index];
-	preferences.joystick_controls = controls->joystick_preset > _joystick_preset_legacy_south_paw ?
-		_joystick_preset_legacy_south_paw : controls->joystick_preset;
-
-	switch (controls->button_preset)
+	switch (button_preset)
 	{
 		/* port: a preset this build does not know (a later build's) gets
 		the standard buttons, not none, which moved start and back and
@@ -1220,22 +1174,72 @@ static void set_local_player_controls_from_player_profile(
 			preferences.game_control_to_xbox_buttons[11] = _gamepad_analog_button_b;
 			break;
 
-		/* port: the Master Chief Collection's Bumper Jumper for this game:
-		jump on the left shoulder (the Duke's white) and melee on the right
-		(its black), switching grenades on A, action and reload on B and the
-		flashlight on X */
-		case _button_preset_bumper_jumper:
-			preferences.game_control_to_xbox_buttons[0] = _gamepad_analog_button_white;
-			preferences.game_control_to_xbox_buttons[1] = _gamepad_analog_button_a;
-			preferences.game_control_to_xbox_buttons[2] = _gamepad_analog_button_b;
+		/* port: Boxer: melee on the left trigger and grenades on B; action and
+		reload on the right bumper (the black button), flashlight on the left (white), and switching grenades on X,
+		where the later games have their equipment */
+		case _button_preset_boxer:
+			preferences.game_control_to_xbox_buttons[0] = _gamepad_analog_button_a;
+			preferences.game_control_to_xbox_buttons[1] = _gamepad_analog_button_x;
+			preferences.game_control_to_xbox_buttons[2] = _gamepad_analog_button_black;
 			preferences.game_control_to_xbox_buttons[3] = _gamepad_analog_button_y;
-			preferences.game_control_to_xbox_buttons[4] = _gamepad_analog_button_black;
-			preferences.game_control_to_xbox_buttons[5] = _gamepad_analog_button_x;
+			preferences.game_control_to_xbox_buttons[4] = _gamepad_analog_button_left_trigger;
+			preferences.game_control_to_xbox_buttons[5] = _gamepad_analog_button_white;
+			preferences.game_control_to_xbox_buttons[6] = _gamepad_analog_button_b;
+			preferences.game_control_to_xbox_buttons[7] = _gamepad_analog_button_right_trigger;
+			preferences.game_control_to_xbox_buttons[8] = _gamepad_binary_button_start;
+			preferences.game_control_to_xbox_buttons[9] = _gamepad_binary_button_back;
+			preferences.game_control_to_xbox_buttons[10] = _gamepad_binary_button_left_thumb;
+			preferences.game_control_to_xbox_buttons[11] = _gamepad_binary_button_right_thumb;
+			break;
+
+		/* port: Green Thumb: melee on the right stick's click and zoom on B,
+		grenades on the left trigger (the later games' left weapon), action and reload on the right bumper */
+		case _button_preset_green_thumb:
+			preferences.game_control_to_xbox_buttons[0] = _gamepad_analog_button_a;
+			preferences.game_control_to_xbox_buttons[1] = _gamepad_analog_button_x;
+			preferences.game_control_to_xbox_buttons[2] = _gamepad_analog_button_black;
+			preferences.game_control_to_xbox_buttons[3] = _gamepad_analog_button_y;
+			preferences.game_control_to_xbox_buttons[4] = _gamepad_binary_button_right_thumb;
+			preferences.game_control_to_xbox_buttons[5] = _gamepad_analog_button_white;
 			preferences.game_control_to_xbox_buttons[6] = _gamepad_analog_button_left_trigger;
 			preferences.game_control_to_xbox_buttons[7] = _gamepad_analog_button_right_trigger;
 			preferences.game_control_to_xbox_buttons[8] = _gamepad_binary_button_start;
 			preferences.game_control_to_xbox_buttons[9] = _gamepad_binary_button_back;
 			preferences.game_control_to_xbox_buttons[10] = _gamepad_binary_button_left_thumb;
+			preferences.game_control_to_xbox_buttons[11] = _gamepad_analog_button_b;
+			break;
+
+		/* port: Bumper Jumper: jump on the left bumper and melee on the right,
+		action and reload on B, the flashlight on A, grenades on the left trigger */
+		case _button_preset_bumper_jumper:
+			preferences.game_control_to_xbox_buttons[0] = _gamepad_analog_button_white;
+			preferences.game_control_to_xbox_buttons[1] = _gamepad_analog_button_x;
+			preferences.game_control_to_xbox_buttons[2] = _gamepad_analog_button_b;
+			preferences.game_control_to_xbox_buttons[3] = _gamepad_analog_button_y;
+			preferences.game_control_to_xbox_buttons[4] = _gamepad_analog_button_black;
+			preferences.game_control_to_xbox_buttons[5] = _gamepad_analog_button_a;
+			preferences.game_control_to_xbox_buttons[6] = _gamepad_analog_button_left_trigger;
+			preferences.game_control_to_xbox_buttons[7] = _gamepad_analog_button_right_trigger;
+			preferences.game_control_to_xbox_buttons[8] = _gamepad_binary_button_start;
+			preferences.game_control_to_xbox_buttons[9] = _gamepad_binary_button_back;
+			preferences.game_control_to_xbox_buttons[10] = _gamepad_binary_button_left_thumb;
+			preferences.game_control_to_xbox_buttons[11] = _gamepad_binary_button_right_thumb;
+			break;
+
+		/* port: Reclaimer: crouch on B, melee on the right bumper,
+		action and reload on X, and switching grenades on the left stick's click, which the layout leaves free */
+		case _button_preset_reclaimer:
+			preferences.game_control_to_xbox_buttons[0] = _gamepad_analog_button_a;
+			preferences.game_control_to_xbox_buttons[1] = _gamepad_binary_button_left_thumb;
+			preferences.game_control_to_xbox_buttons[2] = _gamepad_analog_button_x;
+			preferences.game_control_to_xbox_buttons[3] = _gamepad_analog_button_y;
+			preferences.game_control_to_xbox_buttons[4] = _gamepad_analog_button_black;
+			preferences.game_control_to_xbox_buttons[5] = _gamepad_analog_button_white;
+			preferences.game_control_to_xbox_buttons[6] = _gamepad_analog_button_left_trigger;
+			preferences.game_control_to_xbox_buttons[7] = _gamepad_analog_button_right_trigger;
+			preferences.game_control_to_xbox_buttons[8] = _gamepad_binary_button_start;
+			preferences.game_control_to_xbox_buttons[9] = _gamepad_binary_button_back;
+			preferences.game_control_to_xbox_buttons[10] = _gamepad_analog_button_b;
 			preferences.game_control_to_xbox_buttons[11] = _gamepad_binary_button_right_thumb;
 			break;
 
@@ -1277,6 +1281,67 @@ static void set_local_player_controls_from_player_profile(
 			preferences.game_control_to_xbox_buttons[11] = _gamepad_binary_button_right_thumb;
 			break;
 	}
+	*result = preferences;
+
+	return;
+}
+
+static void set_local_player_controls_from_player_profile(
+	short local_player_index)
+{
+	struct game_input_preferences preferences = { 0 };
+	real pitch_rate_table[NUMBER_OF_LOOK_SENSITIVITY_SETTINGS] =
+	{
+		40.0f, 50.0f, 60.0f, 70.0f, 80.0f,
+		90.0f, 100.0f, 110.0f, 120.0f, 130.0f
+	};
+	real yaw_rate_table[NUMBER_OF_LOOK_SENSITIVITY_SETTINGS] =
+	{
+		80.0f, 100.0f, 120.0f, 140.0f, 160.0f,
+		180.0f, 200.0f, 220.0f, 240.0f, 260.0f
+	};
+	struct player_profile_controller_settings *controls;
+	long look_sensitivity;
+	long yaw_index;
+	short pitch_index;
+	short controller_index;
+
+	match_assert(
+		"c:\\halo\\SOURCE\\interface\\player_ui.c",
+		0x396,
+		(local_player_index>=0) && (local_player_index<MAXIMUM_NUMBER_OF_LOCAL_PLAYERS));
+
+	controls = &player_ui_globals.local_players[local_player_index].profile.controller_settings;
+	look_sensitivity = controls->look_sensitivity;
+	yaw_index = look_sensitivity - 1;
+	if (look_sensitivity - 1 < 0)
+	{
+		pitch_index = 0;
+	}
+	else
+	{
+		if (yaw_index > NUMBER_OF_LOOK_SENSITIVITY_SETTINGS - 1)
+			pitch_index = NUMBER_OF_LOOK_SENSITIVITY_SETTINGS - 1;
+		else
+			pitch_index = (short)yaw_index;
+	}
+
+	if (yaw_index < 0)
+	{
+		yaw_index = 0;
+	}
+	else
+	{
+		if (yaw_index > NUMBER_OF_LOOK_SENSITIVITY_SETTINGS - 1)
+			yaw_index = NUMBER_OF_LOOK_SENSITIVITY_SETTINGS - 1;
+	}
+
+	preferences.pitch_rate = pitch_rate_table[pitch_index];
+	preferences.yaw_rate = yaw_rate_table[(short)yaw_index];
+	preferences.joystick_controls = controls->joystick_preset > _joystick_preset_legacy_south_paw ?
+		_joystick_preset_legacy_south_paw : controls->joystick_preset;
+
+	player_ui_button_preset_preferences(controls->button_preset, &preferences);
 
 	preferences.invert_look = controls->invert_look;
 	preferences.invert_look_aircraft_control = controls->flight_stick_aircraft_controls;

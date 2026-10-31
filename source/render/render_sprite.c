@@ -166,6 +166,30 @@ static void build_sprite_compute_basis(
 
 /* ---------- globals */
 
+/* port: port/linux/src/port_config.c's */
+long config_integer(char const *name);
+unsigned long config_changes(void);
+
+/* port: display.big_sprite_limit, the sprites covering more than half the
+view drawn in a frame, the rest left out as the Xbox's 11 left them: each
+is a layer over most of the screen (the Halo level's falls, 11 mist sheets
+at 5.5 ms of a Switch Lite's GPU). Read again when a setting changes */
+static long build_sprite_big_limit(
+	void)
+{
+	static unsigned long read_at = (unsigned long)-1;
+	static long limit = 11;
+
+	if (read_at != config_changes())
+	{
+		read_at = config_changes();
+		limit = config_integer("display.big_sprite_limit");
+		if (limit < 0)
+			limit = 11;
+	}
+	return limit;
+}
+
 boolean debug_sprites;
 struct
 {
@@ -549,7 +573,9 @@ void build_sprite(
 						real coverage = render_frustum_cube_view_fraction(&render.frustum, &bounding_rectangle);
 
 						build_sprite_globals.screen_coverage += coverage;
-						if (coverage>0.5f && build_sprite_globals.big_sprite_count++>10)
+						/* port: past display.big_sprite_limit sprites covering
+						half the view (the Xbox's 11), the rest left out */
+						if (coverage>0.5f && build_sprite_globals.big_sprite_count++>=build_sprite_big_limit())
 						{
 							group->sprite_count--;
 							data->sprite_count--;

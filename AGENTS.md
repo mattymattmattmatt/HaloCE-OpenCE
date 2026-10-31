@@ -1,7 +1,7 @@
 # Notes for agents
 
 This repository ports the Halo: Combat Evolved decompilation (Xbox build
-01.01.14.2342, `cachebeta.exe`) to Linux, Windows, Android and the web. The game's C
+01.01.14.2342, `cachebeta.exe`) to Linux, Windows, Android, the web and, as homebrew, the Switch and the PS5. The game's C
 sources are the decompilation; the port adds a platform layer that
 implements the Xbox APIs the game calls, and features the Xbox game did not
 have (a new netcode, internet play, the PC version's menus, Custom Edition
@@ -20,27 +20,34 @@ end.
 | `port/linux/include/` | The port's headers: the limits (`halo_port_limits.h`, with `HALO_PORT_NETWORK_VERSION`), capacities (`halo_port_capacity.h`), the prefix header, `halo_linux_source_fixups.h` (port functions the game's sources call) |
 | `port/include/xdk/` | Stand-ins for the Xbox SDK's headers (declarations only) |
 | `port/windows/` | The Windows build's own files (`win32_*.c`, headers) |
-| `port/android/` | The Android app: the guest runtime, the host library (`host/`), the Java app (`app/`), host imports (`host_imports.list`) |
+| `port/linux/host/` | The Linux host of the guest builds (`ninja linux_arm64`, `ninja linux_x86_64`): its entry point (`host_main.c`), the desktop's host functions (`host_desktop.c`) and their import list, the guest's half of the desktop (`guest_desktop.c`); the rest of the host is Android's (`port/android/host`) |
+| `port/android/` | The Android app: the guest runtime, the host library (`host/`, which the Linux host shares), the Java app (`app/`), host imports (`host_imports.list`, every guest's; `android_imports.list`, the app's own) |
+| `port/ps5/` | The PS5 title (`ninja ps5`): the host (`host/`: the entry point, memory, system calls over FreeBSD's, futexes, SDL3's calls on pacbrew's SDL2, the pad and microphone, the network, the RADV driver's half, the updater `host_update_ps5.c`, the rules tested on the PC `host_rules_ps5.c`); the title's `sce_sys/`; its own import list (`host_imports.list`) and stub (`stubs/`); the release's `README.txt` and the updater's roots (`release/`); the probes (`probe/`); the plan (`PS5.md`). The rest of the host is Android's, the game the x32 guest of `ninja linux_x86_64` |
 | `port/web/` | The web build: its runtime (`src/`: entry, sockets inside the page, memory watch), the page and its service worker (`site/`), the SDL port, tests |
 | `port/assets/` | What the builds embed or ship: high-res HUD (`hud/`), fonts, titles, menus (`menus/`), icons, network brokers and master servers, the dedicated server's web page (`server_ui/`) |
 | `port/third_party/` | Vendored libraries, each with a README naming its upstream, version and checksum |
 | `port/tools/` | Stand-alone tools (`cache_file_report.c`) |
-| `tools/` | Build scripts (`linux_build.py`, `windows_build.py`, `android_build.py`, `web_build.py`, `ci_build.py`, `web_serve.py`), generators (`ce_menus.py`, `port_settings.py`, `hud_assets.py`, `title_assets.py`, `embed_assets.py`, `server_ui_embed.py`, `xdk_headers.py`), the dedicated server's protocol simulator and remote console (`server_sim.py`, `opence_rcon.py`), tests, and `stagekit/` (scenarios staged and instrumented on the real engine, no retail assets) |
+| `tools/` | Build scripts (`linux_build.py`, `windows_build.py`, `android_build.py`, `web_build.py`, `ps5_build.py`, `ci_build.py`, `web_serve.py`), the PS5's title script and deploy (`ps5_title.sh`, `ps5_deploy.py`), generators (`ce_menus.py`, `port_settings.py`, `hud_assets.py`, `title_assets.py`, `embed_assets.py`, `server_ui_embed.py`, `xdk_headers.py`), the dedicated server's protocol simulator and remote console (`server_sim.py`, `opence_rcon.py`), tests, and `stagekit/` (scenarios staged and instrumented on the real engine, no retail assets) |
 | `docs/` | Longer design notes (`custom_edition_caches.md`, `mods.md`, `dedicated_server.md`, `master_protocol.md`) |
 | `pgo/` | Profile-guided optimisation profiles |
 | `deploy/` | Running a dedicated server: systemd, Docker, Pterodactyl, Helm, PufferPanel, MCSManager, example gametypes |
 | `assets/` | Game data for local runs (gitignored: `maps/`, `custom_maps/`) |
-| `.github/workflows/` | CI: builds every platform on each push, publishes releases from `main` |
+| `.github/workflows/` | CI: builds every platform on each push; a pushed tag `v<number>` on `main` publishes release `build-<number>` (higher than the last), its notes the commit's message |
 
 ## Building
 
 ```sh
 python configure.py            # debug build; add --release, --portable, --profile, --pgo=off, --lto=off
 ninja linux                    # build/linux/halo
+ninja linux_x86_64             # build/linux_x86_64/halo: x32 guest in a 64-bit host (x86-64 Linux only;
+                               # configure with --linux-x86-64 first, which downloads musl and SDL3)
+ninja linux_arm64              # build/linux_arm64/halo: arm64_32 guest (64-bit ARM Linux only)
 ninja android                  # the Android guest image and native libraries
 ninja android_apk              # the APK (Gradle)
 ninja web                      # build/web/site (Emscripten: port/web/README.md)
 ninja windows                  # on Windows, or on Linux after configure.py --windows-cross
+ninja ps5                      # build/ps5/title/PPSA99500 (configure with --ps5 and PS5_Vulkan's toolchain:
+                               # port/ps5/README.md, "Building")
 python tools/ci_build.py linux release   # what CI builds
 ```
 
@@ -54,10 +61,27 @@ python tools/ci_build.py linux release   # what CI builds
   game computes the same results. Do not call the system's maths functions.
 - Android: the game is an ILP32 AArch64 guest (`arm64_32`) in a 64-bit app.
   Guest code can call only the host imports declared in
-  `port/android/host_imports.list` and `port/android/guest/runtime/guest_host.h`,
-  and only the SDL functions `guest_sdl.c` bridges. Run `ninja android`
+  `port/android/guest/runtime/guest_host.h` and listed in
+  `port/android/host_imports.list` (the app's own in `android_imports.list`),
+  and only the SDL functions `guest_sdl.c` bridges.
+  `tools/check_host_imports.py` (run by the build) checks that the lists
+  and the declarations agree, and that every argument crosses to the host
+  as the guest left it. Run `ninja android`
   after changing anything it compiles: `port/linux/src`, `port/linux/game`,
   `port/android`, `source/`, the build scripts.
+- Linux x86-64 and arm64: the same guest and host as Android, with the
+  desktop's code paths (`tools/linux_guest_build.py`); the guest is `x32`
+  on x86-64 (desktop OpenGL), `arm64_32` on AArch64. What is particular
+  to a processor is its `GuestArch` in `tools/guest_arch.py`. The x32
+  image is linked below 2 GB (`image_base`, which must equal
+  `HALO_GUEST_IMAGE_BASE` in `halo_android_abi.h`), links no runtime
+  library, and may not touch `%fs`/`%gs` (`tools/guest_image_check.py`,
+  run by the build). The host calls guest code only through
+  `host_call_guest`, which passes arguments zero-extended. Each target
+  configures only on its own processor; `ninja` alone on x86-64 still
+  builds `linux`, and `linux_x86_64` is generated (its sources
+  downloaded) only with `--linux-x86-64` or `--linux-x86-64-cc`, or once
+  they are in `build/linux_x86_64/third_party`.
 - Web: the game is `wasm32` (also ILP32), run on a Web Worker; calls must
   match their callee's type exactly (the link fails on a mismatch), and
   WebGL 2 is ES 3.0. Run `ninja web` after changing what it compiles (as
@@ -69,7 +93,9 @@ python tools/ci_build.py linux release   # what CI builds
 | --- | --- | --- |
 | `HALO_ANDROID` | Android | The app: its display, input, files and lifecycle |
 | `HALO_GLES` | Android, web | The OpenGL ES renderer |
-| `HALO_ARM64_GUEST` | Android | The guest's ABI (ILP32 AArch64) |
+| `HALO_GUEST` | Android, Linux arm64, Linux x86-64 | The game is an ILP32 guest image in a 64-bit host process: its memory, its host imports, the SDL it reaches. The instruction set is the compiler's: test `__aarch64__` or `__x86_64__` |
+| `HALO_GUEST_MACHO` | Android, Linux arm64 | The guest is compiled for clang's Darwin target (`arm64_32`), whose Mach-O objects are converted afterwards |
+| `HALO_ARM64_GUEST` | Android, Linux arm64 | `HALO_GUEST` on AArch64 (its name before); new code tests `HALO_GUEST` or `__aarch64__` |
 | `HALO_WEB` | Web | The browser: its frames, storage, sockets and WebGL 2's limits (with `HALO_GLES`, not `HALO_ANDROID`) |
 | `HALO_WINDOWS` | Windows (`halo_windows_prefix.h`) | The Windows build |
 | `HALO_RELEASE` | `--release` | No assertions checked |
@@ -89,6 +115,10 @@ python -m pytest -q tools/test_linux_port.py                # the build, the map
 python -m pytest -q tools/test_mods.py                      # mods played over a map (needs assets/maps)
 python -m pytest -q tools/test_bots.py                      # the bots in local games (needs assets/maps)
 python -m pytest -q tools/test_cache_file_formats.py tools/test_bmp_files.py tools/test_profile.py
+python -m pytest -q tools/test_host_watch_hash.py tools/test_host_units.py tools/test_check_host_imports.py tools/test_host_syscall.py  # the guests' host
+python -m pytest -q tools/test_guest_image_check.py         # the guest images' checks (x86-64)
+python -m pytest -q tools/test_guest_layout.py tools/test_linux_guest_build.py  # the guests' memory layout, the guest builds' configure
+python -m pytest -q tools/test_ps5_build.py tools/test_ps5_host.py  # the PS5 build's configure and notice, the PS5 host's pure parts
 python tools/test_touch_layout.py                           # the Android touch layout (JDK 17+)
 python tools/test_light_storage.py
 python tools/test_death_timing.py
@@ -224,6 +254,11 @@ The decompilation's upstream, punpckhdq/halo, is AGPL 3.0 from 17 October
   subject ends with `(#N)`.
 - A commit taken from a fork keeps its author and is made with
   `git cherry-pick -x`.
+- A release is the commit tagged `v<number>`. It adds a section to
+  `CHANGELOG.md`: `## Build <number>`, one line per change with its
+  contributors in parentheses, and `Network version <N>`
+  (`HALO_PORT_NETWORK_VERSION`) as the section's last line. Its commit
+  message is the same text, so its last line is the network version too.
 
 ## Documents
 
@@ -234,6 +269,7 @@ The decompilation's upstream, punpckhdq/halo, is AGPL 3.0 from 17 October
 | [port/linux/NETCODE.md](port/linux/NETCODE.md) | The distributed netcode, network versions, joining a game in progress, map sharing, transport, testing |
 | [port/windows/README.md](port/windows/README.md) | The Windows build, its headers, inline functions, crash reports |
 | [port/android/README.md](port/android/README.md) | The Android build, the guest and host, touch controls, Android settings, finding problems |
+| [port/ps5/README.md](port/ps5/README.md) | The PS5 title: installing it, its updates and settings, how it runs on the console, building and developing it; `port/ps5/PS5.md` is its plan and record |
 | [port/web/README.md](port/web/README.md) | The web build, the page, the game data in the browser, limits, how it operates, hosting on GitHub Pages |
 | [port/include/xdk/README.md](port/include/xdk/README.md) | How the SDK declarations were written and are checked |
 | [docs/custom_edition_caches.md](docs/custom_edition_caches.md) | Loading and converting Custom Edition maps, and the evidence for each layout |
@@ -248,4 +284,5 @@ The decompilation's upstream, punpckhdq/halo, is AGPL 3.0 from 17 October
 | [tools/harness/README.md](tools/harness/README.md) | Asset-free regression tests |
 | [tools/stagekit/README.md](tools/stagekit/README.md) | Scenarios staged and instrumented on the real engine, no retail assets |
 | `port/third_party/*/README.md` | Each vendored library |
+| [CHANGELOG.md](CHANGELOG.md) | What each release changed, and its network version |
 | [AUTHORS.md](AUTHORS.md) | Art credits |

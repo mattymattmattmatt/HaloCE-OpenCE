@@ -37,11 +37,14 @@ enum
 	_button_preset_swap_a_and_left_trigger,
 	_button_preset_swap_b_and_left_trigger,
 	_button_preset_swap_b_and_right_thumb,
-	/* port: the Master Chief Collection's Bumper Jumper (jump on the left
-	shoulder, melee on the right), which the Xbox game did not have */
+	/* port: the later games' layouts, as Halo: CE's controls go (player_ui.c) */
+	_button_preset_boxer,
+	_button_preset_green_thumb,
 	_button_preset_bumper_jumper,
+	_button_preset_reclaimer,
 	/* port: Fishsticks: zoom on the left trigger and melee on the right
-	thumbstick's button, grenade throw on the right bumper, crouch on B, grenade switch on the pad's left */
+	thumbstick's button, grenade throw on the right bumper, crouch on B, grenade switch on the pad's left
+	(after this fork's own, whose numbers saved profiles keep) */
 	_button_preset_fishsticks,
 	/* port: Recon: the standard buttons, with action and reload on the right
 	bumper, grenade switch on the left and the flashlight on X */

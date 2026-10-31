@@ -7,7 +7,7 @@ made by tools/button_assets.py), the fonts the text is drawn with
 tools/ce_menus.py) and SMAA's shader and lookup textures
 (port/third_party/smaa) in the game as C data:
 
-    python tools/embed_assets.py OUTPUT.c
+    python tools/embed_assets.py [--platform PORT] OUTPUT.c
 
 writes OUTPUT.c with each PNG and the bitmap it stands for (its tag, index
 and checksum of its pixels, from port/assets/hud/layout.json,
@@ -15,7 +15,11 @@ port/assets/titles/titles.json and port/assets/buttons/buttons.json), the
 fonts and their tags from port/assets/fonts/fonts.json, the menu files
 listed in port/assets/menus/menus.json, and SMAA's shader and lookup
 textures, as port/linux/src/hud_hires.h, text_hires.h, menu_files.h and
-xgpu_post.c declare them. The builds generate it
+xgpu_post.c declare them. With --platform, a port's own button art
+(port/assets/buttons/platforms/PORT, made by tools/button_assets.py platform)
+is embedded beside the common PNGs it has: one row each, with the contexts
+its letters are right in and whose art it is (hud_hires.h), for
+display.xbox_buttons to choose the port's or the Xbox's. The builds generate it
 (hud_assets_build, called by tools/linux_build.py, windows_build.py and
 android_build.py), so the assets are the committed source and Android needs
 no files beside its guest image.
@@ -26,10 +30,12 @@ operands (it keeps .ascii strings as they are, but once garbled them).
 """
 
 import json
+import re
 import struct
+import subprocess
 import sys
 from pathlib import Path
-from typing import Any, List
+from typing import Any, Dict, List, Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 HUD_ASSETS = Path("port/assets/hud")
@@ -42,8 +48,8 @@ TITLE_ASSETS = Path("port/assets/titles")
 TITLE_LIST = TITLE_ASSETS / "titles.json"
 BUTTON_ASSETS = Path("port/assets/buttons")
 BUTTON_LIST = BUTTON_ASSETS / "buttons.json"
-CONTROLLER_ASSETS = Path("port/assets/controller_buttons")
-CONTROLLER_LIST = CONTROLLER_ASSETS / "buttons.json"
+# a port's own button art (button_assets.py platform), by the port's name
+BUTTON_PLATFORMS = BUTTON_ASSETS / "platforms"
 FONT_ASSETS = Path("port/assets/fonts")
 FONT_LIST = FONT_ASSETS / "fonts.json"
 MENU_ASSETS = Path("port/assets/menus")
@@ -67,16 +73,46 @@ def font_files() -> List[str]:
     return sorted({font["file"] for font in fonts})
 
 
-def textures() -> List[tuple]:
-    """The textures: each one's folder, its entry in its list, and whether
-    it is the menus' (a title or a button icon, drawn with the high-res
-    text)."""
+# hud_hires.h's HUD_HIRES_CONTEXT_* bits: where a picture's buttons are right
+# (the Switch's menus with A and B swapped, its menus without, a game: all
+# three), and whose art it is where a port has its own
+CONTEXT_PLACES = 1 | 2 | 4
+CONTEXT_PLATFORM_ART = 8
+CONTEXT_XBOX_ART = 16
+
+
+def platform_overrides(platform: Optional[str]) -> Dict[str, List[dict]]:
+    """The port's own button art, by the common PNG's name: each PNG and its contexts."""
+    listing = BUTTON_PLATFORMS / (platform or "") / "buttons.json"
+    if not platform or not (ROOT / listing).is_file():
+        return {}
+    result: Dict[str, List[dict]] = {}
+    for override in json.loads((ROOT / listing).read_text())["overrides"]:
+        result.setdefault(override["name"], []).append(override)
+    return result
+
+
+def textures(platform: Optional[str] = None) -> List[tuple]:
+    """The textures: each one's folder, its entry in its list, whether it
+    is the menus' (a title or a button icon, drawn with the high-res text),
+    its PNG's name and the contexts it is drawn in (0: all); a port's own
+    button art beside the common PNG it stands for, each marked as whose."""
     result = []
+    overrides = platform_overrides(platform)
     for folder, listing, title in ((HUD_ASSETS, LAYOUT, False), (TITLE_ASSETS, TITLE_LIST, True),
-                                   (BUTTON_ASSETS, BUTTON_LIST, True), (HUD_ASSETS, CE_LAYOUT, False),
-                                   (CONTROLLER_ASSETS, CONTROLLER_LIST, True)):
-        if (ROOT / listing).is_file():
-            result += [(folder, asset, title) for asset in json.loads((ROOT / listing).read_text())["assets"]]
+                                   (BUTTON_ASSETS, BUTTON_LIST, True), (HUD_ASSETS, CE_LAYOUT, False)):
+        if not (ROOT / listing).is_file():
+            continue
+        for asset in json.loads((ROOT / listing).read_text())["assets"]:
+            if listing == BUTTON_LIST and asset["name"] in overrides:
+                # (the port's art, and the Xbox's beside it, for display.xbox_buttons to choose:
+                # hud_hires.h's HUD_HIRES_CONTEXT_PLATFORM_ART and _XBOX_ART)
+                result += [(BUTTON_PLATFORMS / platform, asset, title, override["png"],
+                            (override["contexts"] or CONTEXT_PLACES) | CONTEXT_PLATFORM_ART)
+                           for override in overrides[asset["name"]]]
+                result.append((folder, asset, title, f"{asset['name']}.png", CONTEXT_PLACES | CONTEXT_XBOX_ART))
+            else:
+                result.append((folder, asset, title, f"{asset['name']}.png", 0))
     return result
 
 
@@ -92,11 +128,18 @@ def smaa_files() -> List[tuple]:
     return [(name, symbol) for name, symbol in SMAA_FILES if (ROOT / SMAA_ASSETS / name).is_file()]
 
 
-def hud_asset_inputs() -> List[Path]:
+def platform_of(prefix: str) -> Optional[str]:
+    """The port whose own button art a build embeds: its prefix, if it has some."""
+    return prefix if (ROOT / BUTTON_PLATFORMS / prefix / "buttons.json").is_file() else None
+
+
+def hud_asset_inputs(platform: Optional[str] = None) -> List[Path]:
     """The files the generated source is made from."""
-    inputs = [listing for listing in (LAYOUT, CE_LAYOUT, CE_STOCK, CUSTOM_EDITION_HUD, TITLE_LIST, BUTTON_LIST, CONTROLLER_LIST, FONT_LIST, MENU_LIST)
+    inputs = [listing for listing in (LAYOUT, CE_LAYOUT, CE_STOCK, CUSTOM_EDITION_HUD, TITLE_LIST, BUTTON_LIST, FONT_LIST, MENU_LIST)
               if (ROOT / listing).is_file()]
-    return [*inputs, *(folder / f"{asset['name']}.png" for folder, asset, _ in textures()),
+    if platform:
+        inputs.append(BUTTON_PLATFORMS / platform / "buttons.json")
+    return [*inputs, *(folder / png for folder, _, _, png, _ in textures(platform)),
             *(FONT_ASSETS / name for name in font_files()), *(MENU_ASSETS / name for name in menu_files()),
             *(SMAA_ASSETS / name for name, _ in smaa_files()),
             *([WINDOW_ICON] if (ROOT / WINDOW_ICON).is_file() else []),
@@ -109,13 +152,61 @@ def hud_configure_inputs() -> List[Path]:
     list may rename or remove."""
     inputs = []
     for folder, listing in ((HUD_ASSETS, LAYOUT), (HUD_ASSETS, CE_LAYOUT), (TITLE_ASSETS, TITLE_LIST), (BUTTON_ASSETS, BUTTON_LIST),
-                            (CONTROLLER_ASSETS, CONTROLLER_LIST),
                             (FONT_ASSETS, FONT_LIST), (MENU_ASSETS, MENU_LIST)):
         if (ROOT / listing).is_file():
             inputs += [folder, listing]
     if (ROOT / SMAA_ASSETS).is_dir():
         inputs.append(SMAA_ASSETS)
+    if (ROOT / BUTTON_PLATFORMS).is_dir():
+        inputs += [BUTTON_PLATFORMS, *(listing.relative_to(ROOT) for listing in sorted((ROOT / BUTTON_PLATFORMS).glob("*/buttons.json")))]
     return inputs
+
+
+# the release notes are a Build N commit's message (its subject "Build N")
+NEWS_SUBJECT = re.compile(r"^Build \d+$")
+# what is typed in commit messages that the game's fonts have not, and what
+# is drawn instead
+NEWS_ASCII = {"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"', "\u2013": "-", "\u2014": "-",
+              "\u2026": "...", "\u00a0": " ", "\u2192": "->", "\u00b7": "-"}
+
+
+def _git(*arguments: str) -> str:
+    try:
+        return subprocess.run(["git", *arguments], cwd=ROOT, capture_output=True, text=True, timeout=30,
+                              check=False).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def news_text() -> str:
+    """The main menu's news (menu_functions.c's news screen): the latest
+    release's notes, the message of the newest Build N commit the checkout
+    has (a release's build is of that commit; a shallow clone of another has
+    only its own commit, whose message is taken then), its trailers
+    (Co-Authored-By...) left out, in ASCII; "" outside a git checkout"""
+    message = ""
+    for line in _git("log", "-200", "--format=%H %s").splitlines():
+        commit, _, subject = line.partition(" ")
+        if NEWS_SUBJECT.match(subject.strip()):
+            message = _git("log", "-1", "--format=%B", commit)
+            break
+    if not message:
+        message = _git("log", "-1", "--format=%B")
+    lines = message.replace("\r", "").split("\n")
+    while lines and (not lines[-1].strip() or re.match(r"^[A-Za-z-]+: .+$", lines[-1].strip())):
+        lines.pop()
+    text = "\n".join(lines).strip()
+    for typed, drawn in NEWS_ASCII.items():
+        text = text.replace(typed, drawn)
+    return "".join(character if " " <= character < "\x7f" or character == "\n" else "?" for character in text)
+
+
+def news_inputs() -> List[Path]:
+    """What the news is made again for: the checkout's commits (its HEAD's
+    log), when there is one"""
+    git_directory = _git("rev-parse", "--absolute-git-dir").strip()
+    log = Path(git_directory) / "logs" / "HEAD" if git_directory else None
+    return [log] if log and log.is_file() else []
 
 
 def words(data: bytes) -> List[str]:
@@ -130,13 +221,15 @@ def hud_assets_build(n: Any, prefix: str, output: Path) -> List[Path]:
     """Emits the rule that generates output; returns [output]. It is made
     whatever assets the checkout has (with none, its tables are empty), so
     that the symbols the platform layer refers to are always defined."""
-    inputs = hud_asset_inputs()
+    platform = platform_of(prefix)
+    inputs = hud_asset_inputs(platform)
     n.rule(
         name=f"{prefix}_embed_assets",
-        command="$python tools/embed_assets.py $out",
+        command="$python tools/embed_assets.py " + (f"--platform {platform} " if platform else "") + "$out",
         description=f"{prefix.upper()} EMBED $out",
     )
-    n.build(outputs=output, rule=f"{prefix}_embed_assets", implicit=[Path("tools/embed_assets.py"), *inputs])
+    n.build(outputs=output, rule=f"{prefix}_embed_assets",
+            implicit=[Path("tools/embed_assets.py"), *inputs, *news_inputs()])
     return [output]
 
 
@@ -168,8 +261,12 @@ def png_size(data: bytes, name: str) -> tuple:
 
 
 def main() -> None:
-    if len(sys.argv) != 2:
-        sys.exit("usage: embed_assets.py OUTPUT.c")
+    arguments = sys.argv[1:]
+    platform = None
+    if len(arguments) == 3 and arguments[0] == "--platform":
+        platform, arguments = arguments[1], arguments[2:]
+    if len(arguments) != 1:
+        sys.exit("usage: embed_assets.py [--platform PORT] OUTPUT.c")
     lines = [
         "/* generated by tools/embed_assets.py from port/assets: do not edit */",
         "",
@@ -181,8 +278,7 @@ def main() -> None:
     if (ROOT / CUSTOM_EDITION_HUD).is_file():
         custom_edition = {(entry["tag"], entry["bitmap"]): entry
                           for entry in json.loads((ROOT / CUSTOM_EDITION_HUD).read_text())["assets"]}
-    for index, (folder, asset, title) in enumerate(textures()):
-        name = f"{asset['name']}.png"
+    for index, (folder, asset, title, name, contexts) in enumerate(textures(platform)):
         data = (ROOT / folder / name).read_bytes()
         width, height = png_size(data, name)
         scale = asset["scale"]
@@ -206,7 +302,7 @@ def main() -> None:
         table.append(f'\t{{ "{tag}", {asset["bitmap"]}, {width}, {height}, 0x{asset["crc"]:08x}u, {coverage}, '
                      f'{point_threshold}, {int(title)}, 0x{sprites:x}u, '
                      f'{int(bool(ce))}, {int(asset.get("ce_only", False))}, {ce.get("width", 0)}, {ce.get("height", 0)}, '
-                     f'{ce.get("size", 0)}, 0x{ce.get("crc", 0):08x}u, asset{index}, {len(data)} }},')
+                     f'{ce.get("size", 0)}, 0x{ce.get("crc", 0):08x}u, asset{index}, {len(data)}, {contexts} }},')
     lines.append("const struct hud_hires_embedded hud_hires_embedded[] =")
     lines.append("{")
     lines.extend(table)
@@ -267,6 +363,15 @@ def main() -> None:
     lines.append("};")
     lines.append(f"const unsigned int menu_files_embedded_count = {len(menus)};")
     lines.append("")
+    # the main menu's news (news_text.h): the latest release's notes, ASCII
+    # ending in a NUL
+    data = news_text().encode("ascii") + b"\0"
+    lines.append("")
+    lines.append("const unsigned int halo_news_words[] = {")
+    lines.extend(words(data))
+    lines.append("};")
+    lines.append(f"const unsigned int halo_news_size = {len(data) - 1};")
+    lines.append("")
     # SMAA's shader, as text a GLSL compiler takes (ASCII, ending in a NUL),
     # and its lookup textures (xgpu_post.c); each of size 0 that the
     # checkout does not have. The OpenGL ES renderer has no SMAA.
@@ -297,7 +402,7 @@ def main() -> None:
     lines.append(f"const unsigned long platform_menu_cursor_size = {len(data)};")
     lines.append("")
     lines.append("#endif")
-    output = Path(sys.argv[1])
+    output = Path(arguments[0])
     output.parent.mkdir(parents=True, exist_ok=True)
     text = "\n".join(lines) + "\n"
     if not output.is_file() or output.read_text() != text:

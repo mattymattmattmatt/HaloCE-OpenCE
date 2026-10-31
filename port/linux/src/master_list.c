@@ -449,10 +449,18 @@ static int fetch(const char *url, struct fetched *fetched)
 	pthread_mutex_unlock(&one_at_a_time);
 	return fetched_one;
 }
-#elif defined(HALO_ANDROID)
-/* the app's host (port/android/host/host_https.c) */
-int host_https_get(const char *url, int *status, char *headers, int headers_size, char *body, int body_capacity,
-	int *body_size, char *error, int error_size);
+#elif defined(HALO_ANDROID) || defined(HALO_PS5)
+/* the app's host (port/android/host/host_https.c; the Switch's,
+port/switch/host/host_https.c), as port/android/guest/runtime/guest_host.h */
+struct host_https_sizes
+{
+	int headers_size;
+	int body_capacity;
+	int error_size;
+	int status;
+	int body_size;
+};
+int host_https_get(const char *url, char *headers, char *body, char *error, struct host_https_sizes *sizes);
 
 static int fetch(const char *url, struct fetched *fetched)
 {
@@ -461,19 +469,19 @@ static int fetch(const char *url, struct fetched *fetched)
 	be fetching too) */
 	char *headers = malloc(HEADERS_SIZE);
 	char error[256];
-	int body_size = 0;
+	struct host_https_sizes sizes = { HEADERS_SIZE, MAXIMUM_ANSWER, (int)sizeof(error), 0, 0 };
 
 	fetched->body = malloc(MAXIMUM_ANSWER + 1);
-	if (!headers || !fetched->body || !host_https_get(url, &fetched->status, headers, HEADERS_SIZE, fetched->body,
-		MAXIMUM_ANSWER, &body_size, error, sizeof(error)))
+	if (!headers || !fetched->body || !host_https_get(url, headers, fetched->body, error, &sizes))
 	{
 		free(headers);
 		free(fetched->body);
 		fetched->body = NULL;
 		return 0;
 	}
-	fetched->body[body_size] = 0;
-	fetched->size = (unsigned long)body_size;
+	fetched->status = sizes.status;
+	fetched->body[sizes.body_size] = 0;
+	fetched->size = (unsigned long)sizes.body_size;
 	header_value(headers, "Signature", fetched->signature, sizeof(fetched->signature));
 	header_value(headers, "Signature-Key", fetched->key, sizeof(fetched->key));
 	free(headers);
@@ -498,6 +506,24 @@ static int fetch(const char *url, struct fetched *fetched)
 	return 1;
 }
 #endif
+
+int master_list_https_get(const char *url, int *status, char **body, unsigned long *size)
+{
+	struct fetched fetched;
+
+	memset(&fetched, 0, sizeof(fetched));
+	if (!fetch(url, &fetched) || !fetched.body)
+		return 0;
+	*status = fetched.status;
+	*body = fetched.body;
+	*size = fetched.size;
+	return 1;
+}
+
+void master_list_https_free(char *body)
+{
+	free(body);
+}
 
 int master_list_get(const char *url, int *status, char **body, unsigned long *size)
 {

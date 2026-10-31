@@ -1,0 +1,51 @@
+Halo PS5 memory probe
+
+=== 0: the process ===
+firmware: 0x13600007
+pid: 86
+code (probe_self): 200d69170
+data (report_file): 200d80020
+stack: 7efeaf064
+heap (malloc 64): 880169c00
+libc (printf): 804a505d0
+
+=== 1: the process's map (KERN_PROC_VMMAP) ===
+LOW  0x000778c8000-0x0007791c000 rwx type 9 
+LOW  0x0007791c000-0x00077938000 r-- type 9 
+LOW  0x00077938000-0x0007793c000 r-- type 9 
+LOW  0x0007793c000-0x00077940000 rw- type 9 
+LOW  0x00077940000-0x00077a4c000 rw- type 1 
+     0x00200d68000-0x00200d74000 rwx type 1 
+     0x00200d74000-0x00200d88000 rw- type 1 
+     0x007efcac000-0x007efcb0000 --- type 0 
+     0x007efcb0000-0x007efeb0000 rw- type 1 
+     0x007efeb0000-0x007efeb4000 r-x type 5 
+     0x00804a3c000-0x00804b64000 --x type 9 
+     0x00804b64000-0x00804be8000 r-- type 9 
+     0x00804be8000-0x00804bf0000 r-- type 9 
+     0x00804bf0000-0x00804bf4000 rw- type 9 
+     0x00804bf4000-0x00804c04000 rw- type 1 
+     0x0080a128000-0x0080a174000 --x type 9 
+     0x0080a174000-0x0080a194000 r-- type 9 
+     0x0080a194000-0x0080a198000 r-- type 9 
+     0x0080a198000-0x0080a19c000 rw- type 9 
+     0x0080a19c000-0x0080a1d0000 rw- type 1 
+     0x0081eb94000-0x0081ebc8000 --x type 9 
+     0x0081ebc8000-0x0081ebd4000 r-- type 9 
+     0x0081ebd4000-0x0081ebd8000 r-- type 9 
+     0x0081ebd8000-0x0081ebdc000 rw- type 9 
+     0x0081ebdc000-0x0081ed7c000 rw- type 1 
+     0x0081f844000-0x0081f850000 --x type 9 
+     0x0081f850000-0x0081f858000 r-- type 9 
+     0x0081f858000-0x0081f85c000 r-- type 9 
+     0x0081f85c000-0x0081f870000 rw- type 9 
+     0x00880160000-0x008801f0000 rw- type 1 
+     0x008ff800000-0x008ff804000 rw- type 1 
+     0x008ff804000-0x00900000000 --- type 1 
+27 entries at or above 4 GB
+
+=== 2: MAP_EXCL ===
+MAP_EXCL check: mapping over 200d88000 SUCCEEDED; MAP_EXCL is ignored, so the walk and the big mappings are skipped
+MAP_32BIT (1 MB, no address): placed at 200d88000
+
+=== done ===

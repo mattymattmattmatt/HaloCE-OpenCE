@@ -8,6 +8,10 @@ gamepad input.
 The game is 32-bit code because its data (tags, cache files, saved games)
 contains 32-bit pointers, as on the Xbox.
 
+`ninja linux_arm64` builds the game for 64-bit ARM Linux. Refer to
+"64-bit ARM". `ninja linux_x86_64` builds it as a 64-bit x86 executable,
+which needs no 32-bit libraries. Refer to "64-bit x86".
+
 ## Requirements
 
 You do not need the Xbox SDK. The declarations that the game uses are in
@@ -231,9 +235,12 @@ gamepads operate controllers 2 to 4. With two or more players on this
 computer (co-op, or split screen in a network game) and only one gamepad,
 that gamepad is controller 2 (player 2) and the keyboard and mouse stay
 controller 1; with more gamepads, SPACE on the ADD PLAYER screen does the
-same for the first (refer to the network games' split screen below). The gamepad changes controller only when none of its buttons
-is held. The profile's button layout (Settings > Gamepads) is the
-gamepads' only. Besides the Xbox's five, it has the Master Chief
+same for the first (refer to the network games' split screen below). The
+gamepad changes controller only when none of its buttons is held. The
+profile's button layout (Settings > Gamepads > BUTTON
+LAYOUT, which shows the layout chosen on a picture of the controller,
+what each button does by it) is the gamepads' only. Besides the Xbox's
+five, it has the Master Chief
 Collection's Bumper Jumper: jump on the left bumper, melee on the right,
 switching grenades on A, action and reload on B and the flashlight on X.
 Fishsticks has zoom on the left trigger and melee on the right stick's
@@ -261,7 +268,7 @@ grenades switched with the left bumper (the flashlight moves to X).
 | show the scores (hold) | tab |
 | pause menu | escape |
 | screenshot | F10 |
-| talk in voice chat (hold) | V |
+| talk in voice chat (hold) | V (with a controller, D-pad Down) |
 | type a chat line to everyone | T |
 | type a chat line to your team | Y |
 | vote yes in the vote running (to kick a player, to end the game) | F1 (a controller: the D-pad's left, while the vote runs) |
@@ -269,7 +276,8 @@ grenades switched with the left bumper (the flashlight moves to X).
 | while typing a chat line: to everyone, the team or the vehicle, in turn | Tab |
 
 With a controller, or the touch controls' D-pad, D-pad Up opens the text
-chat's on-screen keyboard (refer to "Text chat").
+chat's on-screen keyboard (refer to "Text chat"), and D-pad Down held talks
+in voice chat; both in a game, and the d-pad still moves the player too.
 
 Always: \` opens the developer console, F12 releases or captures the mouse,
 F11 changes between fullscreen and window. Screenshot (default F10,
@@ -322,6 +330,35 @@ change. The screens open, close and move between each other as the PC
 version's. `display.menus = "xbox"` gives the Xbox's menus, which start every
 kind of game.
 
+The main menu adds two items of the port's: Theater, under Multiplayer,
+the replays this machine recorded of the network games it played
+([REPLAY.md](REPLAY.md)), and Mods (refer to
+[docs/mods.md](../../docs/mods.md)). Theater lists the replays, the newest
+first, each with its map, when and its length; A plays the one chosen,
+and the panel says what it is (its game type, server, who recorded it,
+its size). A replay is the game as it was played: A watches the next
+player and X the one before; the d-pad's left and right skip back and on
+10 seconds (to the keyframe before or after); Y goes round three views
+(behind them, which the right stick flies round them, its click turning
+it with them again, and the left stick zooms; through their eyes with
+their arms and weapon, or from behind their vehicle as they saw it; and a
+free camera moved with the sticks and the triggers; a replay a client
+recorded has only its own player's eyes); the right and left
+shoulder buttons (R and L on the Switch, R1 and L1 on the PS5) play it
+faster or slower, to a pause; Back held shows the scores; B hides the
+lines over the screen; Start pauses it, and in the pause menu B leaves and
+Start resumes. Its
+buttons: RECORD turns `network.record_replays` on or off; DELETE deletes
+the one chosen (pressed twice); on Android, EXPORT opens the system's
+folder picker and copies the replays to the folder chosen (those it
+already holds, by name, are left out), as the app's own folder cannot be
+opened by other apps. On the Switch and the PS5 the Theater shows a QR
+code and an address instead: a page on the local network, while the
+Theater is open, that downloads the replays and uploads others
+(`network.link_page` turns it off, with Direct Link's). The folder keeps
+the newest `network.replays_kept`, and a recording shorter than 15 seconds
+is deleted as it ends.
+
 The menus' text is in the language of the Custom Edition whose `loc.map` is
 in `custom_maps` (French, German, Italian, Spanish and so on), as that
 edition shows it: each of the PC version's texts is that `loc.map`'s
@@ -358,7 +395,9 @@ game does not need a player on each team. The host's START NOW starts the
 game at once; another computer's starts the countdown or takes five
 seconds off it. In the game, each player's pause menu
 opens on their part of the screen, and its LEAVE GAME is theirs: their part
-of the screen stays until the game ends. A game under way shows its own
+of the screen stays until the game ends. A split-screen game on this machine
+alone (no other computers) is different: LEAVE GAME leaves the match for
+every player on it and returns to the main menu. A game under way shows its own
 screen before JOIN GAME: players join there the same way, START or ADD
 PLAYER, and JOIN GAME brings them all into the game.
 
@@ -398,22 +437,47 @@ problem.
 
 ## Bots
 
-Computer players (bots) can play a multiplayer game with you: `bots.count`
-(1 to 15) of them join the lobby of a Slayer game this computer plays or
-hosts: Multiplayer > Create Game > Server Setup > BOTS sets how many, how
-well they play and their teams (hidden for a co-op game, whose allies are
-the campaign pause menu's ALLIES, allowed by CO-OP OPTIONS > ALLOW ALLIES), as does Split Screen in the Xbox's menus. The
-other machines of a hosted game see them as the host's players. They are players as you are: in the scores, the respawns
-and the game's rules, on the teams that `bots.teams` asks for, and they
-follow the teams' changes in the lobby. They look for enemies, aim, fire,
-throw grenades and pick up better weapons, as well as `bots.skill` lets
-them, and walk the paths that the campaign's AI finds on the maps' walkable
-surfaces (`game/bots.c`). They are never in other gametypes (but SWAT,
-Infection and Gun Game, which are Slayer's: below).
+Computer players (bots) play multiplayer games with you: `bots.count` (1 to
+63) of them join the lobby of a game hosted here, local (split screen, which
+is Multiplayer > Split Screen in the Xbox's menus), system link, or a private
+internet game (not a public one, which the server browser lists). The host
+plays them and relays their input to the other machines as any player's, so
+nothing that the machines send each other changes. They are players as you
+are: in the scores, the respawns and the game's rules, on the teams that
+`bots.teams` asks for. They look for enemies, aim (at the head with the
+pistol and the sniper rifle, at the feet with rockets), fire, throw grenades
+and pick up better weapons, as well as `bots.skill` lets them
+(`game/bots.c`). Multiplayer > Create Game > Server Setup > BOTS sets how
+many, how well they play and their teams.
 
-Campaign allies (`bots.coop`) are the campaign's: Server Setup > CO-OP
-OPTIONS > ALLIES before a co-op game, and the campaign pause menu's ALLIES
-(solo, or a co-op game's host) at any time, which brings them in behind the
+- **Capture the Flag and King of the Hill** follow Quake III Arena's bots'
+  rules: each team's defenders keep about its flag (or guard the hill's
+  approaches) and its attackers go for the other flag (or the hill); a
+  carrier runs home, and its own flag taken comes first. **Infection's**
+  zombies hunt and strike, its humans keep together; **SWAT's** bots aim at
+  the head.
+- **Paths** are the campaign AI's searches over the maps' walkable surfaces,
+  less what the bots learn is in the way; a goal the surfaces do not reach is
+  gone to through a teleporter, and teleporters are taken as shortcuts when
+  they save a long walk. Ladders are climbed. `bots.routes` spreads each
+  team's attackers over the map's side lanes (`game/bots_routes.c`).
+- **Vantage points**: a bot holding a sniper rifle (or a rocket launcher; a
+  pistol in Slayer) holds a place that sees the map's key places a while,
+  and leaves it when an enemy comes near, it runs low on ammunition or is
+  hurt (`game/bots_vantage.c`, `game/bots_roles.c`). Not in King of the Hill
+  or Infection.
+- **Vehicles**: a bot whose goal is far off drives an empty Warthog, Ghost or
+  Scorpion, or rides as a Warthog's gunner when a teammate drives, and mans a
+  turret near an enemy (`bots.vehicles`).
+- **Health packs**: a hurt bot goes for a health pack, and for an overshield
+  or camouflage near.
+
+The paths, vantage points, routes, vehicles and health packs are from
+[halo-ce-vita](https://github.com/BirchWoodGod/halo-ce-vita)'s bots
+(BirchWoodGod's PS Vita port, GPL-3.0).
+
+Campaign allies (`bots.coop`) are the campaign's: the campaign pause menu's
+ALLIES (solo, or a co-op game's host) at any time, which brings them in behind the
 player, or takes the extras away, at once. Each has a man's name, picked
 when it joins. Their health shows on the HUD at the left edge, below the
 player's shield and health, each its name over the health meter a vehicle's
@@ -450,12 +514,15 @@ knocks the zoom out); its blows and grenades follow its level (how near,
 how soon, how often; from `"heroic"` a throw leads the target's path, from
 `"veteran"` one goes to where a target was last seen); it strafes in the
 level's rhythm, from long sidesteps to short jiggles at the top, halts,
-crouches and jumps; it steps in for a blow when near; from `"normal"` it
-backs off along a path when it is losing, and from `"veteran"` as soon as
-its shields pop; from `"heroic"` it runs in to finish a won fight; it does
-not see a player far above or below where it looks (unless near, or shot by
-them); and from `"veteran"` it prefers high ground as it roams. halo.log's
-bots line each minute is followed by the fight's counts.
+crouches and jumps; from `"easy"` it steps in for a blow when near; from
+`"normal"` it backs off along a path when it is losing, and from
+`"veteran"` as soon as its shields pop; from `"heroic"` it runs in to finish
+a won fight; it does not see a player far above or below where it looks
+(unless near, or shot by them); and from `"veteran"` it prefers high ground
+as it roams. Infection's zombies keep their own fight, and a bot on the
+hill, carrying the flag or the ball, or holding a vantage point never backs
+off nor runs in. halo.log's bots line each minute is followed by the
+fight's counts.
 
 ## OpenCE gametypes
 
@@ -511,7 +578,7 @@ the setting for one start of the game. It has priority over the file.
 | `display.mode` | `""` | `HALO_DISPLAY_MODE` | `"fullscreen"`: the display, taken at the mode of `display.resolution` (the nearest the display has), or at its desktop mode. `"borderless"`: a window over the whole desktop, whose mode does not change. `"windowed"`: a window of `display.window_size`. Empty: `display.fullscreen` decides (`true`: borderless). F11 changes between the window and the fullscreen mode. Video Setup sets it. |
 | `display.fullscreen` | `true` | `HALO_FULLSCREEN` | `true`: borderless, as `display.mode = "borderless"`. `false`: a window, as `display.mode = "windowed"`. Used when `display.mode` is empty. |
 | `display.resolution` | `"native"` | `HALO_RESOLUTION` | What fullscreen and borderless draw at: `"native"`, the display's own resolution, or `"<width>x<height>"`, such as `"1920x1080"`, 640x480 or more. Fullscreen sets the display to it. Borderless draws at it and scales the picture to the display, where the display has room for it. The picture has 480 lines of the game and the width of the resolution's shape. A window draws at its own size instead. Video Setup's Resolution sets it, from the display's modes; it shows with Fullscreen and Borderless. |
-| `display.resolution_scaling` | `"native"` (Android: `"original"`) | `HALO_RESOLUTION_SCALING` | `"native"`: the game draws at the resolution of the window, or of the display (or `display.resolution`) fullscreen. `"75%"`, `"50%"` or `"25%"`: the game draws at that part of it each way (`"50%"` of 1920x1080 is 960x540) and scales the picture up, for a GPU that cannot keep up with the full resolution. `"original"`: the game draws the 640x480 picture of the Xbox (on Android, 480 lines at the display's shape) and scales it up to the window or the display, whatever `display.mode` is. Video Setup sets it. |
+| `display.resolution_scaling` | `"native"` | `HALO_RESOLUTION_SCALING` | `"native"`: the game draws at the resolution of the window, or of the display (or `display.resolution`) fullscreen. `"original"`: the game draws the 640x480 picture of the Xbox and scales it up to the window or the display, whatever `display.mode` is. Video Setup sets it. |
 | `display.window_size` | `""` | `HALO_WINDOW_SIZE` | The size of the window, as `"<width>x<height>"`, such as `"1920x1080"`, 640x480 or more. You can change the size of the window; the game's picture takes its shape. Empty: `display.window_scale` decides. Video Setup's Window Size sets it, from sizes of each shape (4:3, 16:10, 16:9 and 21:9) that fit the desktop; it shows with Windowed. |
 | `display.window_scale` | `2` | `HALO_WINDOW_SCALE` | Used when `display.window_size` is empty: the size of the window, as a multiple of 640x480. |
 | `display.vsync` | `true` | `HALO_NO_VSYNC=1` sets `false` | `true`: each frame waits for the display. |
@@ -588,15 +655,30 @@ the setting for one start of the game. It has priority over the file.
 | `input.playstation_kernel_driver` | `false` | `HALO_PLAYSTATION_KERNEL_DRIVER` | Linux: `true` drives a PlayStation controller (DualSense, DualShock 4) through the kernel's driver of it (`hid-playstation` since Linux 5.12, `hid-sony`): its buttons, sticks, triggers and rumble, with no setup, but not its lightbar. `false`: SDL's own driver, which needs access to the controller's `/dev/hidraw` device, as Steam's udev rules give it (`steam-devices`, or Steam installed). Read at start-up. |
 | `input.invert_mouse` | `false` | `HALO_MOUSE_INVERT=1` sets `true` | `true`: the vertical mouse aim is inverted. |
 | `input.mouse_aim_assist` | `false` | `HALO_MOUSE_AIM_ASSIST` | `true`: the magnetism of the controller also operates for the mouse. `false`: when the mouse moved after the right stick, the view is not slowed or dragged by a target. The autoaim of the bullets operates in both cases. |
+| `input.gyro_aim` | `"false"` | `HALO_GYRO_AIM` | Android, Switch and PS5. On a profile's Gamepads screen, under Gyro Aim (ON, OFF or ONLY ON ZOOM), or here. `"true"`: the gyroscope turns the view: the phone's on Android (while the touch controls show), on the Switch the controller's and on the PS5 the DualSense's, each local player from their own. `"zoom"`: only while the player is zoomed in (a scope), for fine aiming; the stick aims the rest of the time. `"false"`: the stick only. A `true` or `false` left from before (unquoted) still reads as `"true"` or `"false"`. |
+| `input.gyro_sensitivity_horizontal` | `1.0` | `HALO_GYRO_SENSITIVITY_HORIZONTAL` | Android, Switch and PS5. On that Gyro Aim screen, or here. How far the view turns left and right for the gyroscope when `input.gyro_aim` is true. `1` is the sensor's own turn. The screen offers `0.25` to `10`. |
+| `input.gyro_sensitivity_vertical` | `1.0` | `HALO_GYRO_SENSITIVITY_VERTICAL` | Android, Switch and PS5. On that Gyro Aim screen, or here. How far the view turns up and down. `1` is the sensor's own turn. The screen offers `0.25` to `10`. |
+| `input.gyro_invert_horizontal` | `false` | `HALO_GYRO_INVERT_HORIZONTAL` | Android, Switch and PS5. On that Gyro Aim screen, or here. `true`: turning the phone or controller right looks left. The stick's invert is its own. |
+| `input.gyro_invert_vertical` | `false` | `HALO_GYRO_INVERT_VERTICAL` | Android, Switch and PS5. On that Gyro Aim screen, or here. `true`: tilting the phone or controller up looks down. The stick's invert is its own. |
+| `display.resolution_limit` | `"480"` (Switch), `"2160"` (PS5) | `HALO_RESOLUTION_LIMIT` | Switch and PS5. In Video Setup (Resolution Limit on the Switch, Maximum Resolution on the PS5), or here. The lines the game draws at, no more than the console shows, which the picture is scaled up to. Switch: `"480"` (the game's own), `"720"` or `"1080"`; 1280x720 in handheld, 1920x1080 docked (so `"1080"` draws at 720 in handheld); it also changes when the console is docked or undocked. PS5: `"2160"` (3840x2160), `"1440"` (2560x1440) or `"1080"` (1920x1080), held to the console's video output (a 1080p output draws `"2160"` at 1920x1080). It changes at once. |
+| `performance.cpu_clock` | `"1785"` | `HALO_CPU_CLOCK` | Switch only. In Video Setup, Performance, or here. The CPU's clock: `"1785"` (1.7 GHz, the most Nintendo's own games use), `"1020"` (1 GHz: cooler, and the battery lasts longer) or `"stock"` (left at the rate the console started the game with). It changes at once, and the console's own rates come back when the game exits. |
 | `controls.<action>` | (the table in "Controls") | `HALO_KEY_<ACTION>` | The keys and mouse buttons of an action, up to two, separated by a comma: `move_forward`, `move_backward`, `strafe_left`, `strafe_right`, `jump`, `crouch`, `fire`, `throw_grenade`, `melee`, `reload`, `zoom`, `switch_weapon`, `switch_grenade`, `action`, `flashlight`, `scoreboard`, `pause`, `screenshot`, `push_to_talk`, `chat`, `team_chat`, `vote_yes`, `vote_no`. Keys by their names on a US keyboard (`"W"`, `"Space"`, `"Left Ctrl"`, `"F1"`): a key is the one in that place on any keyboard, which Controls Setup shows by its own label (the US name on Android). Buttons: `"Mouse Left"`, `"Mouse Right"`, `"Mouse Middle"`, `"Mouse 4"`, `"Mouse 5"`, `"Wheel"` (either way), `"Wheel Up"`, `"Wheel Down"`. |
-| `game.downloaded_maps` | `""` | `HALO_DOWNLOADED_MAPS` | Maps to play as downloaded maps, besides the maps that map sharing downloaded (it names them in `downloaded_maps.txt` in `custom_maps`): their names (`bloodgulch`, `hugeass`), separated by commas, or `"*"` for all the maps. The scripts of a downloaded map cannot change the settings of the player or the games of other players. `debug.txt` names what the game refused. |
 | `game.console_log` | `"none"` | `HALO_CONSOLE_LOG` | What the console shows on the screen. `"none"`: only the asserts that stop the game. `"important"`: bans, players that the host drops for cheating, the reasons that the game refuses a command, and the asserts that stop the game. `"all"`: all the lines. The output of a command always shows. `debug.txt` gets all the lines. |
 | `game.language` | `""` | `HALO_LANGUAGE` | The language of the menus: `ja`, `de`, `fr`, `es` or `it`. Empty: English. |
 | `game.enhanced_animations` | `true` | `HALO_ENHANCED_ANIMATIONS` | `true`: the player bipeds' grenade throws keep their legs moving, blended by speed and direction (crouched throws stay crouched, throws in the air use the jump's legs), Warthog and Scorpion riders stay seated to throw and let go of the grips to throw and reload, and a player turns with the aim while throwing, as while meleeing, and in the air, as while running (the original froze the body in a jump and kept the aim within its aiming screen about it, so a shot after turning in the air went between the jump's facing and the crosshair). `false`: the original animations, which freeze the legs during a throw and stand a rider up and the body in the air. The turning with the aim (throwing, in the air) moves where shots go, so in a network game every player turns so whatever this says; `false` turns it off only in a game of one machine. Only in config.toml, not in the menus. |
+| `game.ragdoll_players` | `"none"` | `HALO_RAGDOLL_PLAYERS` | How a player's body falls, in a campaign or a multiplayer game. Settings > Gameplay, or here. `"none"`: the original death animations. `"woody"`: as a ragdoll from the moment it dies, instead of a death animation: pushed the way the killing blow came and hardest where it hit, its knees and elbows bending only their own way, its limbs settling on what is under them, and moved again by a blast. `"halo2"`: a ragdoll after Halo 2's (Havok's): the torso heavier than the limbs, the limbs thick enough to rest on edges and kept out of the torso and each other, joints that drag and twist little, and thrown further by blasts. A cinematic keeps its scripted deaths. On a client (and in a game of one machine) the ragdoll moves the body itself; the host of a network game leaves its bodies as the stock game moves and poses them, which is what it sends its clients and what its shots hit, and only draws them as their ragdolls lie. So machines with other settings, or builds without ragdolls at the same network version, play together, each drawing bodies its own way, and a body can lie a little differently on each screen. |
+| `game.ragdoll_ai` | `"none"` | `HALO_RAGDOLL_AI` | How an AI's body falls, the same choices as `game.ragdoll_players`. Settings > Gameplay, or here. A cinematic keeps its scripted deaths. |
+| `game.terminal_output` | `"menus"` | `HALO_TERMINAL_OUTPUT` | The game's messages at the bottom left of the screen ("Shaders preloaded.", what the console's commands print). `"none"`: never. `"menus"`: in the main menu, not in a campaign or a multiplayer game. `"always"`: everywhere, as the original game. While the console is open they are shown. Settings > Gameplay, or here. |
+| `game.ragdoll` | `"none"` | `HALO_RAGDOLL` | The older ragdoll setting. When `game.ragdoll_players` or `game.ragdoll_ai` is not in the file, that one takes this value. A file from before the two settings has this, and both start as it; a new file has `"none"`, so both stay off. Once each has its own line, this is not read. |
+| `game.downloaded_maps` | `""` | `HALO_DOWNLOADED_MAPS` | Maps to play as downloaded maps, besides the maps that map sharing downloaded (it names them in `downloaded_maps.txt` in `custom_maps`): their names (`bloodgulch`, `hugeass`), separated by commas, or `"*"` for all the maps. The scripts of a downloaded map cannot change the settings of the player or the games of other players. `debug.txt` names what the game refused. |
+| `game.maps.path` | `""` | `HALO_MAPS_PATH` | The folder that the game reads its maps from. Empty: the `maps` folder in the data folder. A relative path is in the data folder. The game reads it once, at the start. The game unpacks a disc image only into the `maps` folder in the data folder, so the folder that this setting names must already hold the maps. On the Switch, a folder that is missing or has no `ui.map` stops the game at the start with an error. |
+| `game.custom_maps.path` | `""` | `HALO_CUSTOM_MAPS_PATH` | The folder that the game reads Custom Edition maps from, and that map sharing downloads maps into. Empty: the `custom_maps` folder in the data folder. A relative path is in the data folder. The game reads it once, at the start. On the Switch, a folder that is missing gets a warning at the start. |
 | `game.unlock_all_levels` | `false` | `HALO_UNLOCK_ALL_LEVELS` | `true`: a profile created afterward starts with all the campaign levels finished on all the difficulties. `false`: a new profile starts at The Pillar of Autumn, and each level opens when you finish the level before it, as on the Xbox. Existing profiles keep their progress. To start a profile over, type `profile_reset_campaign` in the console. |
-| `bots.count` | `0` | `HALO_BOTS` | Computer players (bots) in a Slayer game this computer plays or hosts (Server Setup > BOTS): `0` to `15` join its lobby with the players, as far as the game has room. `0`: none, as in the stock game. Refer to "Bots". |
+| `bots.count` | `0` | `HALO_BOTS` | Computer players (bots) in a game hosted here, local (split screen), system link or a private internet game: `0` to `63` join its lobby with the players, as far as the game has room. Not in public internet games. `0`: none, as in the stock game. Refer to "Bots". |
 | `bots.skill` | `"normal"` | `HALO_BOT_SKILL` | How well the bots play: `"recruit"`, `"easy"`, `"normal"`, `"heroic"`, `"veteran"` or `"legendary"`: how soon they react, how far and how wide they see, how large their aim error is and how fast it settles, how fast they turn, and how they fight. `"easy"`, `"normal"`, `"heroic"` and `"legendary"` keep their numbers; `"recruit"` is below `"easy"`, and `"veteran"` halfway from `"heroic"` to `"legendary"`. Refer to "Bots". |
 | `bots.teams` | `"even"` | `HALO_BOT_TEAMS` | In a team game: `"even"` puts the bots on both teams, evening them with the players; `"against"` puts them all on the team the players are not on. |
+| `bots.vehicles` | `1` | `HALO_BOT_VEHICLES` | `1`: the bots drive and ride the map's vehicles to goals a long way off, and man its turrets. `0`: they stay on foot. |
+| `bots.routes` | `"direct"` | `HALO_BOT_ROUTES` | How the bots go to their goals: `"direct"`, everyone the shortest way; `"lanes"`, each team's attackers spread over the map's side lanes; `"mixed"`, most direct and a few on the side lanes. |
 | `bots.coop` | `0` | `HALO_COOP_ALLIES` | Campaign allies: 0 to 4 AI marines (crewmen on a level with no marines; none on a level with neither) who follow the nearest player, fight from within about 10 m of them, and come back beside them when killed, left behind or stuck. Solo, split screen and hosted co-op. The campaign pause menu's ALLIES (solo, split screen, or a co-op host with `network.coop_allies`), which takes effect at once; each level starts with none. |
 | `paths.data` | `""` | `HALO_DATA_ROOT` | The data root. Refer to "Start the game". |
 | `paths.saves` | `""` | `HALO_SAVE_ROOT` | The save root. Refer to "Files and folders". |
@@ -644,15 +726,19 @@ the setting for one start of the game. It has priority over the file.
 | `network.brokers_file` | `"brokers.txt"` | `HALO_NET_BROKERS_FILE` | The file of the public MQTT brokers that let the machines of an invite find each other, and that carry the listings of the server browser: next to `config.toml`, unless a full path. One `host:port` on each line, up to 4; `#` starts a comment. |
 | `network.stun_servers` | Google and Cloudflare | `HALO_NET_STUN` | The public STUN servers (`host:port`, with commas between them) that give the internet address of a machine. |
 | `network.client_timeout_seconds` | `15` | `HALO_NET_CLIENT_TIMEOUT_SECONDS` | Hosting: the seconds the host waits for a machine it hears nothing from before it drops it (5 to 300; the stock game waits 15). The same seconds are how long each machine's reliable stream waits for its peer to read before it gives up, and how long a host in a game waits for its own network to come back (an address renewed, a wifi drop) before it ends the game; each machine reads its own setting. A longer wait keeps players whose connection stalls (a browser tab in the background), but a machine that is really gone leaves its players frozen for longer. |
+| `network.record_replays` | `false` | `HALO_NET_RECORD_REPLAYS` | `true` records each network game to `replays/` in the data folder, one `.ocreplay` file a game. A host records all of it: what a client that sees every player is sent (a player's game or a dedicated server's). A client records what its host sends it (the players far from its own, or out of sight, less often; only the events the host sends it) and its own players' input. The main menu's Theater plays them; `tools/replay_stats.py` measures them. It is read when a game starts, so turning it on during a game (the overlay's System folder has Record Replays) records from the next one. Refer to [REPLAY.md](REPLAY.md). |
+| `network.replay_hints` | `true` | `HALO_NET_REPLAY_HINTS` | Watching a replay with a controller: `true` shows the bars of the buttons and of the camera's controls over the seek bar; `false` hides them, the seek bar and the top line kept. The replay's pause menu turns them on and off with the north button (Y; the Switch's X, the PS5's triangle). A touchscreen's boxes stay: they are its controls. |
+| `network.replays_kept` | `30` | `HALO_NET_REPLAYS_KEPT` | How many replays `replays/` keeps: as a recording starts, the oldest past this many are deleted. `0` keeps them all. |
+| `network.full_detail_to_clients` | `false` | `HALO_NET_FULL_DETAIL_TO_CLIENTS` | Hosting: `true` sends every client every player every tick (not those far from its own players, or out of their sight, less often) and every damage event (not only those near its players), as a host's replay recorder is sent, so that a client's replay holds all of the game. A client downloads more, the more players there are. The objects and the AI's units are sent as before. |
 | `network.public_address` | `""` | `HALO_NET_PUBLIC_ADDRESS` | Hosting: the internet address the joiners reach this machine at, `host[:port]` (the port forwarded to `network.tunnel_port`), for a server behind a NAT with one forwarded port. It is offered first, and its name is looked up again every 5 minutes. Empty: what STUN and UPnP find. |
 | `network.listings` | `"both"` | `HALO_NET_LISTINGS` | What the server browser lists. `"both"`: the dedicated servers of the master servers first, then the games players host (from the brokers). `"masters"`: the master servers' only. `"brokers"`: the brokers' only. Refer to "Server browser". |
 | `network.link_share` | `"when_needed"` | `HALO_NET_LINK_SHARE` | When the game shows a server the Discord account linked to it (Settings > Network Setup > Discord Account): `"when_needed"` (a server that asks, to let you in from a VPN), `"always"` or `"never"`. Refer to "Discord account". |
 | `network.masters_file` | `"masters.txt"` | `HALO_NET_MASTERS_FILE` | The file of the master servers the server browser asks for dedicated servers, next to `config.toml` unless a full path: on each line an `https://` URL and the master's key (`ed25519:<hex>`), 4 at most. A file that names none (missing, or comments alone, as the release's) leaves the official master, built in (`https://master.opencommunityedition.com`). Refer to "Dedicated server". |
-| `network.browser_source` | `"all"` | `HALO_NET_BROWSER_SOURCE` | The server browser's games. `"all"` (ALL GAMES): the dedicated servers first, then the games players host; `"dedicated"`: the dedicated servers of the master servers; `"players"` (P2P GAMES): the games players host. The tab at the top left of the server browser changes it. |
+| `network.browser_source` | `"all"` | `HALO_NET_BROWSER_SOURCE` | The server browser's games. `"all"` (ALL GAMES): the dedicated servers and the games players host; `"dedicated"`: the dedicated servers of the master servers; `"players"` (P2P GAMES): the games players host. The tab at the top left of the server browser changes it. |
 | `network.browser_show_empty`, `network.browser_show_full` | `true` | `HALO_NET_BROWSER_SHOW_EMPTY`, `HALO_NET_BROWSER_SHOW_FULL` | `false`: the server browser does not list the games with no player, the full games. The server browser's Filters screen sets them. |
 | `network.browser_maps` | `"yes"` | `HALO_NET_BROWSER_MAPS` | `"yes"`: the server browser lists the games on maps this computer does not have. `"no"`: it does not. `"downloadable"`: only those of a Custom Edition map that the host shares. |
 | `network.browser_gametype` | `"any"` | `HALO_NET_BROWSER_GAMETYPE` | The server browser lists the games of one kind only: `"any"`, `"ctf"`, `"slayer"`, `"oddball"`, `"king"` or `"race"` (the Filters screen). |
-| `network.browser_sort` | `"servers"` | `HALO_NET_BROWSER_SORT` | The server browser's order. `"servers"`: dedicated servers first, then by players. `"players"`, `"name"`, `"map"`, `"type"` or `"locked"` (games with a password first). A `-` before one reverses it (`"-players"`). A column's title sorts by it, and again the other way. |
+| `network.browser_sort` | `"players"` | `HALO_NET_BROWSER_SORT` | The server browser's order. `"players"`: the games with the most players first. `"servers"`: dedicated servers first, then by players. `"name"`, `"map"`, `"type"` or `"locked"` (games with a password first). A `-` before one reverses it (`"-players"`). A column's title sorts by it, and again the other way. |
 | `server.enabled` | `false` | `HALO_SERVER` | `true`: run as a dedicated server, as `halo --server` does. Refer to "Dedicated server". The `server.*` settings are written to `config.toml` only by a dedicated server. |
 | `server.name` | `"OpenCE Server"` | `HALO_SERVER_NAME` | The game's name in the lobby and the server browser: 15 characters of printable ASCII. |
 | `server.max_players` | `16` | `HALO_SERVER_MAX_PLAYERS` | The most players (2 to 127). |
@@ -725,6 +811,7 @@ the setting for one start of the game. It has priority over the file.
 | `debug.gpu_stats`, `debug.gpu_trace_frame`, `debug.gpu_trace_constants`, `debug.gpu_dump_shaders`, `debug.texture_dump_directory`, `debug.texture_log`, `debug.gl_debug`, `debug.texture_no_cache` | off | `HALO_GPU_STATS`, `HALO_GPU_TRACE`, `HALO_GPU_TRACE_CONSTANTS`, `HALO_GPU_DUMP_SHADERS`, `HALO_TEXTURE_DUMP`, `HALO_TEXTURE_LOG`, `HALO_GL_DEBUG`, `HALO_TEXTURE_NO_CACHE` | Tools to find problems in the graphics: counts for each frame, all the GL state of one frame, the GLSL code, the textures. |
 | `debug.menu_open` | `""` | `HALO_MENU_OPEN` | Start on this screen of the menus (`main_menu/settings_select/...`, as `port/assets/menus` names it), a player profile being edited, to look at it. |
 | `debug.gpu_skip_vertex_shaders`, `debug.gpu_debug_expression`, `debug.gpu_debug_flat`, `debug.gpu_debug_texture0` | off | `HALO_GPU_SKIP_VS`, `HALO_GPU_DEBUG_EXPR`, `HALO_GPU_DEBUG_FLAT`, `HALO_GPU_DEBUG_T0` | Tools to find problems in the graphics: skip the draws of a vertex shader, or replace the output of all pixel shaders with a GLSL expression (for example `t0.rgb`). |
+| `debug.benchmark`, `debug.benchmark_bots`, `debug.benchmark_quit` | `""`, `63`, `true` | `HALO_BENCHMARK`, `HALO_BENCHMARK_BOTS`, `HALO_BENCHMARK_QUIT` | A benchmark run that is the same each time (`game/benchmark.c`). `"standard"` plays The Pillar of Autumn (from the waking up in the cryo bay), Halo (the waterfall), The Silent Cartographer, 343 Guilty Spark and The Library (its crowd of enemies) for 30 seconds each, and Blood Gulch, Damnation, Sidewinder and Chill Out for 15 seconds each as local Slayer games with `debug.benchmark_bots` computer players (63 by default: 64 players with the player). The player cannot be hurt and the view turns at a fixed rate. A list such as `"a30:30,bloodgulch:15"` plays other maps. The frame rates of each map (the average, the 1% low, the median, the 99th percentile and the longest frame) go to `benchmark.txt` in the data folder, or in the profile folder of the run on Android (`debug.profile_run`), and the game then quits (`debug.benchmark_quit`). |
 | `debug.network_test`, `debug.network_test_start`, `debug.network_test_kill`, `debug.network_test_score`, `debug.network_test_shoot`, `debug.network_test_vehicle`, `debug.network_test_pickup`, `debug.network_test_pickup_weapon`, `debug.network_test_chat`, `debug.network_test_name`, `debug.network_test_public`, `debug.test_input` | off | `HALO_NETWORK_TEST`, `HALO_NETWORK_TEST_START`, `HALO_NETWORK_TEST_KILL`, `HALO_NETWORK_TEST_SCORE`, `HALO_NETWORK_TEST_SHOOT`, `HALO_NETWORK_TEST_VEHICLE`, `HALO_NETWORK_TEST_PICKUP`, `HALO_NETWORK_TEST_PICKUP_WEAPON`, `HALO_NETWORK_TEST_CHAT`, `HALO_NETWORK_TEST_NAME`, `HALO_NETWORK_TEST_PUBLIC`, `HALO_TEST_INPUT` | Automatic tests of system link, or (`log`) a log of the game one machine plays (`game/network_test.c`). Refer to `NETCODE.md`. `debug.test_input = "menu:a down down a"` presses menu buttons one a second (`a`, `b`, `x`, `y`, `up`, `down`, `left`, `right`, `start`, `back` or `wait`), for testing the menus. |
 | `debug.virtual_gamepads`, `debug.virtual_gamepad_script` | `0`, empty | `HALO_VIRTUAL_GAMEPADS`, `HALO_VIRTUAL_GAMEPAD_SCRIPT` | Desktop: attach this many SDL virtual gamepads (`0` to `4`), which the game takes for gamepads plugged in, and press their buttons from a script of `<seconds> <pad> <what>` entries separated by semicolons: the seconds from when the network lobby first opens, the pad `1` to `4` (`0`: the keyboard, whose `a` is SPACE and `start` Enter), and a button (`a`, `b`, `x`, `y`, `start`, `back`, `up`, `down`, `left`, `right`, `lb`, `rb`, `lt`, `rt`), `walk` (the sticks move from then on) or `still`. For testing split screen without four controllers, for example `"3 2 start; 6 2 a; 8 0 a; 10 1 a; 11 1 a; 14 0 start"` with `debug.network_test = "host:bloodgulch"`. |
 | `debug.network_test_cues`, `debug.network_test_cue_players` | none, `1` | `HALO_NETWORK_TEST_CUES`, `HALO_NETWORK_TEST_CUE_PLAYERS` | Console lines a test runs at their seconds, from the first tick that many players are in (`"<second> <line>\|..."`; not on the web). |
@@ -733,6 +820,8 @@ the setting for one start of the game. It has priority over the file.
 | `debug.log_addresses` | `false` | `HALO_LOG_ADDRESSES=1` sets `true` | `true`: other machines' internet addresses are written whole in `debug.txt` and the console, for debugging your own network. `false`: a public address is written as a tag (`addr#3f2a9c`) that matches up only within one run; local network addresses are always whole. Do not post a `debug.txt` written with this on. |
 | `debug.network_latency`, `debug.network_loss`, `debug.network_corrupt`, `debug.network_corrupt_stream`, `debug.network_corrupt_after` | `0` | `HALO_NETWORK_LATENCY`, `HALO_NETWORK_LOSS`, `HALO_NETWORK_CORRUPT`, `HALO_NETWORK_CORRUPT_STREAM`, `HALO_NETWORK_CORRUPT_AFTER` | The game holds all the data that it receives for this number of milliseconds, ignores this percentage of the datagrams, and damages this percentage of the datagrams it receives, and this percentage of its reads of streams, at random (bytes changed, cut short, stretched or replaced), from this many seconds after the start. Use the first two to test the netcode as on the internet, and the others to test that nothing another machine sends can crash the game (a damaged stream is closed, so a little goes a long way; a host's messages to its own client are damaged too, so start damaging once the game has started). |
 | `debug.voice_test` | `false` | `HALO_VOICE_TEST` | Automatic tests of voice chat: a tone replaces the microphone, and each voice that the game hears is written to the log once each second. |
+| `debug.sample_seconds` | `0.0` | `HALO_SAMPLE` | The 64-bit ARM and 64-bit x86 builds only. The host writes to the log, this often in seconds, where each game thread is: its program counter and frame chain, to find where the game spends its time or stops. `0`: never. |
+| `debug.memory_watch` | `true` | `HALO_MEMORY_WATCH` | The 64-bit ARM and 64-bit x86 builds only. `true`: the host notices the game's writes to cached textures and vertices by page protection. `false`: it compares page contents once a frame instead, which is slower. |
 | `debug.telnet_console`, `debug.telnet_console_port` | `false`, `2323` | `HALO_TELNET_CONSOLE`, `HALO_TELNET_CONSOLE_PORT` | The game listens on 127.0.0.1, on this port, for a script console (connect with telnet). The console has no password, so only this computer can reach it. |
 | `debug.profile_record`, `debug.profile_record_when`, `debug.profile_memory` | `false`, `"start"`, `256` | `HALO_PROFILE_RECORD`, `HALO_PROFILE_RECORD_WHEN`, `HALO_PROFILE_MEMORY` | Profiling builds only (`configure.py --profile`). Record without a command; `"start"` records from the first frame until the first map change, `"game"` records each game outside the main menu. Memory is 4–1024 MB. Numbered `profile_<stamp>_<role>.part<n>.json` files remain in `profiles/` after recording. Refer to "Profiling builds" in the main README. |
 
@@ -770,6 +859,10 @@ let the game write to it.
 
 Builds that you make yourself have no build number. They do not look for
 updates.
+
+The 64-bit ARM build downloads `halo-linux-arm64-release.zip` (or
+`-debug.zip`), not the x86 build. The 64-bit x86 build downloads
+`halo-linux-x86_64-release.zip` (or `-debug.zip`).
 
 ## Frame rate
 
@@ -1090,7 +1183,8 @@ host mutes: a player's `/mute` is not sent.
 ### Voice chat
 
 Network games have voice chat, on the local network and on the internet.
-Hold V (`controls.push_to_talk`, Settings > Controls Setup) to talk, or set
+Hold V (`controls.push_to_talk`, Settings > Controls Setup), or in a game a
+controller's D-pad Down (the touch controls' too), to talk, or set
 VOICE CHAT in Settings > Audio to OPEN MIC. VOICE VOLUME sets the volume of
 the other players. On Android, set VOICE CHAT to OPEN MIC to talk: the game
 then asks for the microphone.
@@ -1190,8 +1284,8 @@ master servers, or only the brokers.
   The titles are: server name, map, game, players, the lock (the games
   with a password first) and the dedicated icon (dedicated servers first).
   A second choice of the same title reverses the order, and an arrow on
-  the title shows the direction. The default order is dedicated servers
-  first, then the games with the most players, then by name. The browser
+  the title shows the direction. The default order is the games with the
+  most players first, then by name. The browser
   keeps the order in `network.browser_sort`.
 - FILTERS opens the Filters screen of Custom Edition. It has SHOW EMPTY
   SERVERS, SHOW FULL SERVERS, GAME TYPE (ANY or one game engine) and SHOW
@@ -1756,6 +1850,174 @@ against what the game made at startup (`game_state_image_accept` in
 `saved games/game_state.c`): an image that does not match (a damaged or
 crafted file) is refused, and the level starts over.
 
+## 64-bit ARM
+
+`ninja linux_arm64` builds the game for 64-bit ARM Linux. It was tested on
+a Steam Frame (SteamOS, Adreno 750 with Mesa). Enter it on a 64-bit ARM
+computer: on such a computer, `ninja` without a target builds it.
+
+| Result | Item |
+| --- | --- |
+| `build/linux_arm64/halo` | The game, an AArch64 executable |
+| `build/linux_arm64/libSDL3.so.0` | SDL 3.4.16. The game finds it next to the executable. |
+| `build/linux_arm64/SDL3-LICENSE.txt` | The license of SDL |
+
+The game data, the settings, the saved games, the controls and system link
+are the same as on x86. Linux arm64, x86 Linux, Windows and Android
+machines can play in the same game.
+
+What this build and the 64-bit x86 one (the guest builds) do not have yet,
+as the guest reaches SDL only through the host's imports
+(`host/host_imports.list`), which do not include what they need: the
+Screenshot key (`controls.screenshot`; `debug.screenshot_every` does
+operate), the window's icon, and the names of gamepads in the log.
+
+### Requirements
+
+- Python and ninja.
+- clang with the `arm64_32` target (clang 22 operates), `ld.lld`,
+  `llvm-ar` and `llvm-objdump` (with which the build checks the guest
+  image, `tools/guest_image_check.py`). The option `--linux-arm64-cc` of `configure.py` selects a
+  different clang.
+- The OpenGL ES and EGL headers (`libgles-dev` and `libegl-dev` on Debian
+  and Ubuntu), and for the desktop OpenGL renderer
+  (`--linux-arm64-gl=desktop`) the OpenGL headers (`libgl-dev`). Without
+  them, `ninja linux_arm64` stops and names the missing headers.
+- CMake, and the development files that SDL3 uses for X11, Wayland and
+  sound. Refer to the SDL documentation, or to the `linux-arm64` job in
+  `.github/workflows/build.yml`.
+- A network connection for the first build. `configure.py`, for which
+  this is the default build of a 64-bit ARM computer, downloads musl
+  1.2.5 (checked against its SHA-256) and SDL 3.4.16 to
+  `build/linux_arm64/third_party`. SDL is built with the options of the
+  portable x86 build (`SDL_OPTIONS` in `tools/linux_build.py`).
+
+To start the game: OpenGL ES 3 (`libGLESv2.so.2`, `libEGL.so.1`, from Mesa
+for example). The release builds of GitHub Actions use glibc 2.35 or later.
+
+### How it operates
+
+Recent 64-bit ARM processors (the Steam Frame's, for example) cannot
+execute 32-bit ARM code, and few distributions have 32-bit ARM libraries
+(SDL3, Mesa). Thus this build operates as the Android port does: the game is
+ILP32 AArch64 code, a guest image in a 64-bit process. Refer to "How the
+port operates" in [port/android/README.md](../android/README.md#how-the-port-operates).
+
+- The guest image is the image of the Android build
+  (`generate_guest_image` in `tools/android_build.py`, for the architecture
+  `ARM64_32` of `tools/guest_arch.py`), with the desktop code paths of the
+  platform layer. `tools/linux_guest_build.py` builds it and the host; each
+  of its builds (`LINUX_GUESTS`) is for one architecture. The guest code has
+  `HALO_GUEST` (and `HALO_ARM64_GUEST`, `HALO_GUEST_MACHO`) and `HALO_GLES`,
+  not `HALO_ANDROID`.
+- The host is the Android host (`port/android/host`) as a Linux executable.
+  `host/host_main.c` replaces its `host_main.c` and `host_touch.c`; what
+  both entry points do is in its `host_common.c`. The host's log is the
+  standard error stream, as is the report of a crash (the registers and
+  the frame chain). The executable contains
+  the guest image (`host/guest_image.S`). The guest gets the variables of
+  the environment that it reads (the `HALO_` settings, `HOME`, the XDG
+  folders), so the `HALO_` settings operate.
+- The desktop code paths use more of SDL than the Android app:
+  `host/guest_desktop.c` and `host/host_desktop.c` supply it, and
+  `host/host_imports.list` lists their imports. The guest does SDL's
+  threads, mutexes, atomic values, files and `SDL_GlobDirectory` itself.
+  The host does the windows, the displays, the 2D renderer, the dialogs
+  and the downloads of the self-updater (`src/posix_update.c`).
+- The renderer uses OpenGL ES, as on Android.
+- The host keeps the GPU driver from the kernel's `trace_marker`, as the
+  x86 build does (`src/posix_trace_marker.c`, under "The platform layer"
+  below): on the Steam Frame, its markers took the game from the headset's
+  72 Hz to about 50 frames a second.
+
+## 64-bit x86
+
+`ninja linux_x86_64` builds the game as a 64-bit x86 Linux executable. The
+x86 build (`ninja linux`) stays the default build of an x86 computer, and
+does not change: it is 32-bit code, which needs the distribution's 32-bit
+libraries and drivers. This build needs none. It runs the game as the
+64-bit ARM build does, as a guest image of 32-bit-pointer code in a 64-bit
+process: here x32 code, the x86-64 instruction set with 32-bit pointers.
+
+| Result | Item |
+| --- | --- |
+| `build/linux_x86_64/halo` | The game, an x86-64 executable |
+| `build/linux_x86_64/libSDL3.so.0` | SDL 3.4.16. The game finds it next to the executable. |
+| `build/linux_x86_64/SDL3-LICENSE.txt` | The license of SDL |
+
+The game data, the settings (`config.toml` next to the executable), the
+saved games, the controls and system link are the same as in the x86
+build. The renderer is the x86 build's: desktop OpenGL 4.5. The two builds
+compute the game with the same code and options (SSE arithmetic, no fused
+multiply-add, the vendored musl maths), but the x86 build's `long double`
+is x87's 80-bit one where this build's is a `double`, as MSVC's is.
+
+### Requirements
+
+- Python and ninja.
+- clang with the x32 target (`x86_64-linux-gnux32`; clang 22 operates),
+  `ld.lld`, `llvm-ar` and `llvm-objdump`. The option `--linux-x86-64-cc`
+  of `configure.py` selects a different clang. The kernel's own x32
+  support is not needed: the guest never calls the kernel itself.
+- The OpenGL, OpenGL ES and EGL headers (`libgl-dev`, `libgles-dev` and
+  `libegl-dev` on Debian and Ubuntu, `mesa` on Arch Linux). Without them,
+  `ninja linux_x86_64` stops and names the missing headers.
+- CMake, and the development files that SDL3 uses for X11, Wayland and
+  sound, as for the 64-bit ARM build. Refer to the `linux-x86_64` job in
+  `.github/workflows/build.yml`.
+- A network connection for the first build. As this is not the default
+  build of an x86 computer, `configure.py` generates it only when asked:
+  `python3 configure.py --linux-x86-64` (or with `--linux-x86-64-cc`)
+  downloads musl 1.2.5 (checked against its SHA-256) and SDL 3.4.16 to `build/linux_x86_64/third_party`, and later runs of
+  `configure.py` take them from there. Without them, `ninja linux_x86_64`
+  stops and says so; `configure.py` alone downloads nothing for it.
+
+To start the game: the 64-bit OpenGL libraries of GLVND (`libOpenGL.so.0`,
+`libEGL.so.1`), which Mesa and NVIDIA's driver use. The release builds of
+GitHub Actions are built on Ubuntu 22.04, and use glibc 2.35 or later; a
+build that you make needs the glibc of the computer that built it, or a
+later one.
+
+### How it operates
+
+As "How it operates" under "64-bit ARM", with these differences:
+
+- The guest is compiled by clang for x32 (`X32` in `tools/guest_arch.py`),
+  which writes ELF objects itself: no assembly is converted. Its C library
+  is musl with `guest/libc/arch/x32` of `port/android`: musl's x86 bits,
+  with the guest's own types and system calls, as for `arm64_32`.
+- The guest image is linked at `0x70000000`, below 2 GB, not above the
+  Xbox memory at `0x80000000` as on AArch64: x32's static code addresses
+  its own symbols with 32-bit values that are sign-extended, which cannot
+  reach 2 GB or more. The Xbox memory above it is reached through
+  registers, and its addresses compute with 32-bit wraparound, as on the
+  Xbox.
+- As the image is not above the Xbox memory, the Xbox memory is the x86
+  build's 512 MB (`0x80000000` to `0xA0000000`), with its 256 MB texture
+  cache and 16 MB sound cache, which Custom Edition maps need
+  (`halo_port_capacity.h`). The 64-bit ARM build and Android have 128 MB,
+  with the Xbox's caches.
+- The guest calls the host's functions through import stubs that jump
+  through a table of 64-bit addresses. The host's functions read pointer
+  arguments as 64-bit registers, and x32 code passes them zero-extended,
+  which `tools/test_host_units.py` tests (`x32_boundary_test.c`). The host
+  passes the guest its own arguments zero-extended in turn
+  (`host_call_guest`). An argument after the sixth is on the stack, in an
+  8-byte slot, where clang's x32 code also writes a pointer zero-extended;
+  as only the registers are tested, such an argument is kept a 32-bit or
+  64-bit integer, never a pointer (`tools/check_host_imports.py`), and the
+  OpenGL stubs extend a pointer there themselves.
+- The thread pointer (`%fs`) belongs to the host's glibc. The guest's
+  thread-local variables are emulated, and the build stops if the image
+  uses `%fs` or `%gs`, or has thread-local storage
+  (`tools/guest_image_check.py`).
+- The image needs no runtime library (`libgcc` or compiler-rt): x86-64 has
+  every operation that its integers and floats need, and the link stops if
+  that changes.
+- The host is a position-independent executable, which leaves the low 4 GB
+  of the address space to the guest, and calls OpenGL through GLVND's
+  `libOpenGL`.
+
 ## What operates
 
 | Area | Status |
@@ -1881,6 +2143,8 @@ Other changes:
 | `rasterizer/rasterizer_text.c`, `text/draw_string.c` | Text is drawn from an atlas of the fonts' glyphs, rasterized at the resolution the game draws at (`src/text_hires.c`), when the font has every character of the string. Text can be drawn scaled about a point (`rasterizer_text_set_scale`), as the players' names are. Each glyph's advance is centred on the font tag character's, so the layout is the same, and a glyph is cut at a text box only where the font tag's character visibly was. |
 | `interface/first_person_weapons.c` | The first-person hands are drawn with the unit's shield modifier shader, as its body is (`display.viewmodel_shield`). |
 | `render/render_objects.c`, `objects/objects.c` | In first person, your own body is drawn from the waist down with the pose `first_person_legs.c` makes (`display.first_person_legs`); the waist it found and the mesh `object_mesh.c` read are forgotten on a new map. |
+| `interface/terminal.c` | The game's messages are drawn where `game.terminal_output` says: never, in the main menu only, or always; and while the console is open. |
+| `units/bipeds.c`, `units/units.c`, `objects/damage.c`, `game/game.c` | A body falls as a ragdoll (`game/biped_ragdoll.c`, `game.ragdoll_players` and `game.ragdoll_ai`), in a campaign or a multiplayer game: on a client, and in a game of one machine, it moves the body in place of its physics and death animation; the host of a network game moves and poses its bodies as before and only draws them as their ragdolls lie (`game/render_interpolation.c`). A cinematic keeps its scripted deaths. The killing blow and later blasts push the ragdoll where they hit, and the ragdolls are forgotten on a new map. |
 | `objects/object_lights.c` | Glows the port lights itself (`shield_glow.c`): dynamic lights attached to an object's node, colored and sized each frame by their maker, drawn with a light definition the map has. |
 | `render/render_objects.c`, `interface/first_person_weapons.c`, `rasterizer/xbox/rasterizer_xbox_plasma_energy.c`, `items/projectiles.c` | An overshield as `overshield_effect.c` draws it (`display.overshield_effect`): in its own color, its intensity full, its energy slower, faded above the height it has risen to; a hit on it plays the projectile's effect for an Elite's energy shield in place of its own (only the effect: the projectile's response is its own). |
 | `render/render_objects.c`, `interface/first_person_weapons.c`, `rasterizer/xbox/rasterizer_xbox_plasma_energy.c` | A local player's shield plasma is drawn in the chosen armor color (`display.shield_color`, `shield_color.c`), on the body and on the first-person arms. |
@@ -1912,8 +2176,9 @@ can optimize that code for each processor:
 | `bink/bink_playback.c` | `int 3` | `__builtin_trap` |
 
 The x87 control and status words (`_control87`, `_statusfp`, `_clearfp` in
-`src/msvc_crt.c`) use `fenv.h`. On Android, they use the FPCR and FPSR. In
-the web build, the control word is only remembered.
+`src/msvc_crt.c`) use `fenv.h`. On AArch64 (Android, Linux arm64), they use
+the FPCR and FPSR; on x86-64, MXCSR and the x87 control word. In the web
+build, the control word is only remembered.
 
 The web build's changes (`HALO_WEB`: the main loop runs one iteration for
 each of the browser's frames, the cache thread starts at a function of

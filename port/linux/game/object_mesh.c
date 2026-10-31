@@ -154,14 +154,19 @@ static boolean object_mesh_add_part(
 	if (mesh->vertex_count + vertex_buffer->count > OBJECT_MESH_MAXIMUM_VERTICES)
 		return FALSE;
 
-	IDirect3DVertexBuffer8_Lock((IDirect3DVertexBuffer8 *)vertex_buffer->hardware_format, 0, 0, &vertices, D3DLOCK_READONLY);
-	IDirect3DIndexBuffer8_Lock((IDirect3DIndexBuffer8 *)triangle_buffer->hardware_format, 0, 0, &indices, D3DLOCK_READONLY);
+	/* (port: the buffers where the map's window is: halo_port_window.h) */
+	IDirect3DVertexBuffer8_Lock(VERTEX_BUFFER_HARDWARE_FORMAT(vertex_buffer), 0, 0, &vertices, D3DLOCK_READONLY);
+	IDirect3DIndexBuffer8_Lock(TRIANGLE_BUFFER_HARDWARE_FORMAT(triangle_buffer), 0, 0, &indices, D3DLOCK_READONLY);
+#if defined(HALO_ANDROID) || defined(HALO_MOVABLE_WINDOW)
+	/* (an index buffer's lock is its data's address as the map has it) */
+	indices = PORT_WINDOW_REBASE(indices);
+#endif
 	if (!vertices || !indices)
 	{
 		if (vertices)
-			IDirect3DVertexBuffer8_Unlock((IDirect3DVertexBuffer8 *)vertex_buffer->hardware_format);
+			IDirect3DVertexBuffer8_Unlock(VERTEX_BUFFER_HARDWARE_FORMAT(vertex_buffer));
 		if (indices)
-			IDirect3DIndexBuffer8_Unlock((IDirect3DIndexBuffer8 *)triangle_buffer->hardware_format);
+			IDirect3DIndexBuffer8_Unlock(TRIANGLE_BUFFER_HARDWARE_FORMAT(triangle_buffer));
 		return TRUE;
 	}
 
@@ -247,8 +252,8 @@ static boolean object_mesh_add_part(
 		}
 	}
 
-	IDirect3DVertexBuffer8_Unlock((IDirect3DVertexBuffer8 *)vertex_buffer->hardware_format);
-	IDirect3DIndexBuffer8_Unlock((IDirect3DIndexBuffer8 *)triangle_buffer->hardware_format);
+	IDirect3DVertexBuffer8_Unlock(VERTEX_BUFFER_HARDWARE_FORMAT(vertex_buffer));
+	IDirect3DIndexBuffer8_Unlock(TRIANGLE_BUFFER_HARDWARE_FORMAT(triangle_buffer));
 	return TRUE;
 }
 

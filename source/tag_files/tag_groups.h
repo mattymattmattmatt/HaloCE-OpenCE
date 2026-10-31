@@ -35,7 +35,7 @@ enum tag_field_type
 
 /* ---------- macros */
 
-/* port: tag_block_get_element_fast (below) */
+/* port: an element in range found inline (tag_block_get_element_fast, below) */
 #define TAG_BLOCK_GET_ELEMENT(block_address, index, type) ((type *)tag_block_get_element_fast((block_address), (index), sizeof(type)))
 
 /* ---------- structures */
@@ -126,10 +126,47 @@ void *tag_empty_data(void);
 void *tag_data_get_pointer(struct tag_data const *data, long offset, long size);
 void *tag_block_get_element_with_size(struct tag_block const *block, long index, long element_size);
 
+/* Where a tag_data's or tag_block's data is in this process. A map file names
+these as the window the game was linked for, so a port that puts the window
+elsewhere has to move them (port/linux/include/halo_port_window.h); a read of
+->address goes through here, or the game follows a link-time address. Each
+macro takes the tag_data or tag_block structure itself, so a caller writes
+TAG_DATA_ADDRESS(foo->bar).
+
+Where the window is where the game expects it these are the field itself, so
+the original code and the byte-matching build are unaffected. */
+#if defined(HALO_ANDROID) || defined(HALO_MOVABLE_WINDOW)
+#include "halo_port_window.h"
+
+void *tag_data_address(struct tag_data const *data);
+void *tag_block_address(struct tag_block const *block);
+
+/* tag_data_address and tag_block_address, inline: the game reads tag data
+by the million a frame (the collision and visibility code takes a block
+element for each BSP node it passes), and a call for each was a share of a
+phone's game thread of its own */
+static inline void *tag_data_address_inline(struct tag_data const *data)
+{
+	return PORT_WINDOW_REBASE(data->address);
+}
+
+static inline void *tag_block_address_inline(struct tag_block const *block)
+{
+	return PORT_WINDOW_REBASE(block->address);
+}
+
+#define TAG_DATA_ADDRESS(data) tag_data_address_inline(&(data))
+#define TAG_BLOCK_ADDRESS(block) tag_block_address_inline(&(block))
+#else
+#define TAG_DATA_ADDRESS(data) ((data).address)
+#define TAG_BLOCK_ADDRESS(block) ((block).address)
+#endif
+
 /* port: tag_block_get_element_with_size without a call where all it checks
-holds (the game's most frequent call: a fortieth of the web build's frame),
-and that function where something does not, which notes and handles it
-(__inline__: msvc_comdat.c makes __inline weak, which a static function
+holds (the game's most frequent call: the collision and visibility code takes
+a block element for each BSP node it passes), and that function where
+something does not, which notes and handles it; the element where the window
+is (__inline__: msvc_comdat.c makes __inline weak, which a static function
 cannot be) */
 static __inline__ void *tag_block_get_element_fast(
 	struct tag_block const *block,
@@ -139,10 +176,33 @@ static __inline__ void *tag_block_get_element_fast(
 	if (block && index >= 0 && index < block->count && block->address &&
 		(!block->definition || block->definition->element_size == element_size))
 	{
+#if defined(HALO_ANDROID) || defined(HALO_MOVABLE_WINDOW)
+		return (byte *)PORT_WINDOW_REBASE(block->address) + index * element_size;
+#else
 		return (char *)block->address + index * element_size;
+#endif
 	}
 	return tag_block_get_element_with_size(block, index, element_size);
 }
+
+/* the same, where the block is already a pointer: a macro that took the
+structure by value cannot be used on one */
+#if defined(HALO_ANDROID) || defined(HALO_MOVABLE_WINDOW)
+#define TAG_BLOCK_ADDRESS_AT(block) tag_block_address_inline(block)
+#else
+#define TAG_BLOCK_ADDRESS_AT(block) ((block)->address)
+#endif
+
+/* A tag reference names the tag it points at, with a pointer to a string
+held in the tag data, which the map wrote as an address in the window the
+game was linked for. A read of that name has to go through here for the
+same reason ->address does. */
+#if defined(HALO_ANDROID) || defined(HALO_MOVABLE_WINDOW)
+char const *tag_reference_name(struct tag_reference const *reference);
+#define TAG_REFERENCE_NAME(reference) tag_reference_name(&(reference))
+#else
+#define TAG_REFERENCE_NAME(reference) ((reference).name)
+#endif
 
 /* ---------- prototypes/CACHE_FILES.C */
 

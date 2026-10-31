@@ -1,0 +1,102 @@
+audioin-probe-26195.txt: writing to this file and the kernel log
+system software 13.590.001 (0x13590001)
+
+=== 1. the users ===
+sceUserServiceInitialize: 0x00000000
+sceUserServiceGetForegroundUser: 0x00000000, user 372994645
+sceUserServiceGetLoginUserIdList: 0x00000000
+  user 372994645: "thelinkin3000"
+  user 727659102: "Invitado1"
+
+=== 2. the module ===
+a. sceSysmoduleLoadModuleInternal(0x80000002): 0x00000000
+a. sceKernelLoadStartModule("libSceAudioIn.sprx"): 0x0000006d, its start 0x00000000
+b. sceKernelLoadStartModule("libScePad.sprx"): 0x00000072; sceKernelDlsym("scePadInit"): 0x80020003, 0 (the linked scePadInit is 8009f8bc0)
+c. sceKernelDlsym in 0x6d: sceAudioInOpen 0x80020003 0, sceAudioInInput 0x80020003 0, sceAudioInClose 0x80020003 0, sceAudioInInit 0, sceAudioInGetSilentState 0
+d. the linked imports: sceAudioInInit (if this is the last line, it crashed)
+d. sceAudioInInit: 0x00000000: the linked imports are used
+
+=== 3. the opens, for the foreground user ===
+sceAudioInOpen(user 372994645, type 0, index 0, 256 samples, 48000 Hz, 16-bit mono): 0x30000007
+  sceAudioInClose: 0x00000000
+sceAudioInOpen(user 372994645, type 0, index 0, 128 samples, 48000 Hz, 16-bit mono): 0x30000007
+  sceAudioInClose: 0x00000000
+sceAudioInOpen(user 372994645, type 0, index 0, 512 samples, 48000 Hz, 16-bit mono): 0x80260102
+sceAudioInOpen(user 372994645, type 0, index 0, 1024 samples, 48000 Hz, 16-bit mono): 0x80260102
+sceAudioInOpen(user 372994645, type 0, index 0, 256 samples, 16000 Hz, 16-bit mono): 0x30000007
+  sceAudioInClose: 0x00000000
+sceAudioInOpen(user 372994645, type 0, index 0, 128 samples, 16000 Hz, 16-bit mono): 0x30000007
+  sceAudioInClose: 0x00000000
+sceAudioInOpen(user 372994645, type 0, index 0, 512 samples, 16000 Hz, 16-bit mono): 0x80260102
+sceAudioInOpen(user 372994645, type 0, index 0, 1024 samples, 16000 Hz, 16-bit mono): 0x80260102
+sceAudioInOpen(user 372994645, type 1, index 0, 256 samples, 48000 Hz, 16-bit mono): 0x30000007
+  sceAudioInClose: 0x00000000
+sceAudioInOpen(user 372994645, type 1, index 0, 128 samples, 48000 Hz, 16-bit mono): 0x30000007
+  sceAudioInClose: 0x00000000
+sceAudioInOpen(user 372994645, type 1, index 0, 512 samples, 48000 Hz, 16-bit mono): 0x80260102
+sceAudioInOpen(user 372994645, type 1, index 0, 1024 samples, 48000 Hz, 16-bit mono): 0x80260102
+sceAudioInOpen(user 372994645, type 1, index 0, 256 samples, 16000 Hz, 16-bit mono): 0x30000007
+  sceAudioInClose: 0x00000000
+sceAudioInOpen(user 372994645, type 1, index 0, 128 samples, 16000 Hz, 16-bit mono): 0x30000007
+  sceAudioInClose: 0x00000000
+sceAudioInOpen(user 372994645, type 1, index 0, 512 samples, 16000 Hz, 16-bit mono): 0x80260102
+sceAudioInOpen(user 372994645, type 1, index 0, 1024 samples, 16000 Hz, 16-bit mono): 0x80260102
+captured with: type 0, 48000 Hz, 256 samples
+
+=== 4. the capture, the pad's microphone ===
+sceAudioInOpen(user 372994645, type 0, index 0, 256 samples, 48000 Hz, 16-bit mono): 0x30000007
+--- asked: SPEAK into the pad (count out loud) for 5 seconds
+--- speaking (at 26198.19 s)
+  second 1: 189 returns (the last 256 samples), peak 32767 (100.0%), 47 buffers all zeros, silent state 0x00000000
+  second 2: 188 returns (the last 256 samples), peak 11 (0.0%), 176 buffers all zeros, silent state 0x00000000
+  second 3: 188 returns (the last 256 samples), peak 0 (0.0%), 188 buffers all zeros, silent state 0x00000000
+  second 4: 188 returns (the last 256 samples), peak 30445 (92.9%), 1 buffers all zeros, silent state 0x00000000
+  second 5: 188 returns (the last 256 samples), peak 32134 (98.1%), 0 buffers all zeros, silent state 0x00000000
+  941 returns; the gaps between them: min 5070 us, median 5335 us, 90th 5363 us, max 5620 us; 0 errors
+--- asked: now be SILENT for 5 seconds
+--- silent (at 26206.22 s)
+  second 1: 189 returns (the last 256 samples), peak 22 (0.1%), 0 buffers all zeros, silent state 0x00000000
+  second 2: 188 returns (the last 256 samples), peak 22 (0.1%), 0 buffers all zeros, silent state 0x00000000
+  second 3: 188 returns (the last 256 samples), peak 22 (0.1%), 0 buffers all zeros, silent state 0x00000000
+  second 4: 188 returns (the last 256 samples), peak 22 (0.1%), 0 buffers all zeros, silent state 0x00000000
+  second 5: 188 returns (the last 256 samples), peak 22 (0.1%), 0 buffers all zeros, silent state 0x00000000
+  941 returns; the gaps between them: min 5051 us, median 5334 us, 90th 5362 us, max 5622 us; 0 errors
+
+=== 5. the mute button ===
+--- asked: press the pad's MUTE button (it lights up), then speak for 5 seconds
+--- muted, speaking (at 26214.24 s)
+  second 1: 189 returns (the last 256 samples), peak 745 (2.3%), 148 buffers all zeros, silent state 0x00000004
+  second 2: 188 returns (the last 256 samples), peak 0 (0.0%), 188 buffers all zeros, silent state 0x00000004
+  second 3: 188 returns (the last 256 samples), peak 0 (0.0%), 188 buffers all zeros, silent state 0x00000004
+  second 4: 188 returns (the last 256 samples), peak 0 (0.0%), 188 buffers all zeros, silent state 0x00000004
+  second 5: 188 returns (the last 256 samples), peak 0 (0.0%), 188 buffers all zeros, silent state 0x00000004
+  941 returns; the gaps between them: min 5264 us, median 5334 us, 90th 5365 us, max 5399 us; 0 errors
+--- asked: press MUTE again (unlit), speak for 5 seconds
+--- unmuted, speaking (at 26222.27 s)
+  second 1: 189 returns (the last 256 samples), peak 30806 (94.0%), 0 buffers all zeros, silent state 0x00000000
+  second 2: 188 returns (the last 256 samples), peak 30747 (93.8%), 0 buffers all zeros, silent state 0x00000000
+  second 3: 188 returns (the last 256 samples), peak 32260 (98.4%), 0 buffers all zeros, silent state 0x00000000
+  second 4: 188 returns (the last 256 samples), peak 1069 (3.3%), 0 buffers all zeros, silent state 0x00000000
+  second 5: 188 returns (the last 256 samples), peak 39 (0.1%), 0 buffers all zeros, silent state 0x00000000
+  941 returns; the gaps between them: min 5263 us, median 5334 us, 90th 5363 us, max 5406 us; 0 errors
+
+=== 6. a headset in the pad ===
+--- asked: if you have a headset, plug it into the pad and speak into it for 5 seconds (else just speak)
+--- a headset (if any), speaking (at 26230.29 s)
+  second 1: 188 returns (the last 256 samples), peak 4189 (12.8%), 0 buffers all zeros, silent state 0x00000000
+  second 2: 188 returns (the last 256 samples), peak 326 (1.0%), 0 buffers all zeros, silent state 0x00000000
+  second 3: 188 returns (the last 256 samples), peak 1383 (4.2%), 146 buffers all zeros, silent state 0x00000000
+  second 4: 188 returns (the last 256 samples), peak 11 (0.0%), 179 buffers all zeros, silent state 0x00000000
+  second 5: 188 returns (the last 256 samples), peak 18623 (56.8%), 8 buffers all zeros, silent state 0x00000000
+  940 returns; the gaps between them: min 4637 us, median 5334 us, 90th 5361 us, max 6034 us; 0 errors
+
+=== 7. a second open ===
+sceAudioInOpen(user 372994645, type 0, index 0, 256 samples, 48000 Hz, 16-bit mono): 0x30000006
+  sceAudioInClose: 0x00000000
+the same user again while the first port is open: 0x30000006
+sceAudioInOpen(user 727659102, type 0, index 0, 256 samples, 48000 Hz, 16-bit mono): 0x30000006
+  sceAudioInClose: 0x00000000
+a second user (727659102) while the first port is open: 0x30000006
+sceAudioInClose: 0x00000000
+
+=== done ===

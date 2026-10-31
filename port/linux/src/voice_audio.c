@@ -45,11 +45,34 @@ stalled must not talk late) */
 /* how often a microphone that would not open is tried again (ms) */
 #define VOICE_RETRY_MS 10000
 
+/* Each decoder is checked before and after it decodes (voice_decoder_intact):
+a Switch crashed in Opus's CELT decoder (decode_pulses, a pulse count no
+packet can give) reading a frame relayed by a host, its decoder's state, it
+seemed, written over by something else. The decoder sits between guard bytes,
+and what of it never changes once it is made is kept to compare: its first
+fields (the CELT and SILK parts' offsets, the channels, the rate) and the
+CELT part's (its mode, the tables a frame is read by, the overlap and the
+channels). One found changed is logged (where, and the bytes there) and made
+again, and that frame is dropped rather than decoded. */
+#define VOICE_GUARD_BYTES 64
+#define VOICE_GUARD_FILL 0xa5
+#define VOICE_HEADER_BYTES (4 * (int)sizeof(int))
+#define VOICE_CELT_BYTES ((int)sizeof(void *) + 2 * (int)sizeof(int))
+/* the decoders found changed that are logged, at most */
+#define VOICE_DAMAGE_LOGS 8
+
 struct voice_slot
 {
 	BOOL used;
 	int speaker;
 	OpusDecoder *decoder;
+	/* the decoder's allocation (guard bytes, the decoder, guard bytes), its
+	size, and the parts of it that never change, as made */
+	unsigned char *block;
+	int decoder_size;
+	int celt_offset;
+	unsigned char header[VOICE_HEADER_BYTES];
+	unsigned char celt[VOICE_CELT_BYTES];
 	/* the sequence next expected; FALSE: none yet */
 	BOOL sequenced;
 	unsigned short next_sequence;
@@ -317,6 +340,88 @@ int voice_audio_encode(const float *frame, int bitrate, unsigned char *packet, i
 
 /* (under voice_lock) the slot of a speaker, or a free one (or the longest
 unheard) taken for it */
+/* (a slot's decoder: only the thread that decodes) the decoder made, in
+place, and what of it never changes kept */
+static BOOL voice_decoder_init(struct voice_slot *slot)
+{
+	unsigned char *decoder = slot->block + VOICE_GUARD_BYTES;
+
+	memset(slot->block, VOICE_GUARD_FILL, VOICE_GUARD_BYTES);
+	memset(decoder + slot->decoder_size, VOICE_GUARD_FILL, VOICE_GUARD_BYTES);
+	if (opus_decoder_init((OpusDecoder *)decoder, VOICE_RATE, 1) != OPUS_OK)
+		return FALSE;
+	memcpy(slot->header, decoder, sizeof(slot->header));
+	memcpy(&slot->celt_offset, decoder, sizeof(int));
+	if (slot->celt_offset < VOICE_HEADER_BYTES || slot->celt_offset + VOICE_CELT_BYTES > slot->decoder_size)
+		return FALSE;
+	memcpy(slot->celt, decoder + slot->celt_offset, sizeof(slot->celt));
+	slot->decoder = (OpusDecoder *)decoder;
+	return TRUE;
+}
+
+static BOOL voice_decoder_make(struct voice_slot *slot)
+{
+	slot->decoder_size = opus_decoder_get_size(1);
+	if (slot->decoder_size <= 0)
+		return FALSE;
+	slot->block = malloc((size_t)slot->decoder_size + 2 * VOICE_GUARD_BYTES);
+	if (!slot->block)
+		return FALSE;
+	if (!voice_decoder_init(slot))
+	{
+		free(slot->block);
+		slot->block = NULL;
+		slot->decoder = NULL;
+		return FALSE;
+	}
+	return TRUE;
+}
+
+/* the first difference between bytes and expected (or the fill), said */
+static BOOL voice_bytes_differ(const unsigned char *bytes, const unsigned char *expected, int fill, int size,
+	const char *what, const char *when, int speaker, const unsigned char *block)
+{
+	static int logged;
+	int first, last, index;
+	char shown[3 * 16 + 1];
+
+	for (first = 0; first < size && (expected ? bytes[first] == expected[first] : bytes[first] == fill); first++)
+		;
+	if (first == size)
+		return FALSE;
+	for (last = size - 1; last > first && (expected ? bytes[last] == expected[last] : bytes[last] == fill); last--)
+		;
+	if (logged++ < VOICE_DAMAGE_LOGS)
+	{
+		for (index = 0; index < 16 && first + index < size; index++)
+			snprintf(shown + 3 * index, 4, "%02x ", bytes[first + index]);
+		platform_log("voice chat: speaker %d's decoder (at %p) was written over %s: %s, bytes %d to %d of %d "
+			"(from %p): %s", speaker, (const void *)block, when, what, first, last, size,
+			(const void *)(bytes + first), shown);
+	}
+	return TRUE;
+}
+
+/* (only the thread that decodes) whether the slot's decoder is as it was
+made; if not, it is said where, and the decoder is made again */
+static BOOL voice_decoder_intact(struct voice_slot *slot, int speaker, const char *when)
+{
+	const unsigned char *decoder = slot->block + VOICE_GUARD_BYTES;
+	BOOL damaged = FALSE;
+
+	damaged |= voice_bytes_differ(slot->block, NULL, VOICE_GUARD_FILL, VOICE_GUARD_BYTES, "the guard before it",
+		when, speaker, slot->block);
+	damaged |= voice_bytes_differ(decoder + slot->decoder_size, NULL, VOICE_GUARD_FILL, VOICE_GUARD_BYTES,
+		"the guard after it", when, speaker, slot->block);
+	damaged |= voice_bytes_differ(decoder, slot->header, 0, VOICE_HEADER_BYTES,
+		"its offsets, channels and rate", when, speaker, slot->block);
+	damaged |= voice_bytes_differ(decoder + slot->celt_offset, slot->celt, 0, VOICE_CELT_BYTES,
+		"its CELT mode, overlap and channels", when, speaker, slot->block);
+	if (damaged && !voice_decoder_init(slot))
+		platform_log("voice chat: speaker %d's decoder could not be made again", speaker);
+	return !damaged;
+}
+
 static struct voice_slot *voice_slot_for(int speaker, BOOL create)
 {
 	Uint64 now = SDL_GetTicks();
@@ -346,10 +451,7 @@ static struct voice_slot *voice_slot_for(int speaker, BOOL create)
 		return NULL;
 	if (!oldest->decoder)
 	{
-		int error = 0;
-
-		oldest->decoder = opus_decoder_create(VOICE_RATE, 1, &error);
-		if (!oldest->decoder)
+		if (!voice_decoder_make(oldest))
 			return NULL;
 	}
 	else
@@ -425,10 +527,12 @@ void voice_audio_play(int speaker, unsigned short sequence, const unsigned char 
 	}
 	slot->sequenced = TRUE;
 	slot->next_sequence = (unsigned short)(sequence + 1);
-	decoder = slot->decoder;
 	pthread_mutex_unlock(&voice_lock);
 	/* (decoded outside the lock, which the mixer waits on: only this
 	thread uses a slot's decoder, and only it gives slots to speakers) */
+	if (!voice_decoder_intact(slot, speaker, "before decoding"))
+		return;
+	decoder = slot->decoder;
 	while (lost > 0)
 	{
 		/* (the last lost from this packet's redundancy, those before it
@@ -444,6 +548,9 @@ void voice_audio_play(int speaker, unsigned short sequence, const unsigned char 
 	decoded = opus_decode_float(decoder, packet, length, samples + total, VOICE_FRAME_SAMPLES, 0);
 	if (decoded > 0)
 		total += decoded;
+	/* (Opus's own writing past it, if it is changed only now) */
+	if (!voice_decoder_intact(slot, speaker, "while decoding"))
+		return;
 	/* (the tests: what each speaker sounds like, once a second) */
 	if (voice_testing() && total >= VOICE_FRAME_SAMPLES)
 	{

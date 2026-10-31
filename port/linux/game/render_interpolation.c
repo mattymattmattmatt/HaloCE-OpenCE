@@ -44,6 +44,7 @@ tick, such as a nav marker, is moved as far as the object is drawn from there
 #include "game/players.h"
 #include "render/render_cameras.h"
 #include "units/units.h"
+#include "biped_ragdoll.h"
 
 /* port/linux/src/port_config.c */
 int config_boolean(const char *name);
@@ -150,6 +151,8 @@ static struct interpolated_first_person interpolated_first_person[MAXIMUM_LOCAL_
 static long interpolation_tick;
 static long interpolation_frame;
 static boolean interpolation_rendering;
+/* (between a frame's begin and end, whether it blends or not) */
+static boolean interpolation_drawing;
 static real interpolation_fraction = 1.0f;
 
 /* ---------- blending */
@@ -424,6 +427,7 @@ void render_interpolation_tick(void)
 		struct interpolated_object *record;
 		short node_count = (short)(object->object.node_matrices.size / (short)sizeof(real_matrix4x3));
 		boolean continuing;
+		real_matrix4x3 *drawn;
 
 		if (absolute_index >= MAXIMUM_INTERPOLATED_OBJECTS)
 			continue;
@@ -467,9 +471,13 @@ void render_interpolation_tick(void)
 			record->correction = *global_zero_vector3d;
 			record->correction_pending = *global_zero_vector3d;
 		}
+		/* (a body the host of a network game only draws as a ragdoll, as
+		it lies: biped_ragdoll.c) */
+		drawn = TEST_FLAG(object->object.damage_flags, _object_dead_bit) ?
+			biped_ragdoll_drawn_nodes(iterator.index) : NULL;
 		memcpy(
 			record->nodes + record->latest * record->node_capacity,
-			object_get_node_matrices(iterator.index),
+			drawn ? drawn : object_get_node_matrices(iterator.index),
 			node_count * sizeof(real_matrix4x3));
 		record->rotations_valid[record->latest] = FALSE;
 		record->object_index = iterator.index;
@@ -504,6 +512,7 @@ void render_interpolation_reset(void)
 void render_interpolation_frame_begin(void)
 {
 	interpolation_rendering = halo_interpolation_enabled();
+	interpolation_drawing = TRUE;
 	interpolation_frame++;
 	interpolation_fraction = game_time_get_tick_fraction();
 }
@@ -511,6 +520,7 @@ void render_interpolation_frame_begin(void)
 void render_interpolation_frame_end(void)
 {
 	interpolation_rendering = FALSE;
+	interpolation_drawing = FALSE;
 }
 
 real render_interpolation_fraction(void)
@@ -518,7 +528,21 @@ real render_interpolation_fraction(void)
 	return interpolation_rendering ? interpolation_fraction : 1.0f;
 }
 
+static real_matrix4x3 *interpolated_object_node_matrices(long object_index);
+
+/* the pose an object is drawn in: between its last two ticks, or else (not
+blended, or no tick before to blend from) a body the host of a network game
+only draws as a ragdoll as it lies (biped_ragdoll.c), or else its own */
 real_matrix4x3 *render_interpolation_object_node_matrices(long object_index)
+{
+	real_matrix4x3 *nodes = interpolated_object_node_matrices(object_index);
+
+	if (!nodes && interpolation_drawing && object_index != NONE)
+		nodes = biped_ragdoll_drawn_nodes(object_index);
+	return nodes;
+}
+
+static real_matrix4x3 *interpolated_object_node_matrices(long object_index)
 {
 	struct interpolated_object *record;
 	long absolute_index;

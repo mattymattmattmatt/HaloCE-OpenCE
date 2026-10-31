@@ -204,6 +204,24 @@ void terminal_gets_end(
 	return;
 }
 
+/* port: where the output lines are drawn (game.terminal_output: "none",
+"menus", the main menu's only, or "always"); while the console is open,
+always (port/linux/src/port_config.c) */
+const char *config_string(const char *name);
+boolean main_menu_is_active(void);
+
+static boolean terminal_output_shown(
+	void)
+{
+	const char *setting = config_string("game.terminal_output");
+
+	if (terminal_globals.input_state || !strcmp(setting, "always"))
+		return TRUE;
+	if (!strcmp(setting, "none"))
+		return FALSE;
+	return main_menu_is_active();
+}
+
 void terminal_draw(
 	void)
 {
@@ -255,7 +273,7 @@ void terminal_draw(
 			text_filter_resume();
 		}
 
-		if (terminal_render_enable)
+		if (terminal_render_enable && terminal_output_shown()) /* port: (terminal_output_shown) */
 		{
 			struct output_line_datum *line;
 			long line_index;
@@ -387,6 +405,51 @@ void terminal_printf(
 	}
 
 	va_end(arglist);
+
+	return;
+}
+
+/* port: the status line, while it is on screen (terminal_status_printf) */
+static long terminal_status_line_index = NONE;
+
+void terminal_status_printf(
+	real_argb_color const *color,
+	char const *format,
+	...)
+{
+	struct output_line_datum *line = NULL;
+	char *arglist;
+	int count;
+
+	if (!terminal_globals.initialized)
+		return;
+	/* the line it was, unless it faded or the oldest line's place was
+	taken for a new one */
+	if (terminal_status_line_index != NONE)
+		line = datum_try_and_get(terminal_globals.output_lines, terminal_status_line_index);
+	if (!line)
+	{
+		terminal_status_line_index = terminal_new_line();
+		line = output_line_get(terminal_status_line_index);
+	}
+	line->timer = 0;
+	if (color)
+	{
+		line->color = *color;
+	}
+	else
+	{
+		line->color.alpha = 1.f;
+		line->color.red = 0.7f;
+		line->color.green = 0.7f;
+		line->color.blue = 0.7f;
+	}
+	va_start(arglist, format);
+	count = _vsnprintf(line->buffer, NUMBEROF(line->buffer)-2, format, arglist);
+	va_end(arglist);
+	if (count < 0 || count >= (int)(NUMBEROF(line->buffer)-2))
+		line->buffer[NUMBEROF(line->buffer)-2] = 0;
+	line->tabstop = strstr(line->buffer, "|t") != 0;
 
 	return;
 }

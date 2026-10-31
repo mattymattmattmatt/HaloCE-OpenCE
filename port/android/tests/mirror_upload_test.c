@@ -10,6 +10,8 @@ typedef unsigned GLuint, GLenum;
 #define FALSE 0
 #ifndef TEST_DESKTOP
 #define HALO_GLES 1
+/* (the fork's renderer: the ring of stream buffers is its own switch, d3d8_gl.c) */
+#define XGPU_STREAM_RING 1
 #endif
 #define STREAM_BUFFER_RING 3
 #define GL_COPY_WRITE_BUFFER 1
@@ -18,6 +20,8 @@ typedef unsigned GLuint, GLenum;
 #define PLATFORM_CONTIGUOUS_SIZE (2 * SEGMENT_SIZE)
 static unsigned char cpu[PLATFORM_CONTIGUOUS_SIZE];
 #define PLATFORM_CONTIGUOUS_BASE ((unsigned long)cpu)
+/* (the fork's mirror sizes its tables by the window's largest, platform.h) */
+#define PLATFORM_CONTIGUOUS_MAXIMUM PLATFORM_CONTIGUOUS_SIZE
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "line %d: %s\n", __LINE__, #x); exit(1); } } while (0)
 static struct { unsigned long frame, buffer_ring; } device;
 static struct { unsigned long mirrored_bytes; } stats;

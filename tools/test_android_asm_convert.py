@@ -82,6 +82,17 @@ def test_tables_survive_the_build(tmp_path):
     assert b"_starts with an underscore\0" in data
 
 
+def test_strings_keep_their_underscores():
+    # (a string is text: "_%s" named maps for their hash, and lost its underscore)
+    out = convert("\t.section\t__TEXT,__cstring,cstring_literals", "l_.str:", '\t.asciz\t"_%s"', '\t.ascii\t"_de"')
+    assert '\t.asciz "_%s"' in out and '\t.ascii "_de"' in out
+
+
+def test_symbols_lose_the_mach_o_underscore():
+    out = convert("\t.section\t__TEXT,__text,regular,pure_instructions", "_f:", "\tbl\t_csprintf", "\tret")
+    assert "f:" in out and "\tbl csprintf" in out
+
+
 @pytest.mark.parametrize("instruction, replacement", [
     ("\tfcvtzs\ts0, s0", ["\tfmov s0, s0", "\tfcvtzs v0.2s, v0.2s"]),
     ("\tfcvtzu\ts2, s17", ["\tfmov s2, s17", "\tfcvtzu v2.2s, v2.2s"]),

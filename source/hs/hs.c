@@ -12828,7 +12828,7 @@ boolean hs_scenario_merge(
 				csstrcpy(file->name, source_file->name);
 				if (tag_data_resize(&file->source, source_file->source.size))
 				{
-					csmemcpy(file->source.address, source_file->source.address, source_file->source.size);
+					csmemcpy(TAG_DATA_ADDRESS(file->source), TAG_DATA_ADDRESS(source_file->source), source_file->source.size);
 				}
 				else
 				{
@@ -12856,7 +12856,7 @@ static boolean hs_scenario_syntax_data_valid(
 {
 	long const syntax_data_size =
 		sizeof(struct data_array)+MAXIMUM_HS_SYNTAX_NODES_PER_SCENARIO*sizeof(struct hs_syntax_node);
-	byte const *address = (byte const *)scenario->hs_syntax_data.address;
+	byte const *address = (byte const *)TAG_DATA_ADDRESS(scenario->hs_syntax_data);
 	struct data_array const *data = (struct data_array const *)address;
 
 	/* (in the loaded map's tag cache: this build's, or a Custom Edition
@@ -12888,7 +12888,7 @@ bytes at their end that the console's expressions are written to
 static boolean hs_scenario_string_constants_valid(
 	struct scenario const *scenario)
 {
-	byte const *address = (byte const *)scenario->hs_string_constants.address;
+	byte const *address = (byte const *)TAG_DATA_ADDRESS(scenario->hs_string_constants);
 	long size = scenario->hs_string_constants.size;
 
 	return size >= 0x400 &&
@@ -14704,11 +14704,7 @@ static void player_effect_screen_fade_in_evaluate(
 		double value1 = arguments->value1;
 		double value2 = arguments->value2;
 
-#ifdef HALO_ARM64_GUEST
-		player_effect_screen_fade_in(*(real const *)&arguments->value0, (real)value1, (real)value2, arguments->value3);
-#else
 		player_effect_screen_fade_in(arguments->value0, value1, value2, arguments->value3);
-#endif
 		hs_return(thread_index, 0);
 	}
 
@@ -14727,11 +14723,7 @@ static void player_effect_screen_fade_out_evaluate(
 		double value1 = arguments->value1;
 		double value2 = arguments->value2;
 
-#ifdef HALO_ARM64_GUEST
-		player_effect_screen_fade_out(*(real const *)&arguments->value0, (real)value1, (real)value2, arguments->value3);
-#else
 		player_effect_screen_fade_out(arguments->value0, value1, value2, arguments->value3);
-#endif
 		hs_return(thread_index, 0);
 	}
 
@@ -15367,7 +15359,7 @@ boolean hs_scenario_postprocess(
 			MAXIMUM_HS_SCRIPTS_PER_SCENARIO);
 		hs_scenario_scripts_disable(scenario);
 	}
-	hs_syntax_data = (struct data_array *)scenario->hs_syntax_data.address;
+	hs_syntax_data = (struct data_array *)TAG_DATA_ADDRESS(scenario->hs_syntax_data);
 	hs_syntax_data->data = (char *)hs_syntax_data+sizeof(struct data_array);
 	if (!recompile && hs_compile_postprocess(&error_message, &error_source))
 	{
@@ -15579,6 +15571,41 @@ static boolean hs_compile_and_evaluate_command(
 				length--;
 			name[length] = 0;
 			return network_votekick_player_named(name);
+		}
+	}
+	/* port: the bots of a local (split screen) Slayer game in progress, one at
+	a time (network_game_server_port_bot_add, _drop): add_bot and drop_bot in
+	a game without teams, the _red and _blue ones in a team game */
+	{
+		static struct
+		{
+			char const *word;
+			boolean add;
+			long team_index;
+		} const bot_commands[] =
+		{
+			{ "add_bot", TRUE, NONE }, { "add_bot_red", TRUE, 0 }, { "add_bot_blue", TRUE, 1 },
+			{ "drop_bot", FALSE, NONE }, { "drop_bot_red", FALSE, 0 }, { "drop_bot_blue", FALSE, 1 },
+		};
+		short command;
+
+		for (command = 0; command < (short)NUMBEROF(bot_commands); command++)
+		{
+			if (hs_host_player_command(expression, bot_commands[command].word))
+			{
+				char said[128];
+				boolean done = bot_commands[command].add ?
+					network_game_server_port_bot_add(bot_commands[command].team_index, said, (long)sizeof(said)) :
+					network_game_server_port_bot_drop(bot_commands[command].team_index, said, (long)sizeof(said));
+
+				if (done)
+					console_printf(FALSE, "%s", said);
+				else
+					console_warning("%s: %s", bot_commands[command].word, said);
+				/* (and in debug.txt) */
+				error(_error_silent, "%s: %s", bot_commands[command].word, said);
+				return done;
+			}
 		}
 	}
 	/* port: profile_reset_campaign, which clears the first player's

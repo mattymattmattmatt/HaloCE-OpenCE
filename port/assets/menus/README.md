@@ -16,7 +16,7 @@ controller, the keyboard and the mouse, on every port.
 
 `tools/ce_menus.py` writes all of them from the PC version's tags and the
 redraws, but the settings screens (Controls Setup, Gamepads, Mouse, Audio,
-Video and Network Setup), which `tools/port_settings.py` writes in their
+Video, Network Setup and Gameplay), which `tools/port_settings.py` writes in their
 style with what this port has to set: config.toml's settings (a window or
 the full screen, the frame rate, the volumes, internet play, the
 multiplayer HUD), the profile's controller settings, and the keyboard and
@@ -58,8 +58,8 @@ It needs `rsvg-convert`, Pillow, NumPy and SciPy. It writes every file, so
 `git status` should show only the screens meant to change; then
 `ninja linux` (or `ninja android`) embeds them in the game.
 
-A settings screen (Controls Setup, Gamepads, Mouse, Audio, Video or Network
-Setup) is changed in `tools/port_settings.py`, not in its XML, and written
+A settings screen (Controls Setup, Gamepads, Mouse, Audio, Video, Network
+Setup or Gameplay) is changed in `tools/port_settings.py`, not in its XML, and written
 with the command above.
 
 ## Elements
@@ -134,7 +134,7 @@ be a child of many).
 | `description` | A column list's extended description: a widget |
 | `controller` | `1` to `4`, or `any` (the default); a `<child>`'s or `child_controller`: the one it is for |
 | `auto_close`, `auto_close_fade` | It closes itself after this many milliseconds, fading for this many |
-| `platform` | `desktop`, `android` or `web`, or several separated by spaces: it is only there. Every element takes this. |
+| `platform` | `desktop`, `android` (the Android app), `switch`, `ps5` or `web`, or several separated by spaces: it is only there. Every element takes this. |
 
 Widget flags: `pass_unhandled_to_focused_child` (an event it does not handle
 goes to its focused child: a screen needs it for its list to get events),

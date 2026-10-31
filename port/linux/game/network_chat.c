@@ -64,7 +64,6 @@ chat (_chat_line_notice_bit). A client's /mute is not sent: only the host
 mutes.
 */
 
-#include "controller_remap.h"
 #include "cseries.h"
 #include "cseries/errors.h"
 #include "memory/data.h"
@@ -92,6 +91,7 @@ mutes.
 #include "text_filter.h"
 #include "halo_keyboard.h"
 #include "server_director.h"
+#include "network_replay.h"
 
 #include <stdio.h>
 
@@ -1675,11 +1675,29 @@ void network_chat_handle_down(
 
 /* ---------- typing */
 
+/* the local player that plays with the controller of that port; NONE */
+static short chat_controller_local_player(
+	short port)
+{
+	short local;
+
+	if (port < 0 || port >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS || !game_in_progress())
+		return NONE;
+	for (local = local_player_get_next(NONE); local != NONE; local = local_player_get_next(local))
+	{
+		long player = local_player_get_player_index(local);
+
+		if (player != NONE && player_get(player)->local_player_index == port)
+			return local;
+	}
+	return NONE;
+}
+
 /* The editor's owner, or the first local player for direct commands; NONE. */
 static short chat_speaker(
 	boolean typed)
 {
-	short local_player_index = typed && chat_input.active ? controller_remap_local_player(chat_input.controller) : local_player_get_next(NONE);
+	short local_player_index = typed && chat_input.active ? chat_controller_local_player(chat_input.controller) : local_player_get_next(NONE);
 	long player_index = local_player_index != NONE ? local_player_get_player_index(local_player_index) : NONE;
 	/* A departing player's unfinished line must never become somebody else's. */
 	if (typed && chat_input.active && player_index != chat_input.player) return NONE;
@@ -1804,7 +1822,7 @@ static void chat_input_begin(
 	short channel, short controller, boolean physical)
 {
 	struct key_stroke key;
-	short local = controller < 0 ? local_player_get_next(NONE) : controller_remap_local_player(controller);
+	short local = controller < 0 ? local_player_get_next(NONE) : chat_controller_local_player(controller);
 	long player = local != NONE ? local_player_get_player_index(local) : NONE;
 	if (player == NONE) return;
 
@@ -2000,22 +2018,7 @@ void network_chat_update(
 	unsigned long pad = chat_keyboard_buttons(halo_chat_pad_buttons());
 	unsigned long pad_pressed = pad & ~chat_keyboard.held;
 	unsigned long now = system_milliseconds();
-	short port, requested_port = NONE, requested_channel = _chat_channel_everyone;
-	unsigned int chat_mask = (1u << PAD_CHAT) | (1u << PAD_TEAM_CHAT) | (1u << PAD_VEHICLE_CHAT);
 	struct key_stroke key;
-
-	/* Drain every port even while typing, so another player's press is not
-	 * replayed after this line closes. Keyboard and touch keep their path. */
-	for (port = 0; port < 4; port++)
-	{
-		unsigned int actions = controller_remap_pressed(port, chat_mask);
-		if (actions && requested_port == NONE)
-		{
-			requested_port = port;
-			requested_channel = actions & (1u << PAD_CHAT) ? _chat_channel_everyone :
-				actions & (1u << PAD_TEAM_CHAT) ? _chat_channel_team : _chat_channel_vehicle;
-		}
-	}
 
 	chat_keyboard.held = pad;
 	/* (the host's settings: a client's as the host sends them in each game;
@@ -2065,8 +2068,7 @@ void network_chat_update(
 		vote_keys_held = vote_keys;
 		vote_pad_held = vote_pad;
 	}
-	if (!chat_network_game() || !game_in_progress() || chat_speaker(TRUE) == NONE || !chat_shown() || chat_hidden() ||
-		(chat_input.active && chat_input.physical && !controller_remap_connected(chat_input.controller)))
+	if (!chat_network_game() || !game_in_progress() || chat_speaker(TRUE) == NONE || !chat_shown() || chat_hidden())
 	{
 		chat_input_end();
 		chat_actions_held = 0;
@@ -2079,8 +2081,11 @@ void network_chat_update(
 		pressed = held & ~chat_actions_held;
 		chat_actions_held = held;
 		/* (or the controller's D-pad Up, the touch controls' too, which opens
-		the on-screen keyboard) */
-		if ((pressed || requested_port != NONE || TEST_FLAG(pad_pressed, HALO_CHAT_PAD_UP)) && !console_is_active())
+		the on-screen keyboard; not while the overlay menu is open, whose up
+		it is: port/linux/game/overlay_menu.c, nor in a replay's playback,
+		whose up is its camera's: network_replay_playback.c) */
+		if ((pressed || (TEST_FLAG(pad_pressed, HALO_CHAT_PAD_UP) && !network_replay_playing())) &&
+			!console_is_active() && !overlay_menu_open())
 		{
 			/* (no typing where the host has the chat off: it says so, once a
 			while) */
@@ -2097,10 +2102,9 @@ void network_chat_update(
 				chat_input_begin(TEST_FLAG(pressed, HALO_KEYBOARD_CHAT) ? _chat_channel_everyone : _chat_channel_team, NONE, FALSE);
 			else
 			{
-				chat_input_begin(requested_channel, requested_port, requested_port != NONE);
+				chat_input_begin(_chat_channel_everyone, NONE, FALSE);
 				if (!chat_input.active) return;
-				chat_keyboard.opening_buttons = requested_port != NONE ?
-					halo_chat_pad_buttons_for_port(chat_input.controller) : halo_chat_pad_buttons();
+				chat_keyboard.opening_buttons = halo_chat_pad_buttons();
 				chat_keyboard.held = 0;
 				chat_keyboard.open = TRUE;
 				error(_error_log, "chat: the on-screen keyboard opened");
@@ -2645,7 +2649,7 @@ void network_chat_draw(
 {
 	long font_index = hud_get_font_index();
 	unsigned long now = system_milliseconds();
-	boolean speaker = chat_input.active ? local_player_index == controller_remap_local_player(chat_input.controller) :
+	boolean speaker = chat_input.active ? local_player_index == chat_controller_local_player(chat_input.controller) :
 		local_player_index == local_player_get_next(NONE);
 	boolean typing = speaker && chat_input.active && !console_is_active();
 	boolean touch = chat_touch_layout();

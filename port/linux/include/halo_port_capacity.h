@@ -18,18 +18,22 @@ client's own objects take the upper half of the object array).
 /* ---------- game state
 
 The Xbox game state is 0x345000 bytes at 0x80061000 and ends where the tag
-cache begins (0x803A6000). Cache files are linked to that tag cache address,
-so the game state cannot grow in place. The native builds put a 16 MB game
-state above the tag cache (which ends at 0x819A6000), inside the Xbox memory
-window (0x80000000-0xA0000000, Android's to 0x88000000:
-port/linux/src/platform.h) and below everything the window hands out
-top-down (texture and sound caches, Direct3D resources).
+cache begins (0x803A6000). Cache files are linked to those addresses, so
+the game state cannot grow in place, and the port moves them with the
+window where it cannot be at 0x80000000 (port/linux/include/halo_port_window.h).
+The native builds put a 16 MB game state above the tag cache (which ends at
+0x819A6000), inside the Xbox memory window (0x80000000-0xA0000000, 64-bit ARM
+Linux's and the web build's to 0x88000000, Android's and the Switch's as
+large as the host found room for: port/linux/src/platform.h) and below
+everything the window hands out top-down (texture and sound caches,
+Direct3D resources).
 
 The CPU part holds about 17.2 MB of pools at the sizes below (the Xbox pools
 fill 3,165,260 of its 0x305000 bytes); the GPU part holds only the decal
 vertices, as on the Xbox. A change to a pool's size changes the game state's
 layout: saved games of builds before it no longer load. */
 
+#define HALO_PORT_TAG_CACHE_SIZE 0x1600000 /* (0x1600000) */
 #define HALO_PORT_GAME_STATE_BASE_ADDRESS 0x81A00000 /* (0x80061000) */
 #define HALO_PORT_GAME_STATE_CPU_SIZE 0x14C0000 /* (0x305000) */
 #define HALO_PORT_GAME_STATE_GPU_SIZE 0x100000 /* (0x40000) */
@@ -53,12 +57,26 @@ is drawn as the default one ("YOU GOT STABBED" in debug.txt; Elite_Alpha_Siege
 did at 22 MB), and a frame of bigass_v3 draws more than 64 MB (DamnationCE's
 measurement). The desktop builds' cache is 256 MB, half their 512 MB memory
 window (port/linux/src/platform.h), whose pages are backed as they are used.
-Android's window is 128 MB, as the web build's, and its cache the Xbox's. */
+Android's and the Switch's window is as large as the host found room for at
+start-up (platform_contiguous_size): the cache is half of it, as on the
+desktop, where that is more than the 128 MB of the Xbox's layout, and the
+Xbox's own otherwise. Tables kept per page are as large as the largest
+cache (HALO_PORT_TEXTURE_CACHE_MAXIMUM_PAGE_COUNT). The cache is not part of
+the game state, so its size does not change saved games. 64-bit ARM Linux's
+window is 128 MB, as the web build's, and its cache the Xbox's; the x86-64
+guest's window and cache are the desktop's. */
 
-#if defined(HALO_ARM64_GUEST) || defined(HALO_WEB)
+#ifdef HALO_ANDROID
+extern unsigned long platform_contiguous_size;
+#define HALO_PORT_TEXTURE_CACHE_PAGE_COUNT \
+	(platform_contiguous_size > 0x08000000UL ? platform_contiguous_size / 2 / 0x4000 : 0x580) /* (0x580) */
+#define HALO_PORT_TEXTURE_CACHE_MAXIMUM_PAGE_COUNT 0x4000
+#elif defined(HALO_WEB) || (defined(HALO_GUEST) && defined(__aarch64__))
 #define HALO_PORT_TEXTURE_CACHE_PAGE_COUNT 0x580 /* (0x580) */
+#define HALO_PORT_TEXTURE_CACHE_MAXIMUM_PAGE_COUNT HALO_PORT_TEXTURE_CACHE_PAGE_COUNT
 #else
 #define HALO_PORT_TEXTURE_CACHE_PAGE_COUNT 0x4000 /* (0x580) */
+#define HALO_PORT_TEXTURE_CACHE_MAXIMUM_PAGE_COUNT HALO_PORT_TEXTURE_CACHE_PAGE_COUNT
 #endif
 #define HALO_PORT_TEXTURE_CACHE_SIZE (HALO_PORT_TEXTURE_CACHE_PAGE_COUNT*0x4000) /* (0x1600000) */
 
@@ -69,10 +87,10 @@ the Xbox. Halo Custom Edition maps' sounds, converted when they load
 (port/linux/game/custom_edition_sounds.c), and those of sound tags loaded
 over a map's by mods (mod_sounds.c), are longer than the Xbox maps' and fill it (a
 campaign map's dialogue and music did, "SOUND CACHE BLOWN" in debug.txt).
-The desktop builds' cache is 16 MB; Android's and the web build's windows keep
-the Xbox's. */
+The desktop builds' cache is 16 MB (the x86-64 guest's too); the 128 MB
+windows of the AArch64 guests and the web build keep the Xbox's. */
 
-#if defined(HALO_ARM64_GUEST) || defined(HALO_WEB)
+#if defined(HALO_WEB) || (defined(HALO_GUEST) && defined(__aarch64__))
 #define HALO_PORT_SOUND_CACHE_SIZE 0x400000 /* (0x400000) */
 #else
 #define HALO_PORT_SOUND_CACHE_SIZE 0x1000000 /* (0x400000) */

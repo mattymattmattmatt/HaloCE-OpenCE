@@ -749,6 +749,13 @@ static void cache_copy_initialize_file_data(
 		OPEN_EXISTING,
 		FILE_FLAG_NO_BUFFERING | FILE_FLAG_OVERLAPPED,
 		NULL);
+	/* port: the map read ahead of the copy, so that the card is read while zlib unpacks (port/linux/src/xbox_files.c) */
+	if (self->source_file != INVALID_HANDLE_VALUE)
+	{
+		extern void platform_file_read_ahead(HANDLE file);
+
+		platform_file_read_ahead(self->source_file);
+	}
 	self->read_bytes_left = GetFileSize(self->source_file, NULL);
 	self->read_file_size = self->read_bytes_left;
 	self->async_read_bytes_left = self->read_bytes_left;
@@ -1677,6 +1684,40 @@ static void cache_copy_run_decompression(
 	return;
 }
 
+/* port: the port's log (port/linux/src/platform.h) */
+void platform_log(char const *format, ...);
+
+/* port: each map's copy timed in the port's log, from the decompressor's own timers (decompressor_print_timing is
+the game's, off, and writes to debug.txt): the card's reads (synchronous on the port: ReadFileEx completes at once,
+so a read's time is the card's), zlib's, and the writes into the cache file, and what reading the map unpacked would
+take at the reads' rate - whether keeping the maps unpacked on the card would load them sooner. With the map read ahead
+(platform_file_read_ahead) the reads' time is what the copy waited for the reader, and the reader's own line says the
+card's rate */
+static void cache_copy_log_timing(
+	struct simple_decompressor_definition *self)
+{
+	double frequency = (double)performance_frequency;
+	double total = decompressor_globals.times[_decompressor_timer_copying] / frequency;
+	double read = decompressor_globals.times[_decompressor_timer_read_file] / frequency;
+	double write = decompressor_globals.times[_decompressor_timer_write_file] / frequency;
+	double zlib = decompressor_globals.times[_decompressor_timer_zlib] / frequency;
+	double setup = decompressor_globals.times[_decompressor_timer_setup] / frequency;
+	double packed = (double)self->read_file_size;
+	double unpacked = (double)self->header.size;
+
+	if (self->flags & ALL_COPY_FAILURE_FLAGS || packed <= 0.0 || unpacked <= 0.0)
+	{
+		platform_log("map copy: %s did not copy (flags %lx), %.2f s", self->src_name, (unsigned long)self->flags, total);
+		return;
+	}
+	platform_log("map copy: %s, %.1f MB packed to %.1f MB in %.2f s: reads %.2f s (%.1f MB/s), zlib %.2f s "
+		"(%.1f MB/s out), writes %.2f s, setup %.2f s, the rest %.2f s; unpacked on the card it would read in about "
+		"%.2f s at the same rate",
+		self->src_name, packed / 1e6, unpacked / 1e6, total, read, read > 0.0 ? packed / 1e6 / read : 0.0, zlib,
+		zlib > 0.0 ? unpacked / 1e6 / zlib : 0.0, write, setup, total - read - zlib - write - setup,
+		read * unpacked / packed);
+}
+
 static unsigned long __stdcall simple_cache_copy_thread(
 	void *parameter)
 {
@@ -1807,6 +1848,7 @@ static unsigned long __stdcall simple_cache_copy_thread(
 		self->source_file = NULL;
 
 		decompressor_timer_stop(_decompressor_timer_copying);
+		cache_copy_log_timing(self);
 
 		self->destination_file = NULL;
 		SetEvent(self->copy_complete_event);

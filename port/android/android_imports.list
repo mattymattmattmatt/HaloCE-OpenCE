@@ -1,0 +1,24 @@
+# Host functions only the Android app's guest imports (declared in
+# port/android/guest/runtime/guest_host.h, defined in port/android/host's
+# host_main.c and host_touch.c), beyond host_imports.list's.
+host_android_path
+host_gesture_insets
+host_touch_read
+host_touch_look_read
+host_touch_rumble
+host_touch_scene
+host_touch_bindings
+host_touch_gyro_mode
+host_touch_menu_fingers
+# the overlay's devices: a touchscreen, a controller (host_touch.c; touch_input.c)
+host_touch_devices
+# a replay's buttons on the screen, for the overlay to press (host_touch.c;
+# touch_input.c, port/linux/game/network_replay_playback.c)
+host_touch_targets
+# the phone's GPU family, for the GL ES renderer's fixes (host_render_policy.c; guest_render_policy.c)
+host_android_chip_family
+# the Theater's EXPORT REPLAYS (port/android/host/host_main.c; port/linux/game/menu_functions.c)
+host_android_export_replays
+# the server browser's requests to the master servers (port/android/host/host_https.c;
+# port/linux/src/master_list.c)
+host_https_get

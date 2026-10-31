@@ -1,0 +1,81 @@
+guest-probe.txt: writing to this file and the kernel log
+system software 13.590.001 (0x13590001)
+
+=== 1. the process ===
+flexible memory configured: 0x00000000, 448 MB
+flexible memory available: 0x00000000, 442 MB
+direct memory: 12288 MB
+direct memory's largest free block: 0x00000000, 12286 MB at 0x200000
+this program's code 400e70, its data 400e70, the stack 40cba0, malloc 880034c00, anonymous mmap 20001c000
+
+=== 2. the map (sceKernelVirtualQuery) ===
+start              end                      MB prot type flags name
+0x0000000000400000 0x0000000000404000        0    4    0 65786511 cutable
+0x0000000000404000 0x0000000000408000        0    1    0 65786511 cutable
+0x0000000000408000 0x000000000040c000        0    1    0 65786511 cutable
+0x000000000040c000 0x0000000000410000        0    3    0 65786511 cutable
+0x0000000080000000 0x00000000800cc000        0    4    0 62696c11 c.prx
+0x00000000800cc000 0x000000008010c000        0    1    0 62696c11 c.prx
+0x000000008010c000 0x0000000080110000        0    1    0 62696c11 c.prx
+0x0000000080110000 0x0000000080114000        0    3    0 62696c11 c.prx
+0x0000000080114000 0x0000000080118000        0    3    0 62696c11 c.prx
+0x0000000200000000 0x0000000200014000        0    3   12 6f6e6110 n:0008009af2a1
+0x0000000200014000 0x0000000200018000        0    1    0 65635311 ShellCoreUtil
+0x0000000200018000 0x000000020001c000        0    3    0 6f6e6111 n:000800e49077
+0x00000007eedf8000 0x00000007eedfc000        0    0    0 6f4e2801 Name)eboot.bin
+0x00000007eedfc000 0x00000007eeffc000        2    3    0 69616d15 n stack
+0x00000007eeffc000 0x00000007ef000000        0    5    0 6f4e2800 Name)SceSysCore.elf
+15 regions
+
+=== 3. free space below 4 GB (a reservation at each megabyte) ===
+0x000100000-0x000400000     3 MB free
+0x000400000-0x000500000     1 MB taken (placed elsewhere)
+0x000500000-0x080000000  2043 MB free
+0x080000000-0x080200000     2 MB taken (placed elsewhere)
+0x080200000-0x100000000  2046 MB free
+free below 4 GB: 4092 MB; the largest run is 2046 MB at 0x80200000
+
+=== 4. the guest's ranges in direct memory ===
+anonymous mmap(MAP_FIXED) at 0xff000000: placed at ff000000, written and read back
+anonymous mmap(MAP_FIXED, read, write, execute) at 0xff000000: placed at ff000000
+image: 0x70000000-0x74000000, 64 MB of direct memory, read, write and execute, zeroed, in 1 ms
+Xbox window: reserving 0x80000000-0xa0000000: placed elsewhere, 0xffffffff
+Xbox window: 0x90000000-0xb0000000, 512 MB of direct memory, zeroed, in 14 ms
+Custom Edition's tag cache: 0x40440000-0x41b40000, 23 MB of direct memory, zeroed, in 0 ms
+pool: 0x10000000-0x20000000, 256 MB of direct memory, zeroed, in 7 ms
+
+=== 5. code below 4 GB ===
+low code runs (40 + 2): 42, right
+a load through a 32-bit pointer into the window: 1330397512, right
+low code calls the host above 4 GB ((20 + 1) * 2): 42, right
+a stack below 4 GB, through %esp: 305419896, right
+pthread_attr_setstack(0x1ff80000): 0
+pthread_create with that stack: 0
+thread: running on 1ffbffbc, below 4 GB: yes; low code returned 3
+
+=== 6. the game ===
+segment 0: 0x70000000-0x70000030, 48 bytes from the file, flags 4
+segment 1: 0x70000030-0x703e2cd1, 4074657 bytes from the file, flags 5
+segment 2: 0x703e2ce0-0x70e94b23, 11214403 bytes from the file, flags 4
+segment 3: 0x70ea0000-0x71175214, 2970132 bytes from the file, flags 6
+segment 4: 0x71175280-0x72a10ff0, 0 bytes from the file, flags 6
+header: magic 0x4f4c4148 (right), ABI 4 (the probe's 4), image end 0x72a11000 (loaded to 0x72a10ff0)
+entry points: start 0x703d0470, thread start 0x702343b0, attach 0x702344a0, detach 0x70234530, constructors 0x7117520c-0x71175214
+265 imports
+the game's thread starts on 1ff7ffac; MXCSR 0x00009fc0, 0x00001f80 after ps5_fp_ieee
+     1 host_set_tp(0x728c870c)
+     2 host_syscall gettid(0x0, 0x0, 0x0, 0x0) = 1
+     3 host_syscall mmap(0xa0000000, 0x20000000, 0x0, 0x104022) = 2684354560
+     5   the game writes to stderr: halo-linux: 
+     7   the game writes to stderr: Xbox contiguous memory window: 512 MB at 0xa0000000
+     8   the game writes to stderr: 
+     9 host_syscall brk(0x0, 0x0, 0x0, 0x0) = 0
+    10 host_syscall brk(0x2000, 0x0, 0x0, 0x0) = 0
+    11 host_syscall mmap(0x0, 0x2000, 0x0, 0x22) = 268500992
+    12 host_syscall mprotect(0x10011000, 0x1000, 0x3, 0x0) = 0
+    13 host_syscall mmap(0x0, 0x1000, 0x3, 0x22) = 268566528
+the first import the probe does not answer: host_sdl_get_base_path(0x728c87a0, 0x400, 0x0, 0x0)
+after 14 calls to the host in 0.101 s, 0 MB of the pool taken
+system calls: writev 3 gettid 1 brk 2 mmap 3 mprotect 1
+
+=== done ===

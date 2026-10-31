@@ -1,0 +1,315 @@
+host-probe.txt: writing to this file and the kernel log
+system software 13.590.001 (0x13590001)
+RADV's standard error to the kernel log: 0
+the last run did not finish "3. getcwd": it is skipped this time
+
+=== 4. the host's memory, before anything ===
+memory before anything: flexible available 417.0 MB (0x00000000); direct memory's largest free block 12268.0 MB at 0x1400000 (0x00000000); the platform heap maps 16.0 MB, at most 16.0 MB, 0 fallbacks to libc
+
+=== the guest's ranges ===
+image: 0x70000000-0x74000000, 64 MB of direct memory at physical 0x1400000, read, write and execute, zeroed, in 1 ms
+Xbox window: reserving 0x80000000-0xa0000000: placed elsewhere, 0xffffffff
+Xbox window: 0x90000000-0xb0000000, 512 MB of direct memory at physical 0x5400000, zeroed, in 14 ms
+Custom Edition's tag cache: 0x40440000-0x41b40000, 23 MB of direct memory at physical 0x25400000, zeroed, in 0 ms
+pool: 0x10000000-0x20000000, 256 MB of direct memory at physical 0x26b00000, zeroed, in 7 ms
+memory after the guest's ranges: flexible available 417.0 MB (0x00000000); direct memory's largest free block 11413.0 MB at 0x36b00000 (0x00000000); the platform heap maps 16.0 MB, at most 16.0 MB, 0 fallbacks to libc
+
+=== 1. futexes (_umtx_op) ===
+the word at 10000000 (in the pool); _umtx_op is linked, so libkernel exports it
+-- UMTX_OP_WAIT_UINT, UMTX_OP_WAKE (wait 11, wake 3)
+wait for 0 on a word holding 1: returned 0, errno 0 (-), in 3 us
+one waiter (its stack at 0x1004ff7c): the wake returned 0; the waiter returned 0, errno 0
+wake to the waiter's return, 10 runs: min 5 us, median 6 us, max 8 us
+wait with a relative struct timespec of 100 ms: returned -1, errno 60 (Operation timed out), after 100127 us
+wait with a relative struct _umtx_time of 100 ms (CLOCK_MONOTONIC): returned -1, errno 60 (Operation timed out), after 100130 us
+wait with struct _umtx_time, UMTX_ABSTIME, now + 100 ms on CLOCK_MONOTONIC: returned -1, errno 60 (Operation timed out), after 100126 us
+four waiters, wake INT_MAX: the wake returned 0 (errno 0); 4 of 4 had returned 50 ms later
+-- UMTX_OP_WAIT_UINT_PRIVATE, UMTX_OP_WAKE_PRIVATE (wait 15, wake 16)
+wait for 0 on a word holding 1: returned 0, errno 0 (-), in 2 us
+one waiter (its stack at 0x103cff7c): the wake returned 0; the waiter returned 0, errno 0
+wake to the waiter's return, 10 runs: min 5 us, median 6 us, max 7 us
+wait with a relative struct timespec of 100 ms: returned -1, errno 60 (Operation timed out), after 100054 us
+wait with a relative struct _umtx_time of 100 ms (CLOCK_MONOTONIC): returned -1, errno 60 (Operation timed out), after 100112 us
+wait with struct _umtx_time, UMTX_ABSTIME, now + 100 ms on CLOCK_MONOTONIC: returned -1, errno 60 (Operation timed out), after 100132 us
+four waiters, wake INT_MAX: the wake returned 0 (errno 0); 4 of 4 had returned 50 ms later
+-- UMTX_OP_WAIT (a long, 64 bits) on a 32-bit word
+wait for 0 on a word holding 0 whose next word holds 1, 100 ms timeout: returned 0, errno 0 (-), after 2 us
+(it compares the 64 bits from the word's address, 0x100000000 here, so a waiter whose 32-bit word matches does not sleep when the next word is not zero: not to be used on the guest's words)
+
+=== 2. faults ===
+sysconf(_SC_PAGESIZE): 16384
+sigaction(SIGSEGV): 0; sigaction(SIGBUS): 0
+-- 2. faults: sceKernelMprotect on the window
+  the faulting thread's stack is at 1074ff38
+  sceKernelMprotect(0x90100000, 16384 bytes, read only): 0 (0x00000000)
+  the write: 1 fault; then the value reads 0x22222222 (the write completed)
+  signal 11 (SIGSEGV), si_code 2, si_addr 0x90100100
+  mc_rip 0x404e35 mc_rsp 0x1074ff20 mc_rbp 0x1074ff90 mc_rax 0x0 mc_rdi 0x90100000
+  mc_err 0x7 mc_trapno 12 mc_addr 0x90100100 mc_flags 0x5
+  the handler ran on 0x200100f644: inside the alternate stack (0x20010003e0-0x20010103e0); the interrupted stack is below 4 GB
+  the handler's sceKernelMprotect(read, write): 0
+-- 2. faults: mprotect on the window
+  the faulting thread's stack is at 1078ff38
+  mprotect(0x90200000, 16384 bytes, read only): 0 (0x00000000)
+  the write: 1 fault; then the value reads 0x22222222 (the write completed)
+  signal 11 (SIGSEGV), si_code 2, si_addr 0x90200100
+  mc_rip 0x404e35 mc_rsp 0x1078ff20 mc_rbp 0x1078ff90 mc_rax 0x0 mc_rdi 0x90200000
+  mc_err 0x7 mc_trapno 12 mc_addr 0x90200100 mc_flags 0x5
+  the handler ran on 0x200200f644: inside the alternate stack (0x20020003e0-0x20020103e0); the interrupted stack is below 4 GB
+  the handler's mprotect(read, write): 0
+an anonymous mmap of flexible memory: 20001c000
+-- 2. faults: mprotect on flexible memory
+  the faulting thread's stack is at 107cff38
+  mprotect(0x20001c000, 16384 bytes, read only): 0 (0x00000000)
+  the write: 1 fault; then the value reads 0x22222222 (the write completed)
+  signal 11 (SIGSEGV), si_code 2, si_addr 0x20001c100
+  mc_rip 0x404e35 mc_rsp 0x107cff20 mc_rbp 0x107cff90 mc_rax 0x0 mc_rdi 0x20001c000
+  mc_err 0x7 mc_trapno 12 mc_addr 0x20001c100 mc_flags 0x5
+  the handler ran on 0x200300f644: inside the alternate stack (0x20030003e0-0x20030103e0); the interrupted stack is below 4 GB
+  the handler's mprotect(read, write): 0
+-- 2. faults: 1000 cycles, sceKernelMprotect
+  the faulting thread's stack is at 1080ff38
+  1000 cycles of sceKernelMprotect read only, write, fault, the handler's unprotect: 63344 us, 63.34 us a cycle (the protect alone 28.68 us); 1000 faults, 0 failed protects; the value reads 999
+-- 2. faults: 1000 cycles, mprotect
+  the faulting thread's stack is at 1084ff38
+  1000 cycles of mprotect read only, write, fault, the handler's unprotect: 63239 us, 63.24 us a cycle (the protect alone 28.69 us); 1000 faults, 0 failed protects; the value reads 999
+-- 2. faults: a read of unmapped 0x08000000
+  the faulting thread's stack is at 1088ff38
+  the read of 0x8000000 faulted:
+  signal 11 (SIGSEGV), si_code 1, si_addr 0x8000000
+  mc_rip 0x404fca mc_rsp 0x1088ff20 mc_rbp 0x1088ff90 mc_rax 0x0 mc_rdi 0xc54820
+  mc_err 0x4 mc_trapno 12 mc_addr 0x8000000 mc_flags 0x5
+  the handler ran on 0x200600f644: inside the alternate stack (0x20060003e0-0x20060103e0); the interrupted stack is below 4 GB
+
+=== 3. the data folder ===
+-- /data/halo
+stat(/data/halo): mode 040777, uid 0, gid 0
+  entry ".", d_type 4
+  entry "..", d_type 4
+readdir: 2 entries
+mkdir(/data/halo/probe): 0
+chmod(/data/halo/probe, 0777): 0
+wrote /data/halo/probe/16mb.bin: 16 MB in 1 MB fwrites, fflush, fsync (0): 0.885 s, 18.1 MB/s
+chmod 0666: 0
+wrote /data/halo/probe/100mb.bin: 100 MB in 1 MB fwrites, fflush, fsync (0): 5.476 s, 18.3 MB/s
+chmod 0666: 0
+read 100 MB in one read after open: 104857600 bytes in 1 call, 0.040 s, 2473.0 MB/s
+  one read: the first byte 0x00 (0x00 written), the last 0xf5 (0xf5 written): right
+read it in 64 KB reads: 104857600 bytes, 0.036 s, 2759.7 MB/s
+  64 KB reads: the first byte 0x00 (0x00 written), the last 0xf5 (0xf5 written): right
+read it through fread, a 64 KB buffer: 104857600 bytes, 0.040 s, 2530.7 MB/s
+  fread: the first byte 0x00 (0x00 written), the last 0xf5 (0xf5 written): right
+stat(/data/halo/probe/100mb.bin): st_size 104857600, st_mode 0100666, st_mtime 1792281372 (the clock: 1792281372, +0 s), st_blksize 65536
+access(/data/halo, F_OK | R_OK | W_OK): 0
+access(/data/halo/probe/100mb.bin, F_OK | R_OK | W_OK): 0
+access(/data/halo/probe/missing.bin, F_OK | R_OK | W_OK): -1, No such file or directory
+realpath(/data/halo/probe): Operation not permitted
+rename(100mb.bin, renamed.bin): 0
+unlink of it: 0
+rmdir(/data/halo/probe): 0
+-- /app0
+stat(/app0): mode 040777, uid 0, gid 0
+  entry ".", d_type 4
+  entry "..", d_type 4
+  entry "sce_module", d_type 4
+  entry "sce_sys", d_type 4
+  entry "eboot.bin", d_type 8
+  entry "host-probe.txt", d_type 8
+  entry "host-skip.txt", d_type 8
+  entry "radv-shader-cache", d_type 4
+readdir: 8 entries
+mkdir(/app0/probe): 0
+chmod(/app0/probe, 0777): 0
+wrote /app0/probe/16mb.bin: 16 MB in 1 MB fwrites, fflush, fsync (0): 0.852 s, 18.8 MB/s
+chmod 0666: 0
+wrote /app0/probe/100mb.bin: 100 MB in 1 MB fwrites, fflush, fsync (0): 5.412 s, 18.5 MB/s
+chmod 0666: 0
+read 100 MB in one read after open: 104857600 bytes in 1 call, 0.024 s, 4150.9 MB/s
+  one read: the first byte 0x00 (0x00 written), the last 0xf5 (0xf5 written): right
+read it in 64 KB reads: 104857600 bytes, 0.022 s, 4530.4 MB/s
+  64 KB reads: the first byte 0x00 (0x00 written), the last 0xf5 (0xf5 written): right
+read it through fread, a 64 KB buffer: 104857600 bytes, 0.026 s, 3892.1 MB/s
+  fread: the first byte 0x00 (0x00 written), the last 0xf5 (0xf5 written): right
+stat(/app0/probe/100mb.bin): st_size 104857600, st_mode 0100666, st_mtime 1792281378 (the clock: 1792281378, +0 s), st_blksize 65536
+access(/app0, F_OK | R_OK | W_OK): 0
+access(/app0/probe/100mb.bin, F_OK | R_OK | W_OK): 0
+access(/app0/probe/missing.bin, F_OK | R_OK | W_OK): -1, No such file or directory
+realpath(/app0/probe): Operation not permitted
+rename(100mb.bin, renamed.bin): 0
+unlink of it: 0
+rmdir(/app0/probe): 0
+stat(/download0): mode 040777
+/download0: a file was made and written; unlink: 0
+
+=== 4. the host's memory ===
+malloc: 1 blocks, 16 MB; the latest at 2007000020
+malloc: 64 blocks, 1024 MB; the latest at 2046000800
+malloc: 128 blocks, 2048 MB; the latest at 2086001000
+malloc: 192 blocks, 3072 MB; the latest at 20c6001800
+malloc: 256 blocks, 4096 MB; the latest at 2106002000
+malloc: 320 blocks, 5120 MB; the latest at 2146002800
+malloc: 384 blocks, 6144 MB; the latest at 2186003000
+malloc: 448 blocks, 7168 MB; the latest at 21c6003800
+malloc: 512 blocks, 8192 MB; the latest at 2206004000
+malloc of 16 MB blocks, every page written: 512 blocks, 8192 MB, in 0.023 s; stopped at 8 GB
+memory with that taken: flexible available 417.0 MB (0x00000000); direct memory's largest free block 3093.0 MB at 0x23eb00000 (0x00000000); the platform heap maps 8336.0 MB, at most 8336.0 MB, 0 fallbacks to libc
+memory after it is freed: flexible available 417.0 MB (0x00000000); direct memory's largest free block 3093.0 MB at 0x23eb00000 (0x00000000); the platform heap maps 8336.0 MB, at most 8336.0 MB, 0 fallbacks to libc
+instance extensions (0): VK_KHR_device_group_creation VK_KHR_display VK_KHR_external_fence_capabilities VK_KHR_external_memory_capabilities VK_KHR_external_semaphore_capabilities VK_KHR_get_display_properties2 VK_KHR_get_physical_device_properties2 VK_KHR_get_surface_capabilities2 VK_KHR_surface VK_KHR_surface_maintenance1 VK_KHR_surface_protected_capabilities VK_EXT_debug_report VK_EXT_debug_utils VK_EXT_headless_surface VK_EXT_surface_maintenance1 VK_EXT_swapchain_colorspace
+vkCreateInstance (VK_KHR_surface, VK_KHR_display enabled): 0 in 0 ms
+vkEnumeratePhysicalDevices: 0, 1 device
+device "PlayStation 5 GPU (RADV NAVI21)", Vulkan 1.4.354, driver version 0x06802000, vendor 0x1002, device 0x0000
+memory heap 0: 4096.0 MB, flags 0x0
+memory heap 1: 8192.0 MB, flags 0x1 device-local
+memory type 0: heap 1, flags 0x1 device-local
+memory type 1: heap 1, flags 0x1 device-local
+memory type 2: heap 0, flags 0x6 host-visible host-coherent
+memory type 3: heap 1, flags 0x7 device-local host-visible host-coherent
+memory type 4: heap 1, flags 0x7 device-local host-visible host-coherent
+memory type 5: heap 0, flags 0xe host-visible host-coherent host-cached
+memory type 6: heap 0, flags 0xe host-visible host-coherent host-cached
+memory type 7: heap 1, flags 0xc1 device-local
+memory type 8: heap 0, flags 0xc6 host-visible host-coherent
+memory type 9: heap 1, flags 0xc7 device-local host-visible host-coherent
+memory type 10: heap 0, flags 0xce host-visible host-coherent host-cached
+queue family 0: flags 0xf, 1 queues
+queue family 1: flags 0xe, 4 queues
+vkCreateDevice (one graphics queue of family 0, VK_KHR_swapchain): 0 in 0 ms
+memory with the instance and the device: flexible available 417.0 MB (0x00000000); direct memory's largest free block 3056.0 MB at 0x241000000 (0x00000000); the platform heap maps 8352.0 MB, at most 8352.0 MB, 0 fallbacks to libc
+vkAllocateMemory(256 MB, type 0, device-local): 0 in 23 us
+memory after 256 MB of device-local: flexible available 417.0 MB (0x00000000); direct memory's largest free block 2800.0 MB at 0x251000000 (0x00000000); the platform heap maps 8352.0 MB, at most 8352.0 MB, 0 fallbacks to libc
+vkAllocateMemory(64 MB, type 2, host-visible and host-coherent): 0 in 3011 us
+memory after 64 MB of host-visible and host-coherent: flexible available 417.0 MB (0x00000000); direct memory's largest free block 2736.0 MB at 0x255000000 (0x00000000); the platform heap maps 8352.0 MB, at most 8352.0 MB, 0 fallbacks to libc
+vkMapMemory of the 64 MB: 0, at 4010000000
+written and read back: 0 words wrong
+memory after both are freed: flexible available 417.0 MB (0x00000000); direct memory's largest free block 3056.0 MB at 0x241000000 (0x00000000); the platform heap maps 8352.0 MB, at most 8352.0 MB, 0 fallbacks to libc
+
+=== 5. the display ===
+vkGetPhysicalDeviceDisplayPropertiesKHR: 0, 1 display
+display 0: "PS5 VideoOut", 0x0 mm, 3840x2160, transforms 0x1, plane reorder 0, persistent content 0
+vkGetDisplayModePropertiesKHR: 0, 1 mode
+mode 0: 3840x2160 at 59940 mHz
+vkGetPhysicalDeviceDisplayPlanePropertiesKHR: 0, 1 plane
+plane 0: current display display 0, stack index 0; supported displays (0): 1 (display 0 first)
+vkCreateDisplayModeKHR(1920x1080 at 59940 mHz): -3
+vkCreateDisplayModeKHR(1920x1080 at 60000 mHz): -3
+vkCreateDisplayModeKHR(3840x2160 at 60000 mHz): -3
+vkCreateDisplayModeKHR(1280x720 at 59940 mHz): -3
+plane 0 capabilities on 3840x2160 at 59940 mHz (the display's): 0; alpha 0x1, source position 0,0 to 0,0, source extent 1x1 to 3840x2160, destination position 0,0 to 0,0, destination extent 3840x2160 to 3840x2160
+-- the native mode, 3840x2160
+vkCreateDisplayPlaneSurfaceKHR(3840x2160, plane 0, stack 0, alpha 0x1): 0
+vkGetPhysicalDeviceSurfaceSupportKHR(family 0): 0, supported
+surface capabilities (0): images 2 to 5, current 3840x2160, min 1x1, max 3840x2160, layers 1, transforms 0x1 (current 0x1), composite alpha 0x1, usage 0x9f
+surface formats (0): format 44 colour space 0; format 50 colour space 0;
+present modes (0): 2 (FIFO)
+vkCreateSwapchainKHR(FIFO, 3840x2160, format 44, 3 images asked): 0
+3 swapchain images
+the native mode: 60 frames, 60 presented; the last 50 took 0.834 s (50 refreshes at 59.94 Hz: 0.834 s); intervals min 16.65 ms, median 16.69 ms, max 16.73 ms
+no 1920x1080 mode exists or was created: the renderer scales to the native mode itself
+
+=== 6. leaving and returning ===
+sceUserServiceInitialize: 0x00000000
+sceUserServiceGetInitialUser: 0x00000000, user 372994645
+scePadInit: 0x00000000
+the pad: handle 0x031e0700
+sceSystemServiceReceiveEvent and sceSystemServiceGetStatus are declared by hand (OpenOrbis's PS4 declarations), each given a 16 KB buffer; only the event's type and the status's first 8 bytes are read
+for 90 s: watch the grays for 10 s; press the PS button, stay in the system's menu for 10 s, return to the title; hold the PS button for the Quick Menu, close it; wait
+  0.000 s: the pad: connected 1, intercepted 0 (buttons 0x00000000)
+  0.000 s: sceSystemServiceReceiveEvent: 0x80a10004
+  0.000 s: sceSystemServiceGetStatus: 0x00000000; events waiting 0, then bytes 00 00 00 00 (isSystemUiOverlaid first)
+  1.013 s: 63 frames in 1.013 s, intervals min 1.75 ms, median 16.69 ms, max 16.71 ms; monotonic 98151.034, realtime 1792281381.301
+  2.014 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.71 ms; monotonic 98152.035, realtime 1792281382.302
+  3.015 s: 60 frames in 1.001 s, intervals min 16.64 ms, median 16.69 ms, max 16.73 ms; monotonic 98153.036, realtime 1792281383.303
+  4.016 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 98154.037, realtime 1792281384.304
+  5.018 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.68 ms, max 16.73 ms; monotonic 98155.038, realtime 1792281385.305
+  6.019 s: 60 frames in 1.001 s, intervals min 16.59 ms, median 16.69 ms, max 16.80 ms; monotonic 98156.039, realtime 1792281386.306
+  7.020 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 98157.040, realtime 1792281387.307
+  8.021 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 98158.041, realtime 1792281388.308
+  9.022 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 98159.042, realtime 1792281389.309
+ 10.024 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.71 ms; monotonic 98160.043, realtime 1792281390.310
+ 11.025 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 98161.044, realtime 1792281391.311
+ 12.026 s: 60 frames in 1.001 s, intervals min 16.64 ms, median 16.69 ms, max 16.74 ms; monotonic 98162.045, realtime 1792281392.312
+ 13.027 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 98163.046, realtime 1792281393.313
+ 14.028 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 98164.047, realtime 1792281394.314
+ 15.030 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 98165.048, realtime 1792281395.315
+ 16.031 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 98166.049, realtime 1792281396.316
+ 17.032 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 98167.050, realtime 1792281397.317
+ 18.033 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 98168.051, realtime 1792281398.318
+ 19.034 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.71 ms; monotonic 98169.052, realtime 1792281399.319
+ 20.035 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.73 ms; monotonic 98170.053, realtime 1792281400.320
+ 21.037 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 98171.054, realtime 1792281401.321
+ 22.038 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 98172.055, realtime 1792281402.322
+ 23.039 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 98173.056, realtime 1792281403.323
+ 24.040 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.71 ms; monotonic 98174.057, realtime 1792281404.324
+ 25.041 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 98175.058, realtime 1792281405.325
+ 26.043 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 98176.059, realtime 1792281406.326
+ 27.044 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.71 ms; monotonic 98177.060, realtime 1792281407.327
+ 28.045 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 98178.061, realtime 1792281408.328
+ 29.046 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.73 ms; monotonic 98179.062, realtime 1792281409.329
+ 30.047 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 98180.063, realtime 1792281410.330
+ 31.049 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 98181.064, realtime 1792281411.331
+ 32.050 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.71 ms; monotonic 98182.065, realtime 1792281412.332
+ 33.051 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 98183.066, realtime 1792281413.333
+ 34.052 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 98184.067, realtime 1792281414.334
+ 35.053 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 98185.068, realtime 1792281415.335
+ 36.054 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 98186.069, realtime 1792281416.336
+ 37.056 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 98187.070, realtime 1792281417.337
+ 38.057 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 98188.071, realtime 1792281418.338
+ 39.058 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 98189.072, realtime 1792281419.339
+ 40.059 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 98190.073, realtime 1792281420.340
+ 41.060 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.73 ms; monotonic 98191.074, realtime 1792281421.341
+ 42.062 s: 60 frames in 1.001 s, intervals min 16.59 ms, median 16.69 ms, max 16.80 ms; monotonic 98192.075, realtime 1792281422.342
+ 43.063 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 98193.076, realtime 1792281423.343
+ 44.064 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 98194.077, realtime 1792281424.344
+ 45.065 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 98195.078, realtime 1792281425.345
+ 46.066 s: 60 frames in 1.001 s, intervals min 16.64 ms, median 16.69 ms, max 16.74 ms; monotonic 98196.079, realtime 1792281426.346
+ 47.068 s: 60 frames in 1.001 s, intervals min 16.64 ms, median 16.69 ms, max 16.74 ms; monotonic 98197.080, realtime 1792281427.347
+ 48.069 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 98198.081, realtime 1792281428.348
+ 49.070 s: 60 frames in 1.001 s, intervals min 16.67 ms, median 16.69 ms, max 16.70 ms; monotonic 98199.082, realtime 1792281429.349
+ 50.071 s: 60 frames in 1.001 s, intervals min 16.67 ms, median 16.69 ms, max 16.71 ms; monotonic 98200.083, realtime 1792281430.350
+ 51.072 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 98201.084, realtime 1792281431.351
+ 52.073 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 98202.085, realtime 1792281432.352
+ 53.075 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 98203.086, realtime 1792281433.353
+ 54.076 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 98204.087, realtime 1792281434.354
+ 55.077 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 98205.088, realtime 1792281435.355
+ 56.078 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 98206.089, realtime 1792281436.356
+ 57.079 s: 60 frames in 1.001 s, intervals min 16.60 ms, median 16.69 ms, max 16.79 ms; monotonic 98207.090, realtime 1792281437.357
+ 58.081 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 98208.091, realtime 1792281438.358
+ 59.082 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 98209.092, realtime 1792281439.359
+ 60.083 s: 60 frames in 1.001 s, intervals min 16.64 ms, median 16.69 ms, max 16.74 ms; monotonic 98210.093, realtime 1792281440.360
+ 61.084 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 98211.094, realtime 1792281441.361
+ 62.085 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 98212.095, realtime 1792281442.362
+ 63.087 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 98213.096, realtime 1792281443.363
+ 64.088 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 98214.097, realtime 1792281444.364
+ 65.089 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 98215.098, realtime 1792281445.365
+ 66.090 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 98216.099, realtime 1792281446.366
+ 67.091 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 98217.100, realtime 1792281447.367
+ 68.093 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 98218.101, realtime 1792281448.368
+ 69.094 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.68 ms, max 16.73 ms; monotonic 98219.102, realtime 1792281449.369
+ 70.095 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.72 ms; monotonic 98220.103, realtime 1792281450.370
+ 71.096 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 98221.104, realtime 1792281451.371
+ 72.097 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.71 ms; monotonic 98222.105, realtime 1792281452.372
+ 73.098 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 98223.106, realtime 1792281453.373
+ 74.100 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.71 ms; monotonic 98224.107, realtime 1792281454.374
+ 75.101 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 98225.108, realtime 1792281455.375
+ 76.102 s: 60 frames in 1.001 s, intervals min 16.61 ms, median 16.69 ms, max 16.79 ms; monotonic 98226.109, realtime 1792281456.376
+ 77.103 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 98227.110, realtime 1792281457.377
+ 78.104 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 98228.111, realtime 1792281458.378
+ 79.106 s: 60 frames in 1.001 s, intervals min 16.64 ms, median 16.69 ms, max 16.73 ms; monotonic 98229.112, realtime 1792281459.379
+ 80.107 s: 60 frames in 1.001 s, intervals min 16.64 ms, median 16.69 ms, max 16.74 ms; monotonic 98230.113, realtime 1792281460.380
+ 81.108 s: 60 frames in 1.001 s, intervals min 16.64 ms, median 16.69 ms, max 16.74 ms; monotonic 98231.114, realtime 1792281461.381
+ 82.109 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.69 ms, max 16.73 ms; monotonic 98232.115, realtime 1792281462.382
+ 83.110 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 98233.116, realtime 1792281463.383
+ 84.112 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.73 ms; monotonic 98234.117, realtime 1792281464.384
+ 85.113 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 98235.118, realtime 1792281465.385
+ 86.114 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 98236.119, realtime 1792281466.386
+ 87.115 s: 60 frames in 1.001 s, intervals min 16.66 ms, median 16.69 ms, max 16.72 ms; monotonic 98237.120, realtime 1792281467.387
+ 88.116 s: 60 frames in 1.001 s, intervals min 16.65 ms, median 16.68 ms, max 16.73 ms; monotonic 98238.121, realtime 1792281468.388
+ 89.117 s: 60 frames in 1.001 s, intervals min 16.67 ms, median 16.69 ms, max 16.71 ms; monotonic 98239.122, realtime 1792281469.389
+90 s: 5396 frames presented in all; the swapchain never reported out of date
+after the 90 s: 10 of 10 frames presented
+scePadClose: 0x00000000
+
+=== 3. getcwd (last) ===
+3. getcwd: skipped, the last run crashed in it (its kernel log says how)
+
+=== done ===

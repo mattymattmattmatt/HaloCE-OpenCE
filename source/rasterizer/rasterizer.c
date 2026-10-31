@@ -686,12 +686,12 @@ struct rasterizer_debug_options rasterizer_debug_options =
 	{ 0 }, /* pad8A[2] */
 };
 /* No PDB name survives for this target-owned BSS symbol. */
-#ifndef HALO_ARM64_GUEST /* Mach-O section names differ; the default is .bss anyway */
+#ifndef HALO_GUEST_MACHO /* port: Mach-O section names differ; the default is .bss anyway */
 #pragma bss_seg(".bss")
 #endif
 static long bss_004662ec;
 real_argb_color *global_rasterizer_model_ambient_reflection_tint;
-#ifndef HALO_ARM64_GUEST
+#ifndef HALO_GUEST_MACHO
 #pragma bss_seg()
 #endif
 
@@ -1915,9 +1915,9 @@ void rasterizer_debug_model_vertices(
 			triangle_vertex_index < part->triangle_buffer.count + 2;
 			triangle_vertex_index++)
 		{
-			word model_vertex_index = ((word const *)part->triangles.address)[triangle_vertex_index];
+			word model_vertex_index = ((word const *)TAG_BLOCK_ADDRESS(part->triangles))[triangle_vertex_index];
 			struct rasterizer_model_vertex_compressed const *vertex =
-				&((struct rasterizer_model_vertex_compressed const *)part->compressed_vertices.address)[model_vertex_index];
+				&((struct rasterizer_model_vertex_compressed const *)TAG_BLOCK_ADDRESS(part->compressed_vertices))[model_vertex_index];
 			short node_index0;
 			short node_index1;
 			real node_weight0;

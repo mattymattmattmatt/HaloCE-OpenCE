@@ -1144,6 +1144,24 @@ void update_server_handle_distributed_input(
 	queue->current_action = *action;
 }
 
+/* port: a bot's action this tick (port/linux/game/bots.c), which the host's
+tick runs in place of what the bot's queue held, written into the update the
+tick ran: the distributed netcode relays each player's input from there to
+the clients (network_distributed.c), which drive the bot with it */
+void update_server_note_bot_action(
+	short player_index,
+	struct player_action const *action)
+{
+	long update_number = update_server_ticked_update_number();
+	struct update *update = update_number != NONE ? update_server_get_update(update_number) : NULL;
+
+	if (update && update->update_number == update_number && player_index >= 0 &&
+		player_index < (short)update->update.action_count)
+	{
+		update->update.actions[player_index] = *action;
+	}
+}
+
 long update_server_ticked_update_number(
 	void)
 {

@@ -597,6 +597,7 @@ struct network_game *network_game_server_get_game(struct network_game_server *se
 #include "units/units.h"
 #include "custom_edition_cache.h" /* port: port/linux/game/custom_edition_cache.c */
 #include "latency_meter.h" /* port: port/linux/game/latency_meter.c */
+#include "network_replay.h" /* port: port/linux/game/network_replay_playback.c */
 #include "touch_postgame.h" /* port: port/linux/game/touch_postgame.c */
 
 /* network_game_globals.c's */
@@ -1902,6 +1903,23 @@ static struct
 	boolean ban_picked;
 } scoreboard_menu = { NONE, 0, 0, FALSE };
 
+/* port: a network game's scoreboard picked from with a controller (the
+console and the phones have no mouse), while its Back holds it open (not
+the one that shows by itself at a game's end): the right stick moves the pick
+over the other machines' players, a flick at a time, and A votes to kick
+the one picked (network_votekick_request: starts the vote, or votes in the
+one against them). The controller's right stick and A are the game's again
+when the scoreboard closes (halo_scoreboard_controller_set). */
+#define SCOREBOARD_PICK_STICK 16000
+#define SCOREBOARD_PICK_STICK_REST 8000
+
+static struct
+{
+	long player_index;
+	boolean stick_moved;
+	boolean a_down;
+} scoreboard_pick = { NONE, TRUE, TRUE };
+
 /* the scoreboard closed: its scroll forgotten, the wheel the weapons' again */
 static void game_engine_scoreboard_closed(
 	void)
@@ -1915,6 +1933,11 @@ static void game_engine_scoreboard_closed(
 		halo_scoreboard_pointer_update(FALSE, &pointer);
 	}
 	scoreboard_menu.player_index = NONE;
+	/* (port: the controller's right stick and A, the game's again) */
+	halo_scoreboard_controller_set(-1);
+	scoreboard_pick.player_index = NONE;
+	scoreboard_pick.stick_moved = TRUE;
+	scoreboard_pick.a_down = TRUE;
 }
 
 /* the menu's items for the player: whether each is offered, and what it says */
@@ -2101,6 +2124,12 @@ static void game_engine_rasterize_scoreboard(
 	boolean clicked;
 	struct network_votekick_status vote;
 	boolean voting;
+	/* port: picking with the controller (scoreboard_pick), and its right
+	stick and A this frame */
+	boolean picking = FALSE;
+	short pick_stick_x = 0;
+	short pick_stick_y = 0;
+	int pick_a = 0;
 	long extra_rows;
 	long next_row;
 	wchar_t menu_labels[NUMBER_OF_SCOREBOARD_ITEMS][48];
@@ -2126,7 +2155,21 @@ static void game_engine_rasterize_scoreboard(
 	pick a player, have their rows) */
 	pointer_state = halo_scoreboard_pointer_update(network && network_votekick_available(), &pointer);
 	voting = network && network_votekick_get_status(&vote);
-	extra_rows = (voting ? 1 : 0) + (network && pointer_state >= 0 ? 1 : 0);
+	if (network && network_votekick_available())
+	{
+		struct player_datum *viewer = player_try_and_get(player_index);
+
+		picking = viewer && viewer->local_player_index != NONE &&
+			halo_scoreboard_controller_read(viewer->local_player_index, &pick_stick_x, &pick_stick_y, &pick_a);
+	}
+	halo_scoreboard_controller_set(picking ? player_try_and_get(player_index)->local_player_index : -1);
+	/* (A and the stick, held as Back is pressed, count once let go of) */
+	if (!picking)
+	{
+		scoreboard_pick.stick_moved = TRUE;
+		scoreboard_pick.a_down = TRUE;
+	}
+	extra_rows = (voting ? 1 : 0) + (network && (pointer_state >= 0 || picking) ? 1 : 0);
 	rows = (long)((bounds.y1 - SCOREBOARD_LAYOUT_TOP_ROWS * line_height) / SCOREBOARD_SCALE / line_height) - 2 -
 		SCOREBOARD_BOTTOM_ROWS - extra_rows;
 	rows = MAX(rows, 1);
@@ -2186,6 +2229,102 @@ static void game_engine_rasterize_scoreboard(
 		}
 		scoreboard_scroll += notches * SCOREBOARD_WHEEL_STEP + pages * page;
 		scoreboard_scroll = PIN(scoreboard_scroll, 0, MAX(total - page, 0));
+	}
+	/* port: the controller's pick moved (a flick of the right stick: along
+	its list up and down, to the other team's column or the next column of
+	the list left and right), shown (the scroll following it), and voted
+	against with A */
+	if (picking)
+	{
+		long pick_list = NONE;
+		long pick_position = NONE;
+		long list;
+		long position;
+
+		for (list = 0; list < 2 && pick_list == NONE; list++)
+		{
+			for (position = 0; position < list_counts[list]; position++)
+			{
+				if (ranked[lists[list][position]].player_index == scoreboard_pick.player_index)
+				{
+					pick_list = list;
+					pick_position = position;
+					break;
+				}
+			}
+		}
+		if (abs(pick_stick_x) < SCOREBOARD_PICK_STICK_REST && abs(pick_stick_y) < SCOREBOARD_PICK_STICK_REST)
+		{
+			scoreboard_pick.stick_moved = FALSE;
+		}
+		else if (!scoreboard_pick.stick_moved &&
+			(abs(pick_stick_x) >= SCOREBOARD_PICK_STICK || abs(pick_stick_y) >= SCOREBOARD_PICK_STICK))
+		{
+			long step = 0;
+			long wanted_list;
+			long wanted_position;
+
+			scoreboard_pick.stick_moved = TRUE;
+			if (pick_list == NONE)
+			{
+				/* (the first flick picks the first player shown) */
+				wanted_list = 0;
+				wanted_position = scoreboard_scroll;
+				step = 1;
+			}
+			else if (abs(pick_stick_y) >= abs(pick_stick_x))
+			{
+				wanted_list = pick_list;
+				step = pick_stick_y > 0 ? -1 : 1;
+				wanted_position = pick_position + step;
+			}
+			else if (team_columns)
+			{
+				wanted_list = 1 - pick_list;
+				wanted_position = MIN(pick_position, list_counts[wanted_list] - 1);
+				step = -1;
+			}
+			else
+			{
+				wanted_list = 0;
+				step = pick_stick_x > 0 ? 1 : -1;
+				wanted_position = pick_position + step * rows;
+				wanted_position = PIN(wanted_position, 0, list_counts[0] - 1);
+			}
+			/* (this machine's own players are not picked: past them) */
+			for (position = wanted_position; step && position >= 0 && position < list_counts[wanted_list];
+				position += step)
+			{
+				struct player_datum *candidate =
+					player_try_and_get(ranked[lists[wanted_list][position]].player_index);
+
+				if (candidate && candidate->local_player_index == NONE)
+				{
+					scoreboard_pick.player_index = ranked[lists[wanted_list][position]].player_index;
+					pick_list = wanted_list;
+					pick_position = position;
+					break;
+				}
+			}
+		}
+		if (pick_list != NONE)
+		{
+			/* (the rows a page shows of the pick's list) */
+			long shown = team_columns ? rows : page;
+
+			if (pick_position < scoreboard_scroll)
+				scoreboard_scroll = pick_position;
+			else if (pick_position >= scoreboard_scroll + shown)
+				scoreboard_scroll = pick_position - shown + 1;
+			scoreboard_scroll = PIN(scoreboard_scroll, 0, MAX(total - page, 0));
+		}
+		else
+		{
+			scoreboard_pick.player_index = NONE;
+		}
+		if (pick_a && !scoreboard_pick.a_down && scoreboard_pick.player_index != NONE)
+			network_votekick_request((short)DATUM_INDEX_TO_ABSOLUTE_INDEX(scoreboard_pick.player_index));
+		scoreboard_pick.a_down = pick_a != 0;
 	}
 	left = (short)(bounds.x0 + (width - (columns * SCOREBOARD_COLUMN_WIDTH + (columns - 1) * SCOREBOARD_COLUMN_GAP)) / 2);
 	/* (centred on the rows shown: the title's, the heading's, the longest
@@ -2412,6 +2551,16 @@ static void game_engine_rasterize_scoreboard(
 			network_voice_draw_icon(&icon, network_voice_machine_muted(player->network_player_data.machine_index),
 				alpha);
 		}
+		/* port: the player picked with the controller, lit */
+		if (picking && entry->player_index == scoreboard_pick.player_index)
+		{
+			rectangle2d rectangle;
+			short row_left = (short)(left + column * (SCOREBOARD_COLUMN_WIDTH + SCOREBOARD_COLUMN_GAP));
+
+			scoreboard_rectangle(&rectangle, bounds.x0, top, line_height, row_left, SCOREBOARD_COLUMN_WIDTH,
+				2 + row, 1);
+			draw_quad(&rectangle, ((pixel32)(long)(110 * PIN(alpha, 0.0f, 1.0f)) << 24) | 0x00FFFFFF);
+		}
 		/* port: another machine's player, picked with the pointer: lit
 		under it (not under the menu), and its menu opened when clicked */
 		if (pointer_state > 0 && player->local_player_index == NONE)
@@ -2512,11 +2661,13 @@ static void game_engine_rasterize_scoreboard(
 		}
 		scoreboard_draw_row(row_string, FALSE, &color, next_row++, top, left, FALSE);
 	}
-	if (network && pointer_state >= 0)
+	if (network && (pointer_state >= 0 || picking))
 	{
 		color.alpha = alpha;
 		color.red = color.green = color.blue = 0.6f;
-		if (pointer_state == 0)
+		if (picking && pointer_state <= 0)
+			usprintf(row_string, L"Right stick: pick a player   A: vote to kick");
+		else if (pointer_state == 0)
 			usprintf(row_string, L"Right-click to pick a player");
 		else
 			usprintf(row_string, L"Pick a player   (right-click to aim)");
@@ -3283,6 +3434,17 @@ static boolean multiplayer_message_internal(
 }
 
 
+/* port: whether the player's messages and the announcer's lines for them
+are this machine's: one of its local players, or in a replay's playback the
+player watched (port/linux/game/network_replay_playback.c) */
+static boolean game_engine_player_heard(
+	long player_index,
+	struct player_datum const *player)
+{
+	return player->local_player_index != NONE ||
+		(player_index != NONE && player_index == network_replay_watched_player());
+}
+
 static void multiplayer_message(
 	long player_index,
 	long message,
@@ -3290,7 +3452,7 @@ static void multiplayer_message(
 {
 	struct player_datum *player = player_get(player_index);
 
-	if (player->local_player_index != NONE)
+	if (game_engine_player_heard(player_index, player))
 	{
 		wchar_t buffer[1024];
 
@@ -3302,7 +3464,8 @@ static void multiplayer_message(
 			NUMBEROF(buffer)))
 		{
 			buffer[NUMBEROF(buffer) - 1] = 0;
-			hud_print_message(player->local_player_index, buffer);
+			/* (a replay's: the playback's view is local player 0's) */
+			hud_print_message(player->local_player_index != NONE ? player->local_player_index : 0, buffer);
 		}
 	}
 
@@ -4139,6 +4302,16 @@ static void game_engine_post_rasterize_in_game(
 	game_engine_globals.hud_message_timers[local_player_index] = fade;
 
 	return;
+}
+
+/* port: a replay's playback's scores, with Back held: the full-screen
+scoreboard, the watched player's row as a player's own
+(port/linux/game/network_replay_playback.c) */
+void game_engine_port_rasterize_scores(
+	long player_index)
+{
+	if (game_engine || network_coop_active())
+		game_engine_rasterize_in_game_score(player_index, 1.0f);
 }
 
 long game_engine_player_get_team_index(
@@ -8996,7 +9169,7 @@ static long item_collection_get_total(
 	struct tag_block const *permutations)
 {
 	struct item_permutation_definition const *permutation =
-		(struct item_permutation_definition const *)permutations->address;
+		(struct item_permutation_definition const *)TAG_BLOCK_ADDRESS_AT(permutations);
 	long permutation_count = permutations->count;
 	long result = 0;
 	long permutation_index;
@@ -9024,7 +9197,7 @@ static long random_item(
 		0,
 		(short)item_collection_get_total(permutations));
 	struct item_permutation_definition const *permutation =
-		permutations->address;
+		(struct item_permutation_definition const *)TAG_BLOCK_ADDRESS_AT(permutations);
 	long permutation_index = 0;
 
 	while (permutation_index < permutation_count)
@@ -9499,13 +9672,13 @@ void game_engine_client_respawn_countdown(
 	{
 		return;
 	}
-	if (player->local_player_index != NONE &&
+	if (game_engine_player_heard(player_index, player) &&
 		(player->respawn_timer == 90 || player->respawn_timer == 60 || player->respawn_timer == 30))
 	{
 		game_engine_play_multiplayer_sound(_multiplayer_sound_countdown_for_respawn);
 	}
 	player->respawn_timer--;
-	if (player->local_player_index != NONE && player->respawn_timer == 1)
+	if (game_engine_player_heard(player_index, player) && player->respawn_timer == 1)
 		game_engine_play_multiplayer_sound(_multiplayer_sound_respawn);
 
 	return;

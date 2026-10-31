@@ -1786,7 +1786,7 @@ static void effect_generate_part(
 					temporary,
 					"effect %s has a bad part %s",
 					tag_get_name(effect->definition_index),
-					part_definition->reference.name));
+					TAG_REFERENCE_NAME(part_definition->reference)));
 			break;
 	}
 
@@ -2454,7 +2454,8 @@ static void effect_update(
 				{
 					effect->particle_counts[particle_index] = (byte)(long)
 						(((real)count - MAXIMUM_SPLIT_SCREEN_PARTICLE_COUNT) /
-						local_player_count() +
+						/* port: and a replay's playback, of no local player, as one */
+						MAX(local_player_count(), 1) +
 						MAXIMUM_SPLIT_SCREEN_PARTICLE_COUNT);
 				}
 			}

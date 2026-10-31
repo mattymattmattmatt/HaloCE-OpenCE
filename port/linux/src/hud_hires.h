@@ -52,7 +52,20 @@ struct hud_hires_embedded
 	unsigned int ce_width, ce_height, ce_size, ce_crc;
 	const unsigned int *png;
 	unsigned int png_size;
+	/* where its picture's buttons are right, for a port's own button art drawn twice
+	(tools/button_assets.py platform): HUD_HIRES_CONTEXT_* bits; 0 everywhere */
+	unsigned int contexts;
 };
+
+/* the Switch's menus with the right face button as A (controls.nintendo_menu_buttons), its menus without, a game */
+#define HUD_HIRES_CONTEXT_MENUS_SWAPPED 1u
+#define HUD_HIRES_CONTEXT_MENUS 2u
+#define HUD_HIRES_CONTEXT_GAME 4u
+/* where a port has button art of its own (the Switch's, the PS5's), whose a picture is: the port's, or the Xbox's,
+embedded beside it (display.xbox_buttons chooses); neither, a picture of no port's */
+#define HUD_HIRES_CONTEXT_PLATFORM_ART 8u
+#define HUD_HIRES_CONTEXT_XBOX_ART 16u
+#define HUD_HIRES_CONTEXT_PLACES (HUD_HIRES_CONTEXT_MENUS_SWAPPED | HUD_HIRES_CONTEXT_MENUS | HUD_HIRES_CONTEXT_GAME)
 
 extern const struct hud_hires_embedded hud_hires_embedded[];
 extern const unsigned int hud_hires_embedded_count;
@@ -92,16 +105,39 @@ what was decoded and not drawn let go. The desktop builds' alone: Android
 and the web decode each when it is first drawn */
 void hud_hires_map_loaded(const long *assets, long count);
 void hud_hires_map_unloaded(void);
+#ifdef HALO_SWITCH
+/* the deko3d renderer's (xbox_textures_dk.c): a map's sheets, for the host
+to decode now; and those decoded and not drawn let go */
+void dk_hud_prepare(const long *assets, long count);
+void dk_hud_forget(void);
+#endif
 /* whether its green is its coverage (d3d8_gl.c, nv2a_psh.c: coverage_alpha) */
 int hud_hires_override_coverage(long asset);
 /* the GL texture of the texture drawn for some of a bitmap's sprites whose
 placeholder's D3D texture has this Data, and the number of its mip levels;
 0 if data is no placeholder's */
 unsigned int hud_hires_placeholder_texture(unsigned long data, unsigned long *levels);
+/* the texture drawn for the placeholder whose D3D texture has this Data
+(the gameplay buttons' bitmaps too: hud_hires_tags.c), or -1; for the
+texture caches that make their own images of it (xbox_textures_dk.c,
+xbox_textures_vk.c) */
+long hud_hires_placeholder_asset(unsigned long data);
+/* changes whenever a placeholder is registered or forgotten, for caching
+hud_hires_placeholder_asset's answer */
+unsigned long hud_hires_placeholder_serial(void);
 /* whether its red holds exact segment thresholds, read unfiltered (d3d8_gl.c,
 nv2a_psh.c: point_threshold) */
 int hud_hires_override_point_threshold(long asset);
+/* Android's Vulkan renderer: a map's sheets handed to its host to decode (port/android/guest/xbox_textures_vk.c), and
+those not drawn let go; nothing in the OpenGL ES renderer's image (weak defaults, hud_hires.c) */
+void textures_hud_prepare(const long *assets, long count);
+void textures_hud_forget(void);
 
+#if defined(HALO_SWITCH) || defined(HALO_ANDROID) || defined(HALO_PS5)
+/* the deko3d and Vulkan renderers': an 8-bit RGBA PNG's pixels (malloc'd, red first,
+rows top down) and size; NULL if it could not be decoded */
+unsigned char *hud_hires_png_pixels(const void *png, unsigned long size, unsigned long *width, unsigned long *height);
+#endif
 /* Original HUD sheets lacking redraws, with their tag coordinates unchanged.
  * The cache owns the upscaled texture and invalidates it with the source. */
 long hud_hires_upscale_at(unsigned long address, long width, long height);

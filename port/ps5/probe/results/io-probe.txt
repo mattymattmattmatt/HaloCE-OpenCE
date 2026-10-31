@@ -1,0 +1,581 @@
+io-probe.txt: writing to this file and the kernel log
+system software 13.590.001 (0x13590001)
+
+=== users ===
+sceUserServiceInitialize: 0x00000000
+sceUserServiceGetInitialUser: 0x00000000, user 372994645 (0x163b7255)
+sceUserServiceGetLoginUserIdList: 0x00000000: 372994645 -1 -1 -1
+
+=== audio ===
+sceAudioOutInit: 0x00000000
+16-bit stereo, 440 Hz: sceAudioOutOpen(system user, main, 0, 256, 48000, 1): 0x20000000
+16-bit stereo, 440 Hz: 375 grains of 256 frames in 1.992 s (2.000 s of sound), slowest call 5389 us, 0 errors
+16-bit stereo, 440 Hz: sceAudioOutClose: 0x00000000
+float stereo, 660 Hz: sceAudioOutOpen(system user, main, 0, 256, 48000, 4): 0x20000000
+float stereo, 660 Hz: 375 grains of 256 frames in 1.994 s (2.000 s of sound), slowest call 5392 us, 0 errors
+float stereo, 660 Hz: sceAudioOutClose: 0x00000000
+
+=== pad ===
+scePadInit: 0x00000000
+scePadOpen(user 372994645, standard port, 0): 0x030c0700
+reading for 15 s: press buttons, the triggers and both sticks
+  0.00 s: connected 1 (1 controllers)
+  0.00 s: buttons 0x00000000
+  0.00 s: left 129,122 right 128,122 triggers   0   0, touches 0, time 4553998 us
+  4.00 s: buttons 0x00004000 +cross
+  4.10 s: buttons 0x00000000 -cross
+  4.24 s: left 130,123 right 127,124 triggers   0   0, touches 0, time 8797747 us
+  4.26 s: buttons 0x00000090 +up +left
+  4.33 s: left 130,123 right  94,127 triggers   0   0, touches 0, time 8878997 us
+  4.33 s: left 130,123 right  92,129 triggers   0   0, touches 0, time 8880247 us
+  4.34 s: left 130,123 right  61,156 triggers   0   0, touches 0, time 8890259 us
+  4.35 s: left 130,123 right  57,160 triggers   0   0, touches 0, time 8891500 us
+  4.35 s: left 130,123 right  28,192 triggers   0   0, touches 0, time 8897747 us
+  4.41 s: left 130,123 right  29,224 triggers   0   0, touches 0, time 8958998 us
+  4.42 s: left 130,123 right  35,229 triggers   0   0, touches 0, time 8965251 us
+  4.43 s: buttons 0x00000080 -up
+  4.43 s: left 130,123 right  68,249 triggers   0   0, touches 0, time 8987747 us
+  4.45 s: left 130,123 right  96,255 triggers   0   0, touches 0, time 9000248 us
+  4.47 s: left 130,123 right 128,255 triggers   0   0, touches 0, time 9008997 us
+  4.47 s: left 130,123 right 169,255 triggers   0   0, touches 0, time 9017748 us
+  4.47 s: left 130,123 right 193,247 triggers   0   0, touches 0, time 9022748 us
+  4.49 s: left 130,123 right 229,221 triggers   0   0, touches 0, time 9032883 us
+  4.49 s: buttons 0x000000c0 +down
+  4.52 s: left 130,123 right 250,190 triggers   0   0, touches 0, time 9067759 us
+  4.54 s: buttons 0x000001c0 +L2
+  4.54 s: left 130,123 right 255,170 triggers  39   0, touches 0, time 9082747 us
+  4.54 s: left 130,123 right 255,163 triggers  87   0, touches 0, time 9087882 us
+  4.55 s: left 130,123 right 255,161 triggers  99   0, touches 0, time 9088999 us
+  4.55 s: left 130,123 right 255,154 triggers 138   0, touches 0, time 9094005 us
+  4.57 s: left 130,123 right 255,150 triggers 167   0, touches 0, time 9102749 us
+  4.57 s: left 130,123 right 255,135 triggers 201   0, touches 0, time 9103997 us
+  4.57 s: left 130,123 right 255,124 triggers 221   0, touches 0, time 9107748 us
+  4.57 s: left 130,123 right 255,120 triggers 226   0, touches 0, time 9109132 us
+  4.58 s: left 130,123 right 255, 88 triggers 255   0, touches 0, time 9117748 us
+  4.58 s: buttons 0x00000140 -left
+  4.60 s: left 130,123 right 246, 61 triggers 255   0, touches 0, time 9125385 us
+  4.60 s: left 130,123 right 223, 44 triggers 255   0, touches 0, time 9131625 us
+  4.60 s: left 130,123 right 189, 29 triggers 255   0, touches 0, time 9137754 us
+  4.60 s: buttons 0x00000160 +right
+  4.61 s: left 130,123 right 159, 20 triggers 255   0, touches 0, time 9143998 us
+  4.61 s: left 130,123 right 126, 13 triggers 255   0, touches 0, time 9151501 us
+  4.63 s: left 130,123 right  95,  5 triggers 255   0, touches 0, time 9160248 us
+  4.63 s: left 130,123 right  63,  6 triggers 255   0, touches 0, time 9175255 us
+  4.66 s: left 130,123 right  31, 28 triggers 255   0, touches 0, time 9210257 us
+  4.68 s: left 130,123 right  28, 32 triggers 255   0, touches 0, time 9220248 us
+  4.70 s: buttons 0x00000120 -down
+  4.72 s: left 130,123 right  33, 55 triggers 255   0, touches 0, time 9261506 us
+  4.72 s: left 130,123 right  52, 69 triggers 255   0, touches 0, time 9267748 us
+  4.73 s: left 130,123 right  74, 81 triggers 255   0, touches 0, time 9273997 us
+  4.74 s: left 130,123 right 102, 98 triggers 255   0, touches 0, time 9277747 us
+  4.74 s: left 130,123 right 130,123 triggers 255   0, touches 0, time 9281497 us
+  4.74 s: left 130,123 right 127,120 triggers 255   0, touches 0, time 9289007 us
+  4.76 s: left 130,123 right 128,122 triggers 255   0, touches 0, time 9291513 us
+  4.78 s: buttons 0x00000100 -right
+  4.81 s: left 130,123 right 128,122 triggers 223   0, touches 0, time 9350250 us
+  4.81 s: left 130,123 right 128,122 triggers 191   0, touches 0, time 9353997 us
+  4.81 s: left 130,123 right 128,122 triggers 155   0, touches 0, time 9357759 us
+  4.82 s: left 130,123 right 128,122 triggers 126   0, touches 0, time 9361500 us
+  4.84 s: left 130,123 right 128,122 triggers  89   0, touches 0, time 9365499 us
+  4.84 s: left 130,123 right 128,122 triggers  61   0, touches 0, time 9367761 us
+  4.84 s: left 130,123 right 128,122 triggers  12   0, touches 0, time 9372747 us
+  4.84 s: buttons 0x00000000 -L2
+  4.88 s: buttons 0x00000800 +R1
+  4.91 s: buttons 0x00000a00 +R2
+  4.93 s: left 130,123 right 128,122 triggers   0  36, touches 0, time 9464008 us
+  4.93 s: left 130,123 right 128,122 triggers   0  73, touches 0, time 9467759 us
+  4.93 s: left 130,123 right 128,122 triggers   0 167, touches 0, time 9476498 us
+  4.93 s: left 130,123 right 128,122 triggers   0 203, touches 0, time 9479000 us
+  4.95 s: left 130,123 right 128,122 triggers   0 228, touches 0, time 9481499 us
+  4.95 s: buttons 0x00000200 -R1
+  5.10 s: buttons 0x00000a00 +R1
+  5.10 s: buttons 0x00000b00 +L2
+  5.12 s: buttons 0x00000f00 +L1
+  5.12 s: left 130,123 right 128,122 triggers  44 255, touches 0, time 9652748 us
+  5.12 s: left 130,123 right 128,122 triggers 125 255, touches 0, time 9662748 us
+  5.12 s: left 130,123 right 128,122 triggers 134 255, touches 0, time 9663998 us
+  5.12 s: left 130,123 right 128,122 triggers 169 255, touches 0, time 9667750 us
+  5.14 s: left 130,123 right 128,122 triggers 202 255, touches 0, time 9671497 us
+  5.14 s: left 130,123 right 128,122 triggers 226 255, touches 0, time 9675250 us
+  5.14 s: left 130,123 right 128,122 triggers 255 219, touches 0, time 9682749 us
+  5.15 s: left 130,123 right 128,122 triggers 255 184, touches 0, time 9687767 us
+  5.15 s: left 130,123 right 128,122 triggers 255 151, touches 0, time 9692748 us
+  5.17 s: left 130,123 right 128,122 triggers 255 108, touches 0, time 9697747 us
+  5.17 s: left 130,123 right 128,122 triggers 255  90, touches 0, time 9700250 us
+  5.17 s: left 130,123 right 128,122 triggers 255  62, touches 0, time 9702748 us
+  5.18 s: left 130,123 right 128,122 triggers 255  23, touches 0, time 9707749 us
+  5.18 s: buttons 0x00000d00 -R2
+  5.26 s: buttons 0x00000500 -R1
+  5.30 s: buttons 0x00000700 +R2
+  5.30 s: left 130,123 right 128,122 triggers 255  32, touches 0, time 9837757 us
+  5.30 s: left 130,123 right 128,122 triggers 255  86, touches 0, time 9847758 us
+  5.30 s: left 130,123 right 128,122 triggers 255 170, touches 0, time 9850249 us
+  5.32 s: left 130,123 right 128,122 triggers 255 203, touches 0, time 9852750 us
+  5.32 s: left 130,123 right 128,122 triggers 255 225, touches 0, time 9855259 us
+  5.37 s: left 130,123 right 128,122 triggers 221 255, touches 0, time 9920250 us
+  5.39 s: left 130,123 right 128,122 triggers 178 255, touches 0, time 9929009 us
+  5.39 s: buttons 0x00000f00 +R1
+  5.39 s: left 130,123 right 128,122 triggers 158 255, touches 0, time 9932752 us
+  5.41 s: left 130,123 right 128,122 triggers 113 255, touches 0, time 9944006 us
+  5.41 s: left 130,123 right 128,122 triggers  93 255, touches 0, time 9947748 us
+  5.41 s: left 130,123 right 128,122 triggers  57 255, touches 0, time 9959001 us
+  5.43 s: left 130,123 right 128,122 triggers  17 255, touches 0, time 9967748 us
+  5.43 s: buttons 0x00000e00 -L2
+  5.45 s: left 130,123 right 128,122 triggers   0 219, touches 0, time 9997757 us
+  5.46 s: left 130,123 right 128,122 triggers   0 190, touches 0, time 10002748 us
+  5.46 s: left 130,123 right 128,122 triggers   0 151, touches 0, time 10008997 us
+  5.47 s: left 130,123 right 128,122 triggers   0 121, touches 0, time 10012751 us
+  5.47 s: left 130,123 right 128,122 triggers   0  85, touches 0, time 10017748 us
+  5.49 s: left 130,123 right 128,122 triggers   0  59, touches 0, time 10021498 us
+  5.49 s: left 130,123 right 128,122 triggers   0  11, touches 0, time 10033999 us
+  5.49 s: buttons 0x00000c00 -R2
+  5.51 s: buttons 0x00000800 -L1
+  5.53 s: buttons 0x00000000 -R1
+  5.56 s: buttons 0x00000040 +down
+  5.56 s: buttons 0x00004040 +cross
+  5.58 s: buttons 0x00004140 +L2
+  5.58 s: buttons 0x00004040 -L2
+  5.61 s: buttons 0x0000c040 +square
+  5.63 s: buttons 0x0000c060 +right
+  5.69 s: buttons 0x0000c260 +R2
+  5.73 s: left 130,123 right 128,122 triggers   0  34, touches 0, time 10267748 us
+  5.74 s: left 130,123 right 128,122 triggers   0  64, touches 0, time 10292749 us
+  5.78 s: buttons 0x0000ca60 +R1
+  5.81 s: left 130,123 right 128,122 triggers   0  96, touches 0, time 10360258 us
+  5.81 s: buttons 0x00004a60 -square
+  5.83 s: left 130,123 right 128,122 triggers   0 128, touches 0, time 10381508 us
+  5.85 s: left 130,123 right 128,122 triggers   0 161, touches 0, time 10392749 us
+  5.85 s: buttons 0x00004a20 -down
+  5.85 s: buttons 0x00000a20 -cross
+  5.86 s: left 130,123 right 128,122 triggers   0 194, touches 0, time 10400251 us
+  5.86 s: buttons 0x00000a00 -right
+  5.87 s: buttons 0x00000a10 +up
+  5.87 s: buttons 0x00000a90 +left
+  5.87 s: left 130,123 right 128,122 triggers   0 225, touches 0, time 10411502 us
+  5.92 s: buttons 0x00002a90 +circle
+  5.92 s: buttons 0x00002290 -R1
+  5.97 s: left 130,123 right 128,122 triggers   0 223, touches 0, time 10515265 us
+  5.99 s: left 130,123 right 128,122 triggers   0 191, touches 0, time 10531497 us
+  5.99 s: buttons 0x00003290 +triangle
+  6.00 s: left 130,123 right 128,122 triggers   0 156, touches 0, time 10543999 us
+  6.00 s: left 130,123 right 128,122 triggers   0 123, touches 0, time 10552758 us
+  6.02 s: left 130,123 right 128,122 triggers   0  91, touches 0, time 10567748 us
+  6.04 s: left 130,123 right 128,122 triggers   0  60, touches 0, time 10576498 us
+  6.04 s: left 130,123 right 128,122 triggers   0  24, touches 0, time 10582750 us
+  6.06 s: buttons 0x00003090 -R2
+  6.06 s: buttons 0x00003010 -left
+  6.06 s: buttons 0x00001010 -circle
+  6.08 s: buttons 0x00001030 +right
+  6.08 s: buttons 0x00001020 -up
+  6.13 s: buttons 0x00000020 -triangle
+  6.13 s: buttons 0x00000060 +down
+  6.22 s: buttons 0x00008060 +square
+  6.35 s: buttons 0x00000060 -square
+  6.37 s: buttons 0x00000040 -right
+  6.39 s: buttons 0x000000c0 +left
+  6.39 s: buttons 0x00000080 -down
+  6.42 s: buttons 0x00000090 +up
+  6.44 s: buttons 0x00000080 -up
+  6.49 s: buttons 0x00000000 -left
+  6.52 s: left 130,123 right 127,122 triggers   0   0, touches 0, time 11064009 us
+  6.56 s: left 130,123 right 124,128 triggers   0   0, touches 0, time 11098997 us
+  6.58 s: buttons 0x00000200 +R2
+  6.59 s: buttons 0x00000204 +R3
+  6.61 s: left 130,123 right 128,141 triggers   0  27, touches 0, time 11152749 us
+  6.61 s: left 130,123 right 130,141 triggers   0  32, touches 0, time 11158999 us
+  6.69 s: left 127,122 right 139,145 triggers   0  42, touches 0, time 11241499 us
+  6.73 s: buttons 0x00000200 -R3
+  6.74 s: left 128,114 right 134,143 triggers   0  43, touches 0, time 11288998 us
+  6.76 s: left 130,119 right 127,130 triggers   0  45, touches 0, time 11307750 us
+  6.76 s: buttons 0x00000202 +L3
+  6.76 s: left 130,119 right 127,127 triggers   0  46, touches 0, time 11311498 us
+  6.80 s: left 130,128 right 124,122 triggers   0  49, touches 0, time 11340251 us
+  6.80 s: left 130,128 right 128,122 triggers   0  50, touches 0, time 11347762 us
+  6.81 s: left 130,127 right 128,122 triggers   0  52, touches 0, time 11367747 us
+  6.86 s: left 127,121 right 128,122 triggers   0  55, touches 0, time 11402747 us
+  6.88 s: left 124,119 right 127,122 triggers   0  57, touches 0, time 11422748 us
+  6.91 s: left 120,119 right 119,123 triggers   0  64, touches 0, time 11454002 us
+  6.93 s: buttons 0x00000200 -L3
+  6.93 s: left 110,129 right 117,126 triggers   0  67, touches 0, time 11482747 us
+  6.95 s: left 103,135 right 116,128 triggers   0  67, touches 0, time 11495248 us
+  6.98 s: left 107,158 right  85,149 triggers   0  66, touches 0, time 11525248 us
+  6.98 s: left 108,160 right  78,154 triggers   0  66, touches 0, time 11528997 us
+  6.99 s: left 109,161 right  70,160 triggers   0  67, touches 0, time 11532748 us
+  7.00 s: left 109,162 right  59,169 triggers   0  67, touches 0, time 11537748 us
+  7.01 s: left 111,156 right  53,175 triggers   0  67, touches 0, time 11541508 us
+  7.01 s: left 123,133 right  30,192 triggers   0  67, touches 0, time 11549249 us
+  7.01 s: left 126,127 right  17,198 triggers   0  67, touches 0, time 11552765 us
+  7.06 s: left 127,128 right  13,198 triggers   0  69, touches 0, time 11613997 us
+  7.08 s: left 128,130 right  15,205 triggers   0  68, touches 0, time 11622998 us
+  7.10 s: left 132,139 right  28,222 triggers   0  63, touches 0, time 11640395 us
+  7.10 s: left 134,141 right  31,225 triggers   0  63, touches 0, time 11642750 us
+  7.10 s: left 135,142 right  32,226 triggers   0  62, touches 0, time 11643998 us
+  7.12 s: left 153,161 right  57,244 triggers   0  58, touches 0, time 11657748 us
+  7.12 s: left 160,169 right  67,249 triggers   0  56, touches 0, time 11662748 us
+  7.14 s: left 185,193 right 105,255 triggers   0  53, touches 0, time 11677747 us
+  7.14 s: left 194,201 right 118,255 triggers   0  52, touches 0, time 11682896 us
+  7.14 s: left 202,207 right 132,255 triggers   0  50, touches 0, time 11687753 us
+  7.16 s: left 216,218 right 162,255 triggers   0  49, touches 0, time 11697999 us
+  7.16 s: left 222,222 right 201,243 triggers   0  46, touches 0, time 11712753 us
+  7.18 s: left 224,221 right 222,230 triggers   0  44, touches 0, time 11727747 us
+  7.18 s: left 224,221 right 224,228 triggers   0  43, touches 0, time 11730260 us
+  7.20 s: left 225,220 right 231,222 triggers   0  42, touches 0, time 11737748 us
+  7.23 s: left 231,214 right 250,191 triggers   0  41, touches 0, time 11779000 us
+  7.25 s: left 238,204 right 255,157 triggers   0  43, touches 0, time 11794000 us
+  7.26 s: left 245,194 right 252,123 triggers   0  44, touches 0, time 11802748 us
+  7.27 s: left 247,188 right 235,104 triggers   0  44, touches 0, time 11807747 us
+  7.27 s: left 248,185 right 218, 94 triggers   0  45, touches 0, time 11811497 us
+  7.27 s: left 251,177 right 177, 80 triggers   0  47, touches 0, time 11817748 us
+  7.29 s: left 253,173 right 158, 75 triggers   0  47, touches 0, time 11821645 us
+  7.29 s: left 255,165 right 124, 66 triggers   0  50, touches 0, time 11827748 us
+  7.29 s: left 255,163 right 118, 62 triggers   0  51, touches 0, time 11830254 us
+  7.30 s: left 255,158 right 106, 54 triggers   0  52, touches 0, time 11833998 us
+  7.30 s: left 255,154 right  95, 43 triggers   0  53, touches 0, time 11837751 us
+  7.30 s: left 255,149 right  81, 26 triggers   0  54, touches 0, time 11842896 us
+  7.32 s: left 255,141 right  63,  7 triggers   0  56, touches 0, time 11852751 us
+  7.32 s: left 255,124 right  51, 12 triggers   0  60, touches 0, time 11870249 us
+  7.36 s: left 255, 84 right  45, 17 triggers   0  61, touches 0, time 11898998 us
+  7.37 s: left 251, 61 right  40, 21 triggers   0  60, touches 0, time 11912748 us
+  7.38 s: buttons 0x00000a00 +R1
+  7.39 s: left 235, 36 right  31, 30 triggers   0  59, touches 0, time 11929010 us
+  7.39 s: left 233, 34 right  29, 32 triggers   0  59, touches 0, time 11931502 us
+  7.39 s: buttons 0x00000e00 +L1
+  7.39 s: left 231, 31 right  28, 34 triggers   0  58, touches 0, time 11932748 us
+  7.40 s: left 222, 23 right  23, 41 triggers   0  58, touches 0, time 11939145 us
+  7.42 s: left 190,  3 right  16, 49 triggers   0  46, touches 0, time 11965248 us
+  7.44 s: left 165,  0 right  17, 47 triggers   0  31, touches 0, time 11985498 us
+  7.45 s: left 159,  0 right  18, 46 triggers   0  27, touches 0, time 11991652 us
+  7.47 s: left 127,  0 right  19, 45 triggers   0  13, touches 0, time 12021502 us
+  7.49 s: buttons 0x00000f00 +L2
+  7.49 s: left 116,  0 right  21, 45 triggers  32  12, touches 0, time 12040247 us
+  7.51 s: buttons 0x00000700 -R1
+  7.52 s: left 113,  0 right  32, 51 triggers  53  17, touches 0, time 12062748 us
+  7.54 s: left 113,  0 right  40, 52 triggers  55  32, touches 0, time 12082750 us
+  7.54 s: buttons 0x00000300 -L1
+  7.56 s: left 109,  0 right  54, 52 triggers  45  65, touches 0, time 12098998 us
+  7.57 s: left 101,  0 right  62, 46 triggers  37  98, touches 0, time 12119251 us
+  7.59 s: left  95,  0 right  63, 45 triggers  39 121, touches 0, time 12132748 us
+  7.59 s: left  95,  0 right  63, 44 triggers  40 133, touches 0, time 12137999 us
+  7.61 s: left  95,  8 right  63, 42 triggers  41 162, touches 0, time 12150251 us
+  7.61 s: left  95, 16 right  62, 32 triggers  39 193, touches 0, time 12162897 us
+  7.61 s: left  95, 17 right  61, 31 triggers  39 195, touches 0, time 12163998 us
+  7.63 s: left  96, 20 right  60, 28 triggers  37 204, touches 0, time 12169001 us
+  7.63 s: left  96, 31 right  57, 26 triggers  30 216, touches 0, time 12178997 us
+  7.63 s: left  98, 36 right  57, 26 triggers  27 219, touches 0, time 12180248 us
+  7.65 s: buttons 0x00000b00 +R1
+  7.65 s: left 108, 60 right  55, 24 triggers  15 226, touches 0, time 12187998 us
+  7.66 s: left 113, 69 right  54, 22 triggers  12 225, touches 0, time 12190265 us
+  7.66 s: left 124,101 right  52, 20 triggers   4 225, touches 0, time 12193997 us
+  7.66 s: buttons 0x00000a00 -L2
+  7.66 s: left 128,123 right  49, 17 triggers   0 224, touches 0, time 12197747 us
+  7.67 s: left 127,122 right  48, 16 triggers   0 223, touches 0, time 12201498 us
+  7.69 s: left 126,122 right  44, 17 triggers   0 191, touches 0, time 12225250 us
+  7.69 s: buttons 0x00000b00 +L2
+  7.69 s: left 126,122 right  42, 18 triggers  10 158, touches 0, time 12236499 us
+  7.71 s: left 126,121 right  39, 21 triggers  35 128, touches 0, time 12245252 us
+  7.71 s: left 126,121 right  38, 22 triggers  46 117, touches 0, time 12247894 us
+  7.71 s: left 126,120 right  37, 23 triggers  67  95, touches 0, time 12253999 us
+  7.73 s: left 126,120 right  36, 23 triggers  97  64, touches 0, time 12261500 us
+  7.73 s: left 126,119 right  36, 23 triggers 105  59, touches 0, time 12262748 us
+  7.73 s: left 125,119 right  36, 24 triggers 141  46, touches 0, time 12271497 us
+  7.73 s: left 125,119 right  36, 24 triggers 162  47, touches 0, time 12275498 us
+  7.75 s: left 125,119 right  36, 24 triggers 197  61, touches 0, time 12284002 us
+  7.75 s: left 125,119 right  36, 24 triggers 206  68, touches 0, time 12285248 us
+  7.76 s: left 125,118 right  36, 24 triggers 225  87, touches 0, time 12289000 us
+  7.76 s: left 125,118 right  36, 24 triggers 233  96, touches 0, time 12291748 us
+  7.76 s: left 125,118 right  36, 24 triggers 255 135, touches 0, time 12297747 us
+  7.77 s: buttons 0x00000300 -R1
+  7.77 s: left 125,118 right  37, 24 triggers 255 165, touches 0, time 12303997 us
+  7.79 s: left 125,118 right  39, 24 triggers 255 199, touches 0, time 12312750 us
+  7.79 s: left 126,118 right  41, 23 triggers 255 225, touches 0, time 12321499 us
+  7.82 s: left 128,118 right  47, 17 triggers 255 255, touches 0, time 12368999 us
+  7.86 s: left 128,119 right  64, 10 triggers 255 255, touches 0, time 12397895 us
+  7.86 s: left 128,119 right 106, 63 triggers 255 255, touches 0, time 12408997 us
+  7.87 s: left 128,119 right 113, 83 triggers 255 255, touches 0, time 12412748 us
+  7.88 s: left 128,119 right 138,152 triggers 255 255, touches 0, time 12413997 us
+  7.88 s: left 128,119 right 126,111 triggers 255 255, touches 0, time 12417750 us
+  7.88 s: left 128,120 right 129,129 triggers 255 255, touches 0, time 12421498 us
+  7.88 s: left 128,120 right 129,124 triggers 255 255, touches 0, time 12422748 us
+  7.90 s: left 128,121 right 128,123 triggers 255 222, touches 0, time 12435249 us
+  7.90 s: left 128,121 right 128,122 triggers 255 191, touches 0, time 12442747 us
+  7.91 s: left 128,121 right 128,123 triggers 255 155, touches 0, time 12455248 us
+  7.91 s: left 128,121 right 128,123 triggers 255 103, touches 0, time 12457747 us
+  7.93 s: left 128,121 right 128,122 triggers 255  91, touches 0, time 12460500 us
+  7.93 s: left 128,121 right 128,122 triggers 255  61, touches 0, time 12463998 us
+  7.93 s: left 128,121 right 128,123 triggers 255  29, touches 0, time 12468999 us
+  7.94 s: buttons 0x00000100 -R2
+  8.00 s: left 128,121 right 128,123 triggers 220   0, touches 0, time 12548997 us
+  8.00 s: left 128,121 right 128,123 triggers 189   0, touches 0, time 12555250 us
+  8.02 s: left 128,121 right 128,122 triggers 155   0, touches 0, time 12559254 us
+  8.02 s: left 128,121 right 128,123 triggers 105   0, touches 0, time 12562747 us
+  8.02 s: left 128,121 right 128,122 triggers  77   0, touches 0, time 12563999 us
+  8.03 s: left 128,121 right 128,122 triggers  39   0, touches 0, time 12565249 us
+  8.03 s: buttons 0x00000000 -L2
+  8.03 s: left 128,121 right 128,122 triggers   0   0, touches 0, time 12567895 us
+  8.40 s: buttons 0x00000008 +options
+  8.52 s: buttons 0x00000000 -options
+  8.68 s: buttons 0x80000000 +intercepted by the system
+  8.68 s: left 128,128 right 128,128 triggers   0   0, touches 0, time 13225250 us
+  9.79 s: buttons 0x00000000 -intercepted by the system
+  9.79 s: left 129,122 right 128,121 triggers   0   0, touches 0, time 14342748 us
+ 10.07 s: buttons 0x00000800 +R1
+ 10.15 s: buttons 0x00000a00 +R2
+ 10.15 s: left 129,121 right 128,121 triggers   0  61, touches 0, time 14698998 us
+ 10.15 s: buttons 0x00000200 -R1
+ 10.15 s: left 129,121 right 128,121 triggers   0  73, touches 0, time 14700259 us
+ 10.16 s: left 129,122 right 128,121 triggers   0 106, touches 0, time 14702750 us
+ 10.18 s: left 129,122 right 128,121 triggers   0 128, touches 0, time 14705255 us
+ 10.18 s: left 129,122 right 128,121 triggers   0 160, touches 0, time 14708999 us
+ 10.18 s: left 129,122 right 128,121 triggers   0 206, touches 0, time 14714003 us
+ 10.18 s: left 129,121 right 128,121 triggers   0 242, touches 0, time 14717748 us
+ 10.22 s: buttons 0x00000600 +L1
+ 10.25 s: buttons 0x00000e00 +R1
+ 10.28 s: left 129,121 right 128,121 triggers   0 223, touches 0, time 14825248 us
+ 10.28 s: buttons 0x00000f00 +L2
+ 10.29 s: left 129,121 right 128,121 triggers  33 195, touches 0, time 14831497 us
+ 10.29 s: left 129,122 right 128,121 triggers  51 187, touches 0, time 14832748 us
+ 10.29 s: left 129,121 right 128,121 triggers  67 179, touches 0, time 14835499 us
+ 10.31 s: left 129,121 right 128,121 triggers 104 156, touches 0, time 14839249 us
+ 10.31 s: left 129,122 right 128,121 triggers 135 135, touches 0, time 14842748 us
+ 10.31 s: left 129,121 right 128,121 triggers 151 126, touches 0, time 14845248 us
+ 10.32 s: left 128,122 right 128,121 triggers 176 115, touches 0, time 14847749 us
+ 10.32 s: left 129,121 right 128,121 triggers 192 107, touches 0, time 14850405 us
+ 10.32 s: left 129,121 right 128,121 triggers 216  94, touches 0, time 14852750 us
+ 10.33 s: left 129,121 right 128,121 triggers 229  89, touches 0, time 14855249 us
+ 10.33 s: left 129,122 right 128,121 triggers 255  63, touches 0, time 14861645 us
+ 10.35 s: left 129,121 right 128,121 triggers 255  29, touches 0, time 14870260 us
+ 10.35 s: buttons 0x00000d00 -R2
+ 10.37 s: buttons 0x00000500 -R1
+ 10.39 s: buttons 0x00000700 +R2
+ 10.39 s: left 129,121 right 128,121 triggers 255  36, touches 0, time 14931501 us
+ 10.39 s: left 129,121 right 128,121 triggers 255  66, touches 0, time 14934000 us
+ 10.39 s: left 129,121 right 128,121 triggers 255 107, touches 0, time 14937748 us
+ 10.41 s: left 129,121 right 128,121 triggers 255 128, touches 0, time 14940249 us
+ 10.41 s: left 129,121 right 128,121 triggers 255 166, touches 0, time 14943998 us
+ 10.41 s: left 129,121 right 128,121 triggers 255 199, touches 0, time 14947749 us
+ 10.41 s: left 129,122 right 128,121 triggers 255 242, touches 0, time 14952748 us
+ 10.47 s: left 129,121 right 128,121 triggers 216 255, touches 0, time 15011498 us
+ 10.47 s: buttons 0x00000f00 +R1
+ 10.47 s: left 129,122 right 128,121 triggers 187 255, touches 0, time 15015248 us
+ 10.47 s: left 129,121 right 128,121 triggers 158 255, touches 0, time 15018998 us
+ 10.49 s: left 129,122 right 128,121 triggers 122 255, touches 0, time 15022749 us
+ 10.49 s: left 129,122 right 128,121 triggers  75 255, touches 0, time 15027749 us
+ 10.49 s: left 129,121 right 128,121 triggers  62 255, touches 0, time 15028998 us
+ 10.50 s: left 129,122 right 128,121 triggers  19 255, touches 0, time 15032748 us
+ 10.50 s: buttons 0x00000e00 -L2
+ 10.50 s: buttons 0x00000a00 -L1
+ 10.52 s: left 128,122 right 128,121 triggers   0 203, touches 0, time 15064145 us
+ 10.52 s: left 129,121 right 128,121 triggers   0 183, touches 0, time 15067748 us
+ 10.52 s: left 129,121 right 128,121 triggers   0 152, touches 0, time 15072749 us
+ 10.54 s: left 129,122 right 128,121 triggers   0 117, touches 0, time 15077748 us
+ 10.54 s: left 129,122 right 128,121 triggers   0  95, touches 0, time 15081748 us
+ 10.54 s: left 129,121 right 128,121 triggers   0  44, touches 0, time 15087998 us
+ 10.55 s: left 129,122 right 128,121 triggers   0  27, touches 0, time 15092748 us
+ 10.57 s: buttons 0x00000800 -R2
+ 10.58 s: buttons 0x00000000 -R1
+ 10.63 s: buttons 0x00000100 +L2
+ 10.63 s: left 129,121 right 128,121 triggers  39   0, touches 0, time 15177748 us
+ 10.63 s: left 129,121 right 128,121 triggers  71   0, touches 0, time 15181645 us
+ 10.64 s: left 129,121 right 128,121 triggers 106   0, touches 0, time 15183998 us
+ 10.66 s: left 129,121 right 128,121 triggers 151   0, touches 0, time 15187748 us
+ 10.66 s: left 129,122 right 128,121 triggers 163   0, touches 0, time 15189010 us
+ 10.66 s: left 129,122 right 128,121 triggers 217   0, touches 0, time 15192748 us
+ 10.66 s: left 129,121 right 128,121 triggers 229   0, touches 0, time 15195249 us
+ 10.67 s: buttons 0x00000300 +R2
+ 10.68 s: buttons 0x00004300 +cross
+ 10.68 s: left 129,121 right 128,121 triggers 255  52, touches 0, time 15212749 us
+ 10.69 s: left 129,121 right 128,121 triggers 255  74, touches 0, time 15215248 us
+ 10.69 s: left 129,121 right 128,121 triggers 255 108, touches 0, time 15217749 us
+ 10.70 s: left 129,121 right 128,121 triggers 255 133, touches 0, time 15220249 us
+ 10.70 s: left 129,121 right 128,121 triggers 255 166, touches 0, time 15222749 us
+ 10.70 s: left 129,122 right 128,121 triggers 255 215, touches 0, time 15227748 us
+ 10.71 s: left 129,122 right 128,121 triggers 255 224, touches 0, time 15229000 us
+ 10.79 s: left 129,121 right 128,121 triggers 255 220, touches 0, time 15332748 us
+ 10.79 s: left 129,121 right 128,121 triggers 255 191, touches 0, time 15338999 us
+ 10.80 s: buttons 0x00000300 -cross
+ 10.80 s: left 129,122 right 128,121 triggers 255 158, touches 0, time 15345251 us
+ 10.82 s: left 129,121 right 128,121 triggers 255 126, touches 0, time 15351653 us
+ 10.82 s: left 129,121 right 128,121 triggers 255  94, touches 0, time 15355254 us
+ 10.82 s: left 129,121 right 128,121 triggers 255  60, touches 0, time 15360261 us
+ 10.82 s: left 129,121 right 128,121 triggers 255  28, touches 0, time 15365247 us
+ 10.84 s: buttons 0x00000100 -R2
+ 10.84 s: left 129,121 right 128,121 triggers 219   0, touches 0, time 15375249 us
+ 10.84 s: left 129,122 right 128,121 triggers 183   0, touches 0, time 15382748 us
+ 10.85 s: left 129,122 right 128,121 triggers 153   0, touches 0, time 15388998 us
+ 10.85 s: left 129,122 right 128,121 triggers 124   0, touches 0, time 15393998 us
+ 10.87 s: left 129,122 right 128,121 triggers  95   0, touches 0, time 15400249 us
+ 10.87 s: left 129,121 right 128,121 triggers  62   0, touches 0, time 15407748 us
+ 10.89 s: left 129,122 right 128,121 triggers  30   0, touches 0, time 15423999 us
+ 10.89 s: buttons 0x00004100 +cross
+ 10.89 s: buttons 0x00004000 -L2
+ 10.99 s: buttons 0x00004020 +right
+ 11.02 s: buttons 0x00000020 -cross
+ 11.06 s: buttons 0x00000030 +up
+ 11.07 s: buttons 0x00000010 -right
+ 11.09 s: buttons 0x00000090 +left
+ 11.14 s: buttons 0x00000080 -up
+ 11.19 s: buttons 0x00002080 +circle
+ 11.21 s: buttons 0x00002280 +R2
+ 11.21 s: left 128,122 right 128,121 triggers   0  32, touches 0, time 15757875 us
+ 11.22 s: left 129,121 right 128,121 triggers   0  67, touches 0, time 15765253 us
+ 11.22 s: buttons 0x000022c0 +down
+ 11.22 s: left 129,121 right 128,121 triggers   0 105, touches 0, time 15771500 us
+ 11.24 s: left 129,121 right 128,121 triggers   0 151, touches 0, time 15777763 us
+ 11.24 s: left 129,122 right 128,121 triggers   0 160, touches 0, time 15780256 us
+ 11.26 s: left 129,122 right 128,121 triggers   0 193, touches 0, time 15807749 us
+ 11.31 s: left 129,122 right 128,121 triggers   0 224, touches 0, time 15856500 us
+ 11.33 s: buttons 0x00002240 -left
+ 11.36 s: buttons 0x00002260 +right
+ 11.46 s: buttons 0x00000260 -circle
+ 11.46 s: buttons 0x00004260 +cross
+ 11.48 s: buttons 0x0000c260 +square
+ 11.53 s: buttons 0x0000c220 -down
+ 11.56 s: buttons 0x0000c200 -right
+ 11.59 s: buttons 0x00004200 -square
+ 11.59 s: left 129,121 right 128,121 triggers   0 222, touches 0, time 16141647 us
+ 11.61 s: buttons 0x00000200 -cross
+ 11.61 s: left 129,122 right 128,121 triggers   0 189, touches 0, time 16154008 us
+ 11.61 s: left 129,122 right 128,121 triggers   0 158, touches 0, time 16162910 us
+ 11.63 s: left 129,121 right 128,121 triggers   0 122, touches 0, time 16172749 us
+ 11.63 s: left 129,121 right 128,121 triggers   0  89, touches 0, time 16182749 us
+ 11.65 s: left 129,121 right 128,121 triggers   0  61, touches 0, time 16190262 us
+ 11.65 s: left 129,121 right 128,121 triggers   0  30, touches 0, time 16200248 us
+ 11.67 s: buttons 0x00000000 -R2
+ 11.83 s: buttons 0x00002000 +circle
+ 11.89 s: buttons 0x00000000 -circle
+ 11.93 s: buttons 0x00002000 +circle
+ 12.04 s: buttons 0x00000000 -circle
+ 12.17 s: buttons 0x00000080 +left
+ 12.20 s: buttons 0x00002080 +circle
+ 12.30 s: buttons 0x00000080 -circle
+ 12.37 s: buttons 0x00000000 -left
+ 13.53 s: left 129,122 right 127,121 triggers   0   0, touches 0, time 18074005 us
+ 13.63 s: left 132,121 right  95,129 triggers   0   0, touches 0, time 18172768 us
+ 13.64 s: left 133,121 right  55,150 triggers   0   0, touches 0, time 18187754 us
+ 13.64 s: left 133,120 right  33,163 triggers   0   0, touches 0, time 18192759 us
+ 13.65 s: left 133,120 right  30,166 triggers   0   0, touches 0, time 18194008 us
+ 13.71 s: left 160,115 right   7,182 triggers   0   0, touches 0, time 18252768 us
+ 13.75 s: left 194,111 right   5,179 triggers   0   0, touches 0, time 18288001 us
+ 13.76 s: left 216,105 right   1,159 triggers   0   0, touches 0, time 18314008 us
+ 13.78 s: left 224,103 right  11,132 triggers   0   0, touches 0, time 18327896 us
+ 13.78 s: left 225,103 right  19,126 triggers   0   0, touches 0, time 18330373 us
+ 13.78 s: left 225,103 right  34,119 triggers   0   0, touches 0, time 18332758 us
+ 13.80 s: left 226,102 right  80,117 triggers   0   0, touches 0, time 18337758 us
+ 13.80 s: left 226,102 right 116,118 triggers   0   0, touches 0, time 18340259 us
+ 13.81 s: left 226,102 right 137,120 triggers   0   0, touches 0, time 18341508 us
+ 13.81 s: left 226,101 right 122,123 triggers   0   0, touches 0, time 18348000 us
+ 13.81 s: left 226,101 right 129,123 triggers   0   0, touches 0, time 18349145 us
+ 13.82 s: left 226, 99 right 127,123 triggers   0   0, touches 0, time 18352770 us
+ 13.82 s: left 226, 98 right 128,123 triggers   0   0, touches 0, time 18355499 us
+ 13.84 s: left 226, 95 right 128,123 triggers   0   0, touches 0, time 18360257 us
+ 13.84 s: left 223, 94 right 128,123 triggers   0   0, touches 0, time 18379008 us
+ 13.84 s: left 174, 94 right 128,123 triggers   0   0, touches 0, time 18387758 us
+ 13.85 s: left 158, 97 right 128,123 triggers   0   0, touches 0, time 18390264 us
+ 13.86 s: left 126,120 right 128,123 triggers   0   0, touches 0, time 18394011 us
+ 13.87 s: left 130,122 right 128,123 triggers   0   0, touches 0, time 18397999 us
+ 13.87 s: left 130,122 right 127,123 triggers   0   0, touches 0, time 18399008 us
+ 13.94 s: left 129,122 right 128,125 triggers   0   0, touches 0, time 18480261 us
+ 14.00 s: left 135,122 right 127,126 triggers   0   0, touches 0, time 18552873 us
+ 14.03 s: left 135,123 right 127,128 triggers   0   0, touches 0, time 18572873 us
+ 14.03 s: buttons 0x00000004 +R3
+ 14.04 s: left 135,122 right 128,128 triggers   0   0, touches 0, time 18581625 us
+ 14.10 s: buttons 0x00000006 +L3
+ 14.15 s: left 139,105 right 127,128 triggers   0   0, touches 0, time 18689126 us
+ 14.23 s: left 135,110 right 128,132 triggers   0   0, touches 0, time 18777874 us
+ 14.23 s: buttons 0x00000002 -R3
+ 14.25 s: left 135,113 right 131,126 triggers   0   0, touches 0, time 18790264 us
+ 14.25 s: buttons 0x00000000 -L3
+ 14.27 s: left 127,116 right 131,121 triggers   0   0, touches 0, time 18819152 us
+ 14.58 s: left 128,121 right 129,122 triggers   0   0, touches 0, time 19119015 us
+ 14.58 s: left 127,121 right 129,122 triggers   0   0, touches 0, time 19120264 us
+ 14.58 s: left 128,121 right 129,121 triggers   0   0, touches 0, time 19125254 us
+ 14.58 s: left 127,121 right 129,121 triggers   0   0, touches 0, time 19127897 us
+ 14.63 s: left 128,121 right 129,122 triggers   0   0, touches 0, time 19181623 us
+ 14.63 s: left 127,121 right 129,121 triggers   0   0, touches 0, time 19182765 us
+ 14.65 s: left 128,121 right 129,121 triggers   0   0, touches 0, time 19204023 us
+ 14.67 s: left 127,121 right 129,122 triggers   0   0, touches 0, time 19206519 us
+ 14.69 s: left 128,121 right 129,122 triggers   0   0, touches 0, time 19230373 us
+ 14.69 s: left 127,121 right 129,122 triggers   0   0, touches 0, time 19232764 us
+ 14.70 s: left 128,121 right 129,121 triggers   0   0, touches 0, time 19241516 us
+ 14.71 s: left 127,121 right 129,122 triggers   0   0, touches 0, time 19242765 us
+ 14.71 s: left 128,121 right 129,122 triggers   0   0, touches 0, time 19250376 us
+ 14.71 s: left 127,121 right 129,122 triggers   0   0, touches 1, time 19251624 us
+ 14.71 s: left 128,121 right 129,122 triggers   0   0, touches 1, time 19256514 us
+ 14.73 s: left 127,121 right 129,121 triggers   0   0, touches 1, time 19260267 us
+ 14.73 s: left 128,121 right 129,121 triggers   0   0, touches 0, time 19272765 us
+ 14.74 s: left 127,121 right 129,122 triggers   0   0, touches 0, time 19274014 us
+ 14.74 s: left 128,121 right 129,122 triggers   0   0, touches 0, time 19275257 us
+ 14.74 s: left 127,121 right 129,122 triggers   0   0, touches 0, time 19279018 us
+ 14.75 s: left 128,121 right 129,121 triggers   0   0, touches 0, time 19284014 us
+ 14.75 s: left 127,121 right 129,122 triggers   0   0, touches 0, time 19285254 us
+ 14.77 s: left 128,121 right 129,122 triggers   0   0, touches 0, time 19294251 us
+ 14.77 s: left 127,121 right 129,122 triggers   0   0, touches 0, time 19295374 us
+ 14.77 s: left 128,121 right 129,121 triggers   0   0, touches 0, time 19299125 us
+ 14.78 s: left 127,121 right 129,122 triggers   0   0, touches 0, time 19300376 us
+ 14.78 s: left 128,121 right 129,121 triggers   0   0, touches 0, time 19310373 us
+ 14.78 s: left 127,121 right 129,121 triggers   0   0, touches 0, time 19312765 us
+ 14.79 s: left 128,121 right 129,121 triggers   0   0, touches 0, time 19317762 us
+ 14.79 s: left 127,121 right 129,122 triggers   0   0, touches 0, time 19319146 us
+ 14.81 s: left 128,121 right 129,121 triggers   0   0, touches 0, time 19327998 us
+ 14.81 s: left 127,121 right 129,122 triggers   0   0, touches 0, time 19329125 us
+ 14.83 s: left 128,121 right 129,122 triggers   0   0, touches 2, time 19367873 us
+ 14.83 s: left 127,121 right 129,122 triggers   0   0, touches 2, time 19369123 us
+ 14.83 s: left 128,121 right 129,122 triggers   0   0, touches 2, time 19379135 us
+ 14.83 s: buttons 0x00100000 +touch pad
+ 14.83 s: left 127,121 right 129,122 triggers   0   0, touches 2, time 19380377 us
+ 14.86 s: left 128,121 right 129,121 triggers   0   0, touches 2, time 19382874 us
+ 14.86 s: left 127,121 right 129,122 triggers   0   0, touches 2, time 19384134 us
+ 14.86 s: left 128,121 right 129,122 triggers   0   0, touches 2, time 19391624 us
+ 14.86 s: left 127,121 right 129,122 triggers   0   0, touches 1, time 19394148 us
+ 14.87 s: left 128,121 right 129,121 triggers   0   0, touches 1, time 19399124 us
+ 14.87 s: left 127,121 right 129,122 triggers   0   0, touches 1, time 19402874 us
+ 14.87 s: left 128,121 right 129,122 triggers   0   0, touches 1, time 19404016 us
+ 14.88 s: left 127,121 right 129,122 triggers   0   0, touches 1, time 19407873 us
+ 14.90 s: left 128,121 right 129,121 triggers   0   0, touches 1, time 19409016 us
+ 14.90 s: left 127,121 right 129,122 triggers   0   0, touches 1, time 19410387 us
+ 14.90 s: left 128,121 right 129,122 triggers   0   0, touches 1, time 19411627 us
+ 14.91 s: left 127,121 right 129,122 triggers   0   0, touches 1, time 19412878 us
+ 14.92 s: left 128,121 right 129,122 triggers   0   0, touches 1, time 19415399 us
+ 14.92 s: left 127,121 right 129,122 triggers   0   0, touches 1, time 19417875 us
+ 14.92 s: left 128,121 right 129,121 triggers   0   0, touches 1, time 19421515 us
+ 14.92 s: left 127,121 right 129,122 triggers   0   0, touches 1, time 19424124 us
+ 14.93 s: left 128,121 right 129,121 triggers   0   0, touches 1, time 19425268 us
+ 14.93 s: left 127,121 right 129,122 triggers   0   0, touches 1, time 19430374 us
+ 14.93 s: left 128,121 right 129,121 triggers   0   0, touches 1, time 19441624 us
+ 14.94 s: left 127,121 right 129,122 triggers   0   0, touches 1, time 19443002 us
+ 14.94 s: left 128,121 right 129,121 triggers   0   0, touches 1, time 19447896 us
+ 14.96 s: left 127,121 right 129,122 triggers   0   0, touches 1, time 19449124 us
+ 14.96 s: left 128,121 right 129,122 triggers   0   0, touches 1, time 19455375 us
+ 14.96 s: left 127,121 right 129,122 triggers   0   0, touches 1, time 19457876 us
+ 14.97 s: left 128,121 right 129,121 triggers   0   0, touches 1, time 19460378 us
+ 14.97 s: left 127,121 right 129,121 triggers   0   0, touches 1, time 19462883 us
+ 14.97 s: left 128,121 right 129,122 triggers   0   0, touches 1, time 19464125 us
+ 14.98 s: left 127,121 right 129,122 triggers   0   0, touches 1, time 19465373 us
+ 14.98 s: left 128,121 right 129,121 triggers   0   0, touches 1, time 19466623 us
+ 14.98 s: left 127,121 right 129,122 triggers   0   0, touches 1, time 19469150 us
+ 14.99 s: left 128,121 right 129,122 triggers   0   0, touches 1, time 19471623 us
+ 14.99 s: left 127,121 right 129,122 triggers   0   0, touches 1, time 19472875 us
+ 14.99 s: left 128,121 right 129,121 triggers   0   0, touches 1, time 19479154 us
+ 15.00 s: left 127,121 right 129,122 triggers   0   0, touches 1, time 19481625 us
+ 15.00 s: left 128,121 right 129,121 triggers   0   0, touches 1, time 19490375 us
+ 15.01 s: left 127,121 right 129,122 triggers   0   0, touches 1, time 19491625 us
+ 15.01 s: left 128,121 right 129,122 triggers   0   0, touches 1, time 19492882 us
+ 15.01 s: left 127,121 right 129,122 triggers   0   0, touches 1, time 19495375 us
+ 15.02 s: left 128,121 right 129,122 triggers   0   0, touches 1, time 19497888 us
+ 15.02 s: left 127,121 right 129,122 triggers   0   0, touches 1, time 19499129 us
+ 15.02 s: left 128,121 right 129,121 triggers   0   0, touches 1, time 19502874 us
+ 15.03 s: buttons 0x00000000 -touch pad
+ 15.03 s: left 127,121 right 129,121 triggers   0   0, touches 1, time 19504123 us
+ 15.03 s: left 128,121 right 129,122 triggers   0   0, touches 1, time 19505373 us
+ 15.04 s: left 127,121 right 129,122 triggers   0   0, touches 1, time 19507884 us
+ 15.04 s: left 128,121 right 129,122 triggers   0   0, touches 1, time 19510270 us
+ 15.04 s: left 127,121 right 129,122 triggers   0   0, touches 1, time 19511647 us
+871 reads, 0 empty, 9648 samples, at most 45 in one read, 0 errors
+
+=== rumble ===
+scePadSetVibrationMode(compatible): 0x00000000
+scePadSetVibration(128, 128): 0x00000000
+scePadSetVibration(0, 0): 0x00000000
+scePadClose: 0x00000000
+
+=== done ===

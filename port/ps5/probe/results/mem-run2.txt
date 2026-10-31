@@ -1,0 +1,120 @@
+Halo PS5 memory probe
+
+=== 0: the process ===
+firmware: 0x13600007
+pid: 92
+code (probe_self): 200615190
+data (report_file): 20062c020
+stack: 7ef08f064
+heap (malloc 64): 880941c00
+libc (printf): 81a2545d0
+
+=== 1: the process's map (KERN_PROC_VMMAP) ===
+LOW  0x00039664000-0x000396b8000 rwx type 9
+LOW  0x000396b8000-0x000396d4000 r-- type 9
+LOW  0x000396d4000-0x000396d8000 r-- type 9
+LOW  0x000396d8000-0x000396dc000 rw- type 9
+LOW  0x000396dc000-0x000397e8000 rw- type 1
+     0x00200614000-0x00200620000 rwx type 1
+     0x00200620000-0x002006c8000 rw- type 1
+     0x007eee8c000-0x007eee90000 --- type 0
+     0x007eee90000-0x007ef090000 rw- type 1
+     0x007ef090000-0x007ef094000 r-x type 5
+     0x0081a240000-0x0081a368000 --x type 9
+     0x0081a368000-0x0081a3ec000 r-- type 9
+     0x0081a3ec000-0x0081a3f4000 r-- type 9
+     0x0081a3f4000-0x0081a3f8000 rw- type 9
+     0x0081a3f8000-0x0081a408000 rw- type 1
+     0x0081ee54000-0x0081ee88000 --x type 9
+     0x0081ee88000-0x0081ee94000 r-- type 9
+     0x0081ee94000-0x0081ee98000 r-- type 9
+     0x0081ee98000-0x0081ee9c000 rw- type 9
+     0x0081ee9c000-0x0081f03c000 rw- type 1
+     0x00833658000-0x00833664000 --x type 9
+     0x00833664000-0x0083366c000 r-- type 9
+     0x0083366c000-0x00833670000 r-- type 9
+     0x00833670000-0x00833684000 rw- type 9
+     0x0083ff44000-0x0083ff90000 --x type 9
+     0x0083ff90000-0x0083ffb0000 r-- type 9
+     0x0083ffb0000-0x0083ffb4000 r-- type 9
+     0x0083ffb4000-0x0083ffb8000 rw- type 9
+     0x0083ffb8000-0x0083ffec000 rw- type 1
+     0x00880938000-0x008809c8000 rw- type 1
+     0x008ff800000-0x008ff804000 rw- type 1
+     0x008ff804000-0x00900000000 --- type 1
+27 entries at or above 4 GB
+
+=== 2: the guard against mapping over the process ===
+MAP_EXCL over 2006c8000: mapped over it (ignored)
+guard check: map_fixed over 2006c8000 refused (already mapped), as it should be
+MAP_32BIT (1 MB, no address): placed at 2006c8000
+
+=== 2: one page every megabyte below 4 GB ===
+first, the pages below 1 MB at 64 KB:
+0x000010000  maps
+0x000020000  maps
+0x000030000  maps
+0x000040000  maps
+0x000050000  maps
+0x000060000  maps
+0x000070000  maps
+0x000080000  maps
+0x000090000  maps
+0x0000a0000  maps
+0x0000b0000  maps
+0x0000c0000  maps
+0x0000d0000  maps
+0x0000e0000  maps
+0x0000f0000  maps
+then every megabyte (runs of the same outcome):
+0x000100000-0x039700000  maps
+0x039700000-0x039800000  already mapped
+0x039800000-0x100000000  maps
+lowest address that maps: 0x10000
+megabytes that map: 4094 of 4095
+
+=== 3: the guest's ranges ===
+hint 0x3c000000: placed at 3c000000 (taken)
+hint 0x80000000: placed at 80000000 (taken)
+image 0x3c000000 + 0x1000000: maps, first and last pages written and read
+custom edition tag cache 0x40440000 + 0x1700000: maps, first and last pages written and read
+xbox window 0x80000000 + 0x8000000: maps, first and last pages written and read
+xbox window at its largest 0x80000000 + 0x20000000: maps, first and last pages written and read
+a 256 MB pool 0x10000000 + 0x10000000: maps, first and last pages written and read
+1 GB from 0x40000000 0x40000000 + 0x40000000: maps, first and last pages written and read
+
+=== 4: running code below 4 GB ===
+test base: 0x3c000000 (code there, data at +1 MB, stack above the data)
+test code: 21 bytes from 200624090
+A: mmap PROT_READ | PROT_WRITE | PROT_EXEC
+  readable: yes
+  runs: yes (40 + 2 = 42)
+  loads through a 32-bit pointer: yes (0x4f4c4148)
+  jumps to the host above 4 GB: yes (126)
+  runs on a stack below 4 GB: yes (0x12345678)
+B: mmap read-write, then mprotect PROT_READ | PROT_EXEC
+  readable: yes
+  runs: yes (40 + 2 = 42)
+  loads through a 32-bit pointer: yes (0x4f4c4148)
+  jumps to the host above 4 GB: yes (126)
+  runs on a stack below 4 GB: yes (0x12345678)
+C: a shared memory object, mapped writable anywhere and PROT_READ | PROT_EXEC below 4 GB
+  writable view at 2006c8000
+  readable: yes
+  runs: yes (40 + 2 = 42)
+  loads through a 32-bit pointer: yes (0x4f4c4148)
+  jumps to the host above 4 GB: yes (126)
+  runs on a stack below 4 GB: yes (0x12345678)
+D: mmap read-write, then the SDK's kernel_mprotect to read-execute
+  kernel_get_vmem_protection now: 0x5
+  readable: yes
+  runs: yes (40 + 2 = 42)
+  loads through a 32-bit pointer: yes (0x4f4c4148)
+  jumps to the host above 4 GB: yes (126)
+  runs on a stack below 4 GB: yes (0x12345678)
+
+=== 5: a thread on a stack below 4 GB ===
+starting a thread on 0x3c200000-0x3c240000 (if nothing follows, it crashed)
+the thread ran; its local was at 0x3c23ffc4 (on the stack given)
+
+=== done ===

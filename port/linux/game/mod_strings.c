@@ -340,8 +340,9 @@ static struct mod_string_list *mod_string_list_new(
 			byte const *string = file + data_cursor;
 
 			data_cursor += size;
-			if (map_entry->string.size > 0 && map_entry->string.address &&
-				formats_match(string, size, map_entry->string.address, (unsigned long)map_entry->string.size,
+			/* (the map's string where the window is: halo_port_window.h) */
+			if (map_entry->string.size > 0 && TAG_DATA_ADDRESS(map_entry->string) &&
+				formats_match(string, size, TAG_DATA_ADDRESS(map_entry->string), (unsigned long)map_entry->string.size,
 					group->unicode))
 			{
 				byte *characters = list->characters + character_cursor;

@@ -22,7 +22,16 @@ struct game_state_header
 	short player_count; // 0x124
 	short difficulty; // 0x126
 	unsigned long cache_file_checksum; // 0x128
-	long unused[7]; // 0x12C
+	/* the game state holds pointers into itself, so a saved game is only
+	meaningful where the state was at the address it was written at. This
+	records that address, so a save from a build or a device that placed it
+	elsewhere is ignored rather than restoring pointers that point nowhere
+	(0x12C) */
+	unsigned long layout_address;
+	/* and how far the port had moved the game's own image, whose addresses
+	the state holds too (halo_port_window.h's PORT_IMAGE_SHIFT) */
+	unsigned long image_shift;
+	long unused[5];
 	unsigned long checksum; // 0x148
 };
 

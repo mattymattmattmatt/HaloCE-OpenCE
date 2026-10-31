@@ -32,8 +32,21 @@ where its offset falls in their combined offset space.
 #include "tag_schema.h"
 #include "map_share.h"
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <xtl.h>
+
+#ifdef HALO_SWITCH
+/* the host's cache of textures' bytes, outside the Xbox window (port/switch/host/host_texture_cache.c), which a
+Custom Edition map's bitmaps are kept in as read, before custom_edition_bitmap_pixels_arrived converts them: the
+texture cache, half the window, takes them back from it rather than from the card. Keyed by where they are in the
+map's combined space, the top bit set (a mod bitmap's keys have it clear: mod_bitmaps.c); emptied as each map's tags
+go (mod_bitmaps_tags_unloaded) */
+int host_texture_cache_get(uint64_t key, uint32_t buffer, uint32_t size);
+void host_texture_cache_put(uint64_t key, uint32_t buffer, uint32_t size);
+void memory_watch_prepare_write(void *address, unsigned long size);
+#define CUSTOM_EDITION_TEXTURE_KEY(offset) ((1ull << 63) | (uint64_t)(unsigned long)(offset))
+#endif
 
 /* ---------- constants */
 
@@ -209,6 +222,48 @@ static boolean maps_folder_has(
 	return file_path_exists(path);
 }
 
+/* <folder>\<subfolder>\<name><extension>, the first subfolder that has it.
+One level only, the same order the menus scan (custom_edition_maps.c). */
+static boolean maps_subfolder_has(
+	char const *folder,
+	char const *name,
+	char const *extension,
+	char *path)
+{
+	char pattern[MAP_PATH_SIZE];
+	WIN32_FIND_DATAA data;
+	HANDLE find;
+
+	if (folder == maps_folder(1) && !custom_edition_install_present())
+		return FALSE;
+	if (strlen(folder) + 3 >= MAP_PATH_SIZE)
+		return FALSE;
+	sprintf(pattern, "%s*.*", folder);
+	find = FindFirstFileA(pattern, &data);
+	if (find == INVALID_HANDLE_VALUE)
+		return FALSE;
+	do
+	{
+		char nested[MAP_PATH_SIZE];
+
+		if (!(data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+			continue;
+		if (!strcmp(data.cFileName, ".") || !strcmp(data.cFileName, ".."))
+			continue;
+		if (strlen(folder) + strlen(data.cFileName) + 1 + strlen(name) + strlen(extension) >= MAP_PATH_SIZE)
+			continue;
+		sprintf(nested, "%s%s\\", folder, data.cFileName);
+		if (maps_folder_has(nested, name, extension, path))
+		{
+			CloseHandle(find);
+			return TRUE;
+		}
+	} while (FindNextFileA(find, &data));
+	CloseHandle(find);
+
+	return FALSE;
+}
+
 /* The custom_maps folder's one map named <name>_<hash>.map, for a name
 without the hash its file has: its file name (without the extension) in
 `hashed` (MAP_PATH_SIZE characters). A download beside another version of
@@ -258,8 +313,9 @@ static boolean maps_folder_hashed_name(
 	return count == 1;
 }
 
-/* the file the map `map_name` names (a level name or a file name),
-whatever version a network game is on (custom_edition_map_file_named) */
+/* the file the map `map_name` names (a level name or a file name), in a
+maps folder or one subfolder of it, whatever version a network game is on
+(custom_edition_map_file_named) */
 static boolean custom_edition_map_named(
 	char const *map_name,
 	char *path)
@@ -270,7 +326,8 @@ static boolean custom_edition_map_named(
 
 	for (folder = 0; folder < NUMBER_OF_MAPS_FOLDERS; folder++)
 	{
-		if (maps_folder_has(maps_folder(folder), name, MAP_FILE_EXTENSION, path))
+		if (maps_folder_has(maps_folder(folder), name, MAP_FILE_EXTENSION, path) ||
+			maps_subfolder_has(maps_folder(folder), name, MAP_FILE_EXTENSION, path))
 		{
 			return TRUE;
 		}
@@ -905,6 +962,11 @@ boolean custom_edition_map_find_version(
 		{
 			return TRUE;
 		}
+		if (maps_subfolder_has(maps_folder(folder), name, MAP_FILE_EXTENSION, path) &&
+			map_share_map_version(path, &found_version) && found_version == version)
+		{
+			return TRUE;
+		}
 	}
 	/* (custom_maps' other versions of the name: the one whose name ends in
 	the version's digits, if its hash is that) */
@@ -1096,22 +1158,25 @@ boolean custom_edition_cache_playable(
 	return custom_edition_level_name(level_name) && custom_edition_cache_identify(level_name, &identity);
 }
 
-boolean custom_edition_cache_campaign(
-	char const *map_name)
+short custom_edition_cache_file_scenario_type(
+	char const *path)
 {
+	struct custom_edition_file file;
 	struct cache_file_identity identity;
+	short type = NONE;
 
-	return custom_edition_cache_identify(map_name, &identity) &&
-		identity.scenario_type == _scenario_type_solo;
-}
+	if (!halo_custom_edition_tag_cache() || !custom_edition_file_open(&file, path))
+	{
+		return NONE;
+	}
+	if (cache_file_identify(&file.source, &identity) == _cache_file_status_ok &&
+		identity.format == _cache_file_format_custom_edition_cache)
+	{
+		type = (short)identity.scenario_type;
+	}
+	custom_edition_file_close(&file);
 
-boolean custom_edition_cache_multiplayer(
-	char const *map_name)
-{
-	struct cache_file_identity identity;
-
-	return custom_edition_cache_identify(map_name, &identity) &&
-		identity.scenario_type == _scenario_type_multiplayer;
+	return type;
 }
 
 struct cache_file_tag_header *custom_edition_cache_tags_load(
@@ -1337,6 +1402,19 @@ void custom_edition_cache_read(
 		file_offset = (unsigned long)offset;
 	}
 
+#ifdef HALO_SWITCH
+	/* (a bitmap's pixels kept by the host: as read, and converted below as
+	they would be) */
+	if (tag_index != NONE && size > 0)
+	{
+		memory_watch_prepare_write(buffer, (unsigned long)size);
+		if (host_texture_cache_get(CUSTOM_EDITION_TEXTURE_KEY(offset), (uint32_t)(uintptr_t)buffer, (uint32_t)size))
+		{
+			custom_edition_bitmap_pixels_arrived(globals->tag_cache, globals->loaded_bytes, tag_index, offset, buffer);
+			return;
+		}
+	}
+#endif
 	/* the game reads its map from its main thread only (scenario and
 	structure BSP loading, the texture and sound caches), so the streams and
 	the staging buffer need no lock */
@@ -1363,6 +1441,10 @@ void custom_edition_cache_read(
 	}
 	else if (tag_index != NONE)
 	{
+#ifdef HALO_SWITCH
+		if (size > 0)
+			host_texture_cache_put(CUSTOM_EDITION_TEXTURE_KEY(offset), (uint32_t)(uintptr_t)buffer, (uint32_t)size);
+#endif
 		custom_edition_bitmap_pixels_arrived(globals->tag_cache, globals->loaded_bytes, tag_index, offset, buffer);
 	}
 

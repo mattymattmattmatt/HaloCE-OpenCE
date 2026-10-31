@@ -91,12 +91,21 @@ CHILD_OFFSETS = {
     **{("ui\\shell\\main_menu\\settings_select\\multiplayer_setup\\player_options_edit\\player_options_menu",
         f"ui\\shell\\main_menu\\settings_select\\multiplayer_setup\\player_options_edit\\op_{row}"): (54, 73 + 27 * index)
        for index, row in enumerate(port_settings.PLAYER_OPTIONS_ROWS)},
-    ("ui\\shell\\main_menu\\main_menu_select_list", "ui\\shell\\main_menu\\main_menu_item_quit_game"):
-        port_settings.QUIT_ITEM_PLACE,
+    # the main menu's items closer together, for MODS and THEATER
+    # (port_settings.MAIN_MENU_ITEMS)
+    **{("ui\\shell\\main_menu\\main_menu_select_list", f"ui\\shell\\main_menu\\main_menu_item_{item}"):
+       port_settings.main_menu_item_place(item)
+       for item in ("load_camp", "multiplayer", "profile", "settings", "quit_game")},
     ("ui\\shell\\main_menu\\multiplayer_type_select\\multiplayer_type_select_list",
      "ui\\shell\\main_menu\\multiplayer_type_select\\multiplayer_type_gametypes_item"): (0, 358),
     ("ui\\shell\\main_menu\\multiplayer_type_select\\multiplayer_type_select_screen",
      "ui\\shell\\main_menu\\blueline"): (64, 349),
+    # the profile settings' rows, ten in the nine's room
+    # (port_settings.PROFILE_ROWS)
+    **{("ui\\shell\\main_menu\\settings_select\\player_setup\\player_profile_edit\\profile_edit_select_list",
+        f"ui\\shell\\main_menu\\settings_select\\player_setup\\player_profile_edit\\{row}"):
+       (0, port_settings.profile_row_offset(row))
+       for row, top in port_settings.PROFILE_ROWS if top is not None},
     # the browser's rows up under the column titles, into the place of the
     # scroll up button (hidden: the list does not scroll)
     **{("ui\\shell\\main_menu\\multiplayer_type_select\\join_game\\join_game_items_list",
@@ -347,7 +356,6 @@ class Art:
         self.placeholder = Image.open(placeholder).convert("RGBA")
         self.pictures = []  # (frame, size, PC picture) of the frames drawn as the placeholder
         self.xbox_frames = []  # (PC frame, Xbox bitmap, its frame) drawn from the Xbox map
-        self.added_frames = []  # (our bitmap, Xbox bitmap, its frame): port_settings.BITMAP_FRAMES
         self.svgs = []
         self.pngs = []
 
@@ -422,10 +430,6 @@ class Art:
             self.draw(relative, index, len(data), width, height, MENUS / png, self.shown.get(tag, []))
             self.pngs.append(png)
             lines.append(f"\t\t<frame{attributes([('png', png), ('width', width), ('height', height)])}/>")
-        # (the port's frames after them: the Xbox map's, scaled)
-        for source, index, width, height, x, y in port_settings.BITMAP_FRAMES.get(our_name(tag), []):
-            self.added_frames.append((our_name(tag), source, index))
-            lines.append(f"\t\t<frame{attributes([('map', source), ('index', index), ('width', width), ('height', height), ('x', x or None), ('y', y or None)])}/>")
         lines.append("\t</bitmap>")
         return "\n".join(lines)
 
@@ -583,7 +587,8 @@ def widget_xml(tag: str, widget: dict, tags: Tags, functions: list, inputs: list
         name = patch.get("swap", {}).get(our_name(child_tag), our_name(child_tag))
         lines += [f"{inner}{line}" for line in patch.get("insert_before", {}).get(our_name(child_tag), [])]
         pairs = [("widget", name), ("x", x or None), ("y", y or None),
-                 ("controller", str(child["custom controller index"] + 1) if child["flags"] & 1 else None)]
+                 ("controller", str(child["custom controller index"] + 1) if child["flags"] & 1 else None),
+                 ("platform", patch.get("child_platforms", {}).get(name))]
         lines.append(f"{inner}<child{attributes(pairs)}/>")
     lines += [f"{inner}{line}" for line in patch.get("children", [])]
     lines.append(f"{indent}</widget>")
@@ -612,32 +617,15 @@ def pause_art(art):
     return lines
 
 
-def regenerate_settings():
-    """Write port-owned settings and register any new screens for embedding."""
-    screens = port_settings.settings_files()
-    for name, lines in screens.items():
-        (CE / name).write_text("\n".join(lines))
-    manifest = MENUS / "menus.json"
-    data = json.loads(manifest.read_text())
-    files = set(data["files"]) | {"ce/" + name for name in screens}
-    data["files"] = sorted(name for name in files if name.endswith(".xml")) + sorted(
-        name for name in files if not name.endswith(".xml"))
-    manifest.write_text(json.dumps(data, indent=1) + "\n")
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--settings-only", action="store_true", help="regenerate port-owned settings screens and their manifest")
-    parser.add_argument("--tags", type=Path, required="--settings-only" not in sys.argv)
-    parser.add_argument("--definitions", type=Path, required="--settings-only" not in sys.argv)
-    parser.add_argument("--redraws", type=Path, required="--settings-only" not in sys.argv)
-    parser.add_argument("--placeholder", type=Path, required="--settings-only" not in sys.argv, help="the picture for frames with no redraw")
+    parser.add_argument("--tags", type=Path, required=True)
+    parser.add_argument("--definitions", type=Path, required=True)
+    parser.add_argument("--redraws", type=Path, required=True)
+    parser.add_argument("--placeholder", type=Path, required=True, help="the picture for frames with no redraw")
     parser.add_argument("--pictures", type=Path,
                         help="the PC version's pictures, as PNGs by tag path: only where each is, to place its placeholder")
     arguments = parser.parse_args()
-    if arguments.settings_only:
-        regenerate_settings()
-        return
     tags = Tags(arguments.tags, arguments.definitions)
     # (the names of the Xbox's own as the game has them, which the tags' own
     # names give a little differently: "create&edit", "NULL")
@@ -709,9 +697,18 @@ def main() -> None:
     # (the main menu's MODS, in the redraws' own letters, and the mods'
     # status icons: Lucide's, port/assets/icons/lucide)
     lines.append(art.port_picture("main_menu/menu_mods", port_settings.menu_item_frames("MODS", art.redraws)))
+    # (and its THEATER: port_settings._theater)
+    lines.append(art.port_picture("main_menu/menu_theater", port_settings.menu_item_frames("THEATER", art.redraws)))
     lines.append(art.port_picture("mods/status", port_settings.mod_status_frames(ROOT / "port/assets/icons/lucide")))
     lines.append(art.port_picture("mods/status_small",
                                   port_settings.mod_status_frames(ROOT / "port/assets/icons/lucide", 16)))
+    # (the button-layout overlay's controllers, AL2009man's Gamepad Asset
+    # Pack's, beside the pictures that draw them: port_settings.CONTROLLERS)
+    (MENUS / "port_svg/controllers").mkdir(parents=True, exist_ok=True)
+    for controller in port_settings.CONTROLLERS:
+        shutil.copy2(MENUS / "controllers" / f"{controller}.svg", MENUS / "port_svg/controllers" / f"{controller}.svg")
+    lines += [art.port_picture(name, frames) for name, frames in port_settings.layout_overlay_pictures()]
+    lines += [art.port_picture(name, frames) for name, frames in port_settings.browser_hint_pictures()]
     # (nothing: what a game map draws for a frame of ui.map's it has not,
     # menu_tags.c)
     lines.append(art.port_picture("blank", [
@@ -743,15 +740,6 @@ def main() -> None:
         "| --- | --- |",
     ]
     report += [f"| `{name}.png` | `{tag}` frame {index} |" for name, tag, index in sorted(art.xbox_frames)]
-    report += [
-        "",
-        "These frames are added after a bitmap's, drawn scaled from the Xbox map's (the profile settings'",
-        "picture of Gamepad Setup: the Xbox's Controller Setup's pictures of the button settings).",
-        "",
-        "| Our bitmap | The Xbox's frame |",
-        "| --- | --- |",
-    ]
-    report += [f"| `{name}` | `{tag}` frame {index} |" for name, tag, index in art.added_frames]
     report += [
         "",
         "## Placeholders, to be redrawn",

@@ -280,8 +280,9 @@ static void *view_block_element(
 			element_bytes);
 	}
 
+	/* (the map's block where the window is: halo_port_window.h) */
 	return element_index >= 0 && element_index < block->count && block->address ?
-		(byte *)block->address + element_index * element_bytes : NULL;
+		(byte *)TAG_BLOCK_ADDRESS_AT(block) + element_index * element_bytes : NULL;
 }
 
 /* the name of the tag of absolute index `tag_index`, for messages */

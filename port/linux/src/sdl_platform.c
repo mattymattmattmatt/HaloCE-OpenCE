@@ -133,6 +133,8 @@ extern const unsigned long platform_menu_cursor_size;
 #endif
 
 #if !defined(HALO_ANDROID) && !defined(HALO_WEB)
+static BOOL data_find_image(const char *directory, char *path, int size);
+
 /* the maps folder checked to hold the Xbox maps (platform_maps_folder_check).
 When it holds Halo PC's instead, or no ui.map, the player is told where each
 kind goes and the game quits, rather than failing to load Halo PC's ui.map
@@ -154,6 +156,14 @@ static void data_check_maps(void)
 	switch (maps.state)
 	{
 	case _maps_folder_xbox:
+		/* (maps extracted before the extraction wrote the loading screen's picture: it from the disc image, if
+		one is still beside the maps folder) */
+		{
+			char image[1024];
+
+			if (data_find_image(maps.root, image, sizeof(image)) && xiso_write_missing_loading_picture(image, maps.root))
+				platform_log("the loading screen's picture taken from %s (the maps folder had none)", image);
+		}
 		if (!maps.stray_pc_maps)
 			return;
 		snprintf(message, sizeof(message),
@@ -602,6 +612,43 @@ BOOL platform_offer_game_data(const char *destination)
 }
 #endif
 
+#if defined(HALO_ANDROID) && !defined(HALO_SWITCH)
+/* display.resolution_limit on a phone: how many pixels the game's renderers
+draw for each of its 480 lines (d3d8_gl.c and d3d8_vk.c's screen_mode_choose,
+asked every frame), to the smaller of the setting's lines and the screen's
+height in pixels: "native" the screen's own, else "2160", "1440", "1080",
+"720" or "480" (the game's own, as the phones drew before the setting). The
+width keeps the screen's shape, as it does at 480. */
+float platform_resolution_scale(void)
+{
+	static unsigned long read_at = (unsigned long)-1;
+	static long lines = 480;
+	static int native;
+	int pixel_width = 0, pixel_height = 0;
+	long wanted;
+
+	if (read_at != config_changes())
+	{
+		const char *setting = config_string("display.resolution_limit");
+
+		read_at = config_changes();
+		native = !strcmp(setting, "native");
+		lines = native ? 0 : atol(setting);
+		if (!native && (lines < 480 || lines > 4320))
+		{
+			platform_log("display.resolution_limit \"%s\" is not \"native\" or a number of lines from 480 to 4320: "
+				"480", setting);
+			lines = 480;
+		}
+	}
+	if (!platform_window || !SDL_GetWindowSizeInPixels(platform_window, &pixel_width, &pixel_height) ||
+		pixel_height < 480)
+		return 1.0f;
+	wanted = native || lines > pixel_height ? pixel_height : lines;
+	return (float)wanted / 480.0f;
+}
+#endif
+
 int halo_interpolation_enabled(void)
 {
 	static int enabled;
@@ -758,9 +805,8 @@ static BOOL platform_window_fullscreen(void)
 /* the size in pixels the game draws its picture at (d3d8_gl.c): the
 window's, the display's while fullscreen, or display.resolution's while
 fullscreen (either kind) where the display has room for it; before the
-window opens, what it will be (d3d8_gl.c draws a part of it for
-display.resolution_scaling's percentages). FALSE where it is "original": the
-Xbox's 640x480, scaled to the window. */
+window opens, what it will be. FALSE where display.resolution_scaling is
+"original": the Xbox's 640x480, scaled to the window. */
 BOOL platform_screen_mode(long *width, long *height)
 {
 	/* (the size last given, for a window that has none: minimized) */
@@ -1293,9 +1339,10 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 		return FALSE;
 	}
 #ifndef HALO_ANDROID
-#ifndef HALO_GLES
 	/* the game's icon, which the desktop shows for the window (on Windows
-	also halo.exe's own, port/windows/halo.rc; a web page has its own) */
+	also halo.exe's own, port/windows/halo.rc; a web page has its own; not
+	a guest's, which reaches no SDL surfaces) */
+#if !defined(HALO_GLES) && !defined(HALO_GUEST)
 	if (platform_window_icon_size)
 	{
 		SDL_Surface *icon = SDL_LoadPNG_IO(SDL_IOFromConstMem(platform_window_icon, platform_window_icon_size), true);
@@ -2521,7 +2568,7 @@ void platform_pump_events(void)
 			break;
 #endif
 		case SDL_EVENT_GAMEPAD_ADDED:
-#ifdef HALO_ARM64_GUEST
+#ifdef HALO_GUEST
 			/* (the guest reaches SDL only through host_imports.list, which
 			has no SDL_GetGamepadName) */
 			SDL_OpenGamepad(event.gdevice.which);
@@ -2605,6 +2652,8 @@ void platform_binding_capture_begin(void)
 	binding_settling = TRUE;
 	binding_polled_ms = SDL_GetTicks();
 	pthread_mutex_unlock(&input_lock);
+	/* (or a button of the controller: xinput_sdl.c) */
+	halo_gamepad_capture_begin();
 }
 
 void platform_binding_capture_cancel(void)
@@ -2618,8 +2667,18 @@ int platform_binding_capture_poll(int *input)
 {
 	int result = 0;
 
+	int gamepad_input = -1;
+	int gamepad_result = halo_gamepad_capture_poll(&gamepad_input);
+
 	pthread_mutex_lock(&input_lock);
 	binding_polled_ms = SDL_GetTicks();
+	if (gamepad_result && binding_capture == _binding_capture_waiting)
+	{
+		binding_capture = _binding_capture_taken;
+		binding_taken_ms = SDL_GetTicks();
+		binding_capture_result = gamepad_result;
+		binding_captured_input = gamepad_input;
+	}
 	if (binding_capture == _binding_capture_taken)
 	{
 		result = binding_capture_result;
@@ -2627,6 +2686,9 @@ int platform_binding_capture_poll(int *input)
 		binding_capture = _binding_capture_idle;
 	}
 	pthread_mutex_unlock(&input_lock);
+	/* (taken by a key, the controller is let go of) */
+	if (result)
+		halo_gamepad_capture_end();
 	return result;
 }
 

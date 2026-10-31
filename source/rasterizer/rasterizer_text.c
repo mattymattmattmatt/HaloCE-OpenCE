@@ -844,7 +844,7 @@ static long hires_text_font_get(
 	capital = font_get_character_by_ascii_code(font, 'H');
 	if (capital)
 	{
-		byte const *pixels = (byte const *)font->pixels.address + capital->pixels_offset;
+		byte const *pixels = (byte const *)TAG_DATA_ADDRESS(font->pixels) + capital->pixels_offset;
 
 		for (row = 0; row < capital->bitmap_height; row++)
 		{
@@ -884,7 +884,7 @@ static long font_character_ink(
 	short y0,
 	short y1)
 {
-	byte const *pixels = (byte const *)font->pixels.address + font_character->pixels_offset;
+	byte const *pixels = (byte const *)TAG_DATA_ADDRESS(font->pixels) + font_character->pixels_offset;
 	short row, column;
 	long ink = 0;
 
@@ -1199,7 +1199,7 @@ cache_hardware_format_character(
 		hardware_character->x0 = hardware_character_cache.x0;
 		hardware_character->y0 = hardware_character_cache.y0;
 
-		source = (byte *)font->pixels.address + font_character->pixels_offset;
+		source = (byte *)TAG_DATA_ADDRESS(font->pixels) + font_character->pixels_offset;
 
 		/* (port: the border clear, white with no alpha as the character's
 		own clear texels are) */

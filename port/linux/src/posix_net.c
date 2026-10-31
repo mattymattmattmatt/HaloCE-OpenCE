@@ -77,6 +77,12 @@ with the host ABI.
 
 static __thread int last_error;
 
+#ifdef HALO_PS5
+/* the console's resolver (port/ps5/host/host_net_ps5.c): its libc refuses
+getaddrinfo to a title */
+posix_ulong ps5_net_resolve_ipv4(const char *host);
+#endif
+
 static int fail(void)
 {
 	switch (errno)
@@ -173,7 +179,13 @@ int posix_socket_listen(int socket, int backlog)
 int posix_socket_accept(int socket, void *address, int *address_length)
 {
 	socklen_t length = address_length ? (socklen_t)*address_length : 0;
+#ifdef HALO_PS5
+	/* (no accept4 there; and close-on-exec means nothing where nothing is
+	executed) */
+	int result = accept(socket, address, address_length ? &length : NULL);
+#else
 	int result = accept4(socket, address, address_length ? &length : NULL, SOCK_CLOEXEC);
+#endif
 
 	if (address_length)
 		*address_length = (int)length;
@@ -231,12 +243,19 @@ int posix_socket_shutdown(int socket, int how)
 
 int posix_socket_set_nonblocking(int socket, int nonblocking)
 {
+#ifdef HALO_PS5
+	/* a title is refused fcntl's O_NONBLOCK and FIONBIO (EACCES); the
+	console's own SO_NBIO is what makes a socket non-blocking there
+	(port/ps5/PS5.md, phase 5) */
+	return succeed(setsockopt(socket, SOL_SOCKET, 0x1200, &nonblocking, sizeof(nonblocking)));
+#else
 	int flags = fcntl(socket, F_GETFL);
 
 	if (flags < 0)
 		return fail();
 	flags = nonblocking ? (flags | O_NONBLOCK) : (flags & ~O_NONBLOCK);
 	return succeed(fcntl(socket, F_SETFL, flags));
+#endif
 }
 
 int posix_socket_set_nodelay(int socket)
@@ -382,8 +401,29 @@ int posix_socket_select(int *read, int *read_count, int *write, int *write_count
 			descriptors[total].revents = 0;
 		}
 	}
-	result = poll(descriptors, (nfds_t)total, infinite ? -1 :
-		(int)(milliseconds < 0 ? 0 : milliseconds > INT_MAX ? INT_MAX : milliseconds));
+	{
+		int wait = infinite ? -1 : (int)(milliseconds < 0 ? 0 : milliseconds > INT_MAX ? INT_MAX : milliseconds);
+		struct timespec started, now;
+
+		clock_gettime(CLOCK_MONOTONIC, &started);
+		for (;;)
+		{
+			result = poll(descriptors, (nfds_t)total, wait);
+			if (result >= 0 || errno != EINTR)
+				break;
+			/* (a signal the game never asked for - the Android profiler's samples, 500 a second: host_debug.c -
+			is no error of the sockets', as select's caller would take it, the game ending; the wait goes on for
+			what is left of it) */
+			if (wait > 0)
+			{
+				long long waited;
+
+				clock_gettime(CLOCK_MONOTONIC, &now);
+				waited = (long long)(now.tv_sec - started.tv_sec) * 1000 + (now.tv_nsec - started.tv_nsec) / 1000000;
+				wait = waited >= milliseconds ? 0 : (int)(milliseconds - waited);
+			}
+		}
+	}
 	for (index = 0; index < total && result > 0; index++)
 	{
 		/* (as select fails on a descriptor that is not open) */
@@ -502,6 +542,10 @@ posix_ulong posix_local_ipv4_address(void)
 
 void posix_random_bytes(void *buffer, posix_ulong size)
 {
+#ifdef HALO_PS5
+	/* (FreeBSD 11 has no getrandom, and a title no /dev/urandom) */
+	arc4random_buf(buffer, size);
+#else
 	unsigned char *cursor = buffer;
 
 	while (size)
@@ -540,6 +584,7 @@ void posix_random_bytes(void *buffer, posix_ulong size)
 		fputs("no random numbers from the system: cannot continue\n", stderr);
 		abort();
 	}
+#endif
 }
 
 posix_ulong posix_resolve_ipv4(const char *host)
@@ -547,6 +592,13 @@ posix_ulong posix_resolve_ipv4(const char *host)
 	struct addrinfo hints, *results;
 	posix_ulong address = 0;
 
+#ifdef HALO_PS5
+	struct in_addr dotted;
+
+	if (inet_pton(AF_INET, host, &dotted) == 1)
+		return dotted.s_addr;
+	return ps5_net_resolve_ipv4(host);
+#endif
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_DGRAM;
@@ -658,7 +710,7 @@ int posix_user_secret(unsigned char *secret, int size)
 #endif
 }
 
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(HALO_PS5)
 /* runs a program with its arguments and waits for it; its exit status, or -1 */
 static int run_program(char *const arguments[])
 {
@@ -676,7 +728,8 @@ static int run_program(char *const arguments[])
 
 int posix_register_url_scheme(const char *scheme, const char *description)
 {
-#ifdef __ANDROID__
+	/* (a console has no desktop, nor a title readlink) */
+#if defined(__ANDROID__) || defined(HALO_PS5)
 	(void)scheme;
 	(void)description;
 	return 0;

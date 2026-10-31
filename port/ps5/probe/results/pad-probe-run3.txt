@@ -1,0 +1,115 @@
+pad-probe-25513.txt: writing to this file and the kernel log
+system software 13.590.001 (0x13590001)
+ScePadData is 120 bytes; angular velocity at 0x28, timestamp at 0x50
+
+=== 1. SDL2, as the title starts it ===
+SDL_NumJoysticks: 3
+joystick 0: "thelinkin3000", instance 1, type 7, opened as a game controller
+  sensors SDL2 says it has: gyro no, accelerometer no
+joystick 1: "Invitado1", instance 2, type 7, opened as a game controller
+  sensors SDL2 says it has: gyro no, accelerometer no
+joystick 2: "PS5 Remote Control", instance 0, type 0, opened as a game controller
+  sensors SDL2 says it has: gyro no, accelerometer no
+
+=== 2. the users ===
+sceUserServiceInitialize: 0x80960003 (SDL2 has started it already)
+sceUserServiceGetForegroundUser: 0x00000000, user 372994645 (0x163b7255)
+sceUserServiceGetLoginUserIdList: 0x00000000
+  user 372994645 (0x163b7255): "thelinkin3000" (0x00000000)
+  user 727659102 (0x2b5f325e): "Invitado1" (0x00000000)
+
+=== 3. each user's pad, while SDL2 holds it ===
+"thelinkin3000": scePadGetHandle(user 372994645, standard port, 0): 0x03790701
+"thelinkin3000": scePadOpen again: 0x80920004 (already opened: SDL2's)
+"thelinkin3000": scePadGetControllerInformation: 0x00000000: touch pad 1920x1080 at 44.9 a mm, dead zones 13 13, connection type 0, 1 connected, connected 1, device class 0
+"thelinkin3000": scePadGetExtControllerInformation: 0x80920101, bytes 28 to 47 (pad types, capability): 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+"Invitado1": scePadGetHandle(user 727659102, standard port, 0): 0x037a0702
+"Invitado1": scePadOpen again: 0x80920004 (already opened: SDL2's)
+"Invitado1": scePadGetControllerInformation: 0x00000000: touch pad 1920x1080 at 44.9 a mm, dead zones 13 13, connection type 0, 1 connected, connected 1, device class 0
+"Invitado1": scePadGetExtControllerInformation: 0x80920101, bytes 28 to 47 (pad types, capability): 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+
+=== 4. the sensor not yet turned on: 2 s of scePadReadState ===
+SDL2: device event 0x653, which 0
+SDL2: device event 0x653, which 1
+SDL2: device event 0x653, which 2
+  "thelinkin3000": 484 reads, 474 new samples (237.9 a second), the timestamp's gaps min 1223, mean 4204, max 10001; the timestamps advanced 1992496 against the counter's 1992506 us (1.0000); 0 reads not connected, 0 errors
+  "thelinkin3000" with the sensor off: angular velocity's largest magnitude x 3.48139 y 1.22623 z 3.98527; mean x -0.32450 y +0.01111 z +0.00777
+  "thelinkin3000" last sample: acceleration -0.0337 +0.9964 +0.0401, orientation -0.3076 -0.0083 +0.0073 +0.9515, buttons 0x00000000, connected 1, count 1
+  "Invitado1": 484 reads, 456 new samples (228.9 a second), the timestamp's gaps min 1193, mean 4364, max 13864; the timestamps advanced 1989997 against the counter's 1992504 us (0.9987); 0 reads not connected, 0 errors
+  "Invitado1" with the sensor off: angular velocity's largest magnitude x 0.01611 y 0.00487 z 0.00632; mean x -0.00193 y -0.00008 z -0.00061
+  "Invitado1" last sample: acceleration +0.1896 +0.9813 +0.0995, orientation -0.0026 -0.0001 -0.0007 +1.0000, buttons 0x00000000, connected 1, count 1
+
+=== 5. the sensor on ===
+"thelinkin3000": scePadSetMotionSensorState(handle, 1): 0x00000000
+"Invitado1": scePadSetMotionSensorState(handle, 1): 0x00000000
+
+=== 5a. at rest, the dead band as the library has it ===
+--- asked: put the pad DOWN on a table and do not touch it (at 25515.56 s)
+  "thelinkin3000": 1213 reads, 1192 new samples (238.5 a second), the timestamp's gaps min 999, mean 4193, max 10140; the timestamps advanced 4997628 against the counter's 4998809 us (0.9998); 0 reads not connected, 0 errors
+  "thelinkin3000" at rest: angular velocity's largest magnitude x 0.00750 y 0.00586 z 0.01353; mean x +0.00007 y -0.00000 z +0.00018
+  "thelinkin3000" last sample: acceleration -0.0309 +1.0001 +0.0443, orientation -0.3040 -0.0117 -0.0003 +0.9526, buttons 0x00000000, connected 1, count 1
+  "Invitado1": 1213 reads, 1150 new samples (230.1 a second), the timestamp's gaps min 999, mean 4346, max 18750; the timestamps advanced 4997624 against the counter's 4998809 us (0.9998); 0 reads not connected, 0 errors
+  "Invitado1" at rest: angular velocity's largest magnitude x 0.00664 y 0.00491 z 0.00508; mean x -0.00003 y +0.00004 z -0.00009
+  "Invitado1" last sample: acceleration +0.1896 +0.9863 +0.0965, orientation -0.0025 -0.0000 -0.0007 +1.0000, buttons 0x00000000, connected 1, count 1
+
+=== 5b. at rest, the dead band off ===
+"thelinkin3000": scePadSetAngularVelocityDeadbandState(handle, 0): 0x00000000
+"Invitado1": scePadSetAngularVelocityDeadbandState(handle, 0): 0x00000000
+  "thelinkin3000": 970 reads, 954 new samples (238.7 a second), the timestamp's gaps min 1091, mean 4189, max 10119; the timestamps advanced 3996214 against the counter's 3996869 us (0.9998); 0 reads not connected, 0 errors
+  "thelinkin3000" at rest, the dead band off: angular velocity's largest magnitude x 0.00803 y 0.00590 z 0.01209; mean x -0.00007 y +0.00003 z +0.00004
+  "thelinkin3000" last sample: acceleration -0.0308 +1.0000 +0.0460, orientation -0.3041 -0.0118 -0.0003 +0.9526, buttons 0x00000000, connected 1, count 1
+  "Invitado1": 970 reads, 918 new samples (229.7 a second), the timestamp's gaps min 1112, mean 4353, max 13760; the timestamps advanced 3996246 against the counter's 3996869 us (0.9998); 0 reads not connected, 0 errors
+  "Invitado1" at rest, the dead band off: angular velocity's largest magnitude x 0.00591 y 0.00487 z 0.00565; mean x -0.00005 y +0.00002 z +0.00002
+  "Invitado1" last sample: acceleration +0.1922 +0.9783 +0.1003, orientation -0.0025 +0.0000 -0.0007 +1.0000, buttons 0x00000000, connected 1, count 1
+"thelinkin3000": scePadSetAngularVelocityDeadbandState(handle, 1): 0x00000000
+"Invitado1": scePadSetAngularVelocityDeadbandState(handle, 1): 0x00000000
+
+=== 5c. the turns (the dead band on, as the library starts) ===
+--- asked: pick the pad up and hold it as you play, facing the TV (at 25528.67 s)
+--- asked: AIM LEFT: keep the pad level and point it at the LEFT wall (a quarter turn), hold (at 25532.67 s)
+  "thelinkin3000" aim left: each axis's angle, its excursion low to high and where it ended: x -0.007 to +0.000 (end -0.005) y -0.002 to +0.002 (end +0.002) z -0.006 to +0.000 (end -0.006); the axis that moved most: x, negative
+  "thelinkin3000" peak angular velocity: x 0.055 y 0.052 z 0.049
+  "Invitado1" aim left: each axis's angle, its excursion low to high and where it ended: x +0.000 to +0.000 (end +0.000) y +0.000 to +0.000 (end +0.000) z +0.000 to +0.000 (end +0.000); the axis that moved most: x, positive
+  "Invitado1" peak angular velocity: x 0.000 y 0.000 z 0.000
+--- asked: back to facing the TV (at 25536.20 s)
+--- asked: AIM RIGHT: keep the pad level and point it at the RIGHT wall, hold (at 25538.70 s)
+  "thelinkin3000" aim right: each axis's angle, its excursion low to high and where it ended: x -0.395 to +0.002 (end -0.369) y -1.545 to +0.002 (end -1.532) z +0.000 to +0.554 (end +0.554); the axis that moved most: y, negative
+  "thelinkin3000" peak angular velocity: x 1.378 y 4.719 z 2.526
+  "Invitado1" aim right: each axis's angle, its excursion low to high and where it ended: x +0.000 to +0.000 (end +0.000) y +0.000 to +0.000 (end +0.000) z +0.000 to +0.000 (end +0.000); the axis that moved most: x, positive
+  "Invitado1" peak angular velocity: x 0.000 y 0.000 z 0.000
+--- asked: back to facing the TV (at 25542.23 s)
+--- asked: tip the TOP of the pad AWAY from you a quarter turn (look up), hold (at 25544.73 s)
+  "thelinkin3000" up: each axis's angle, its excursion low to high and where it ended: x +0.000 to +1.013 (end +1.013) y -0.010 to +0.004 (end -0.001) z -0.004 to +0.044 (end +0.035); the axis that moved most: x, positive
+  "thelinkin3000" peak angular velocity: x 2.452 y 0.095 z 0.279
+  "Invitado1" up: each axis's angle, its excursion low to high and where it ended: x +0.000 to +0.000 (end +0.000) y +0.000 to +0.000 (end +0.000) z +0.000 to +0.000 (end +0.000); the axis that moved most: x, positive
+  "Invitado1" peak angular velocity: x 0.000 y 0.000 z 0.000
+--- asked: back to facing the TV (at 25548.25 s)
+--- asked: tip the TOP of the pad TOWARD you a quarter turn (look down), hold (at 25550.76 s)
+  "thelinkin3000" down: each axis's angle, its excursion low to high and where it ended: x -1.742 to +0.000 (end -1.704) y -0.107 to +0.011 (end -0.107) z -0.127 to +0.001 (end -0.054); the axis that moved most: x, negative
+  "thelinkin3000" peak angular velocity: x 3.201 y 0.681 z 0.561
+  "Invitado1" down: each axis's angle, its excursion low to high and where it ended: x +0.000 to +0.000 (end +0.000) y +0.000 to +0.000 (end +0.000) z +0.000 to +0.000 (end +0.000); the axis that moved most: x, positive
+  "Invitado1" peak angular velocity: x 0.000 y 0.000 z 0.000
+--- asked: back to facing the TV (at 25554.28 s)
+--- asked: STEER LEFT: turn the pad like a steering wheel to the left, hold (at 25556.78 s)
+  "thelinkin3000" steer left: each axis's angle, its excursion low to high and where it ended: x -0.456 to +0.000 (end -0.456) y -0.236 to +0.000 (end -0.214) z +0.000 to +1.527 (end +1.503); the axis that moved most: z, positive
+  "thelinkin3000" peak angular velocity: x 1.849 y 1.040 z 4.500
+  "Invitado1" steer left: each axis's angle, its excursion low to high and where it ended: x +0.000 to +0.000 (end +0.000) y +0.000 to +0.000 (end +0.000) z +0.000 to +0.000 (end +0.000); the axis that moved most: x, positive
+  "Invitado1" peak angular velocity: x 0.000 y 0.000 z 0.000
+--- asked: back to facing the TV (at 25560.31 s)
+--- asked: STEER RIGHT: turn the pad like a steering wheel to the right, hold (at 25562.81 s)
+  "thelinkin3000" steer right: each axis's angle, its excursion low to high and where it ended: x -0.124 to +0.026 (end -0.060) y -0.009 to +0.108 (end +0.096) z -1.298 to +0.000 (end -1.230); the axis that moved most: z, negative
+  "thelinkin3000" peak angular velocity: x 1.258 y 0.456 z 4.013
+  "Invitado1" steer right: each axis's angle, its excursion low to high and where it ended: x +0.000 to +0.000 (end +0.000) y +0.000 to +0.000 (end +0.000) z +0.000 to +0.000 (end +0.000); the axis that moved most: x, positive
+  "Invitado1" peak angular velocity: x 0.000 y 0.000 z 0.000
+--- asked: back to facing the TV (at 25566.34 s)
+
+=== 6. scePadRead's queue, every 20 ms for 3 s ===
+"thelinkin3000": 150 reads, 1820 samples (606.7 a second), at most 15 in a read; gaps between their timestamps min 42, mean 1648, max 10001
+"Invitado1": 150 reads, 1807 samples (602.3 a second), at most 64 in a read; gaps between their timestamps min 403, mean 1712, max 16115
+
+=== 7. the end ===
+"thelinkin3000": scePadSetMotionSensorState(handle, 0): 0x00000000
+"Invitado1": scePadSetMotionSensorState(handle, 0): 0x00000000
+SDL_Quit returned
+
+=== done ===

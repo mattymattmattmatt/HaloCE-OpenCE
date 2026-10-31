@@ -69,17 +69,21 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_edit_extended_description" controller="1" left="275" top="78" width="320" height="362" bitmap="bitmaps/list_field">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_edit_extended_desc_text"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_edit_extended_desc_pic" x="4"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/layout/xbox_series/overlay_small" x="4" platform="desktop android web"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/layout/dualsense/overlay_small" x="4" platform="ps5"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/layout/switch_pro/overlay_small" x="4" platform="switch"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_edit_select_list" type="column_list" width="640" height="480" flags="pass_unhandled_to_focused_child up_down_tabs_items" description="main_menu/settings_select/player_setup/player_profile_edit/profile_edit_extended_description">
 		<data input="plyr prof edit select menu upd8"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/name_profile_item"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/controller_setup_profile_item"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepads_profile_item"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mouse_settings_profile_item"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings_profile_item"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings_profile_item"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/network_settings_profile_item"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/color_profile_item" y="32"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/controller_setup_profile_item" y="-4"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepads_profile_item" y="-7"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mouse_settings_profile_item" y="-11"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings_profile_item" y="-15"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings_profile_item" y="-18"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/network_settings_profile_item" y="-23"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/color_profile_item" y="6"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gameplay_profile_item"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/about_item" y="32"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_edit_button_bar" y="414"/>
 	</widget>

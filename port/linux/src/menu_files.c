@@ -99,7 +99,7 @@ static long file_add(const char *path, const unsigned char *data, unsigned long 
 
 static unsigned char *file_read(const char *path, unsigned long *size)
 {
-#ifdef HALO_ARM64_GUEST
+#ifdef HALO_GUEST
 	FILE *file = fopen(path, "rb");
 	unsigned char *data = NULL;
 	long length;
@@ -387,8 +387,14 @@ static long current_line(struct reader *reader)
 	return (long)XML_GetCurrentLineNumber(reader->parser);
 }
 
-/* this build's platform, as the platform attribute names it */
-#ifdef HALO_ANDROID
+/* this build's platform, as the platform attribute names it (the Switch's
+game is built as Android's, with HALO_SWITCH too: "android" is the Android
+app's; the PS5's as the desktop's, with HALO_PS5: "desktop" is the PC's) */
+#if defined(HALO_SWITCH)
+#define MENU_PLATFORM "switch"
+#elif defined(HALO_PS5)
+#define MENU_PLATFORM "ps5"
+#elif defined(HALO_ANDROID)
 #define MENU_PLATFORM "android"
 #elif defined(HALO_WEB)
 #define MENU_PLATFORM "web"
@@ -416,9 +422,10 @@ static int for_this_platform(struct reader *reader, const XML_Char **attributes)
 				if (length)
 				{
 					if ((length != 7 || strncmp(name, "desktop", 7)) && (length != 7 || strncmp(name, "android", 7)) &&
-						(length != 3 || strncmp(name, "web", 3)))
+						(length != 3 || strncmp(name, "web", 3)) && (length != 6 || strncmp(name, "switch", 6)) &&
+						(length != 3 || strncmp(name, "ps5", 3)))
 					{
-						reader_error(reader, "platform=\"%s\" names one that is not desktop, android or web",
+						reader_error(reader, "platform=\"%s\" names one that is not desktop, android, switch, ps5 or web",
 							attributes[index + 1]);
 						return 1;
 					}
@@ -1036,6 +1043,10 @@ static struct
 	int failed;
 } art[MAXIMUM_ART];
 static long art_count;
+#if defined(HALO_SWITCH) || defined(HALO_ANDROID) || defined(HALO_PS5)
+/* changed whenever the art registered changes (menu_art_serial) */
+static unsigned long art_serial = 1;
+#endif
 /* a bit of 4096 for each bitmap's Data (art_filter_bit): a texture whose
 bit is clear is no menu's, found without searching the bitmaps, as the
 renderer asks for each texture it binds */
@@ -1081,6 +1092,9 @@ void halo_menus_art_register(void const *texture, char const *png)
 	memset(&art[index], 0, sizeof(art[index]));
 	art[index].data = data;
 	art[index].png = strdup(png);
+#if defined(HALO_SWITCH) || defined(HALO_ANDROID) || defined(HALO_PS5)
+	art_serial++;
+#endif
 	art_filter[art_filter_bit(data) >> 3] |= (unsigned char)(1 << (art_filter_bit(data) & 7));
 }
 
@@ -1098,6 +1112,9 @@ void halo_menus_art_forget(void)
 		}
 	}
 	art_count = 0;
+#if defined(HALO_SWITCH) || defined(HALO_ANDROID) || defined(HALO_PS5)
+	art_serial++;
+#endif
 	memset(art_filter, 0, sizeof(art_filter));
 }
 
@@ -1132,3 +1149,28 @@ unsigned int menu_art_texture(unsigned long data, unsigned long *levels)
 	*levels = art[index].levels;
 	return art[index].texture;
 }
+
+#if defined(HALO_SWITCH) || defined(HALO_ANDROID) || defined(HALO_PS5)
+unsigned long menu_art_serial(void)
+{
+	return art_serial;
+}
+
+const char *menu_art_name(unsigned long data)
+{
+	long index;
+
+	for (index = 0; index < art_count; index++)
+	{
+		if (art[index].data == data)
+			return art[index].png;
+	}
+	return NULL;
+}
+
+const unsigned char *menu_art_png(const char *name, unsigned long *size)
+{
+	*size = 0;
+	return file_data(name, size);
+}
+#endif

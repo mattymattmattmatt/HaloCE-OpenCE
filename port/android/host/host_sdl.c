@@ -19,15 +19,6 @@ so the audio callback is handed to a thread that has one.
 
 #define HANDLE_COUNT 256
 
-enum handle_type
-{
-	_handle_free,
-	_handle_window,
-	_handle_context,
-	_handle_gamepad,
-	_handle_audio,
-};
-
 struct handle
 {
 	int type;
@@ -39,7 +30,7 @@ struct handle
 static struct handle handles[HANDLE_COUNT];
 static pthread_mutex_t handle_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static uint32_t handle_new(int type, void *object)
+uint32_t host_sdl_handle_new(int type, void *object)
 {
 	uint32_t index;
 
@@ -71,7 +62,7 @@ static uint32_t handle_new(int type, void *object)
 	return 0;
 }
 
-static void *handle_get(uint32_t handle, int type)
+void *host_sdl_handle_get(uint32_t handle, int type)
 {
 	void *object = NULL;
 
@@ -84,8 +75,19 @@ static void *handle_get(uint32_t handle, int type)
 	return object;
 }
 
+void host_sdl_handle_free(uint32_t handle)
+{
+	if (handle == 0 || handle >= HANDLE_COUNT)
+		return;
+	pthread_mutex_lock(&handle_lock);
+	handles[handle].type = _handle_free;
+	handles[handle].object = NULL;
+	handles[handle].binding = NULL;
+	pthread_mutex_unlock(&handle_lock);
+}
+
 /* the object of a handle, which the handle no longer refers to; NULL when
-there is none. *binding gets what handle_new's caller stored (audio) */
+there is none. *binding gets what host_sdl_handle_new's caller stored (audio) */
 static void *handle_release(uint32_t handle, int type, void **binding)
 {
 	void *object = NULL;
@@ -147,14 +149,34 @@ int64_t host_sdl_thread_id(void)
 
 /* ---------- video */
 
+/* Under Vulkan the guest's window is real, but made without SDL_WINDOW_OPENGL so
+that SDL makes no EGL surface on it (Android lets one API own a window: the
+Vulkan renderer's surface is made on this one, phase 2), and its GL context is a
+stand-in: a handle to nothing, which the functions below accept. The platform
+layer opens a context and swaps at each present as it does under GL ES, and its
+event loop runs only while it has a window and a context. */
+static char standin_context;
+
 uint32_t host_sdl_create_window(const char *title, int width, int height, int64_t flags)
 {
-	return handle_new(_handle_window, SDL_CreateWindow(title, width, height, (SDL_WindowFlags)flags));
+	if (host_renderer_vulkan)
+	{
+		flags &= ~(int64_t)SDL_WINDOW_OPENGL;
+		host_logf(HOST_LOG_INFO, "window: real, without an OpenGL context (a stand-in), the display being Vulkan's");
+	}
+	{
+		SDL_Window *window = SDL_CreateWindow(title, width, height, (SDL_WindowFlags)flags);
+
+		/* the Vulkan backend makes its surface on the game's window: the last made (host_vk.h) */
+		if (host_renderer_vulkan && window)
+			host_vk_window = window;
+		return host_sdl_handle_new(_handle_window, window);
+	}
 }
 
 void host_sdl_window_size_in_pixels(uint32_t window, int *width, int *height)
 {
-	SDL_Window *object = handle_get(window, _handle_window);
+	SDL_Window *object = host_sdl_handle_get(window, _handle_window);
 
 	*width = 0;
 	*height = 0;
@@ -164,37 +186,95 @@ void host_sdl_window_size_in_pixels(uint32_t window, int *width, int *height)
 
 int host_sdl_set_relative_mouse(uint32_t window, int enabled)
 {
-	SDL_Window *object = handle_get(window, _handle_window);
+	SDL_Window *object = host_sdl_handle_get(window, _handle_window);
 
 	return object ? SDL_SetWindowRelativeMouseMode(object, enabled != 0) : 0;
 }
 
 int host_sdl_gl_set_attribute(int attribute, int value)
 {
+	if (host_renderer_vulkan)
+		return 1;
 	return SDL_GL_SetAttribute((SDL_GLAttr)attribute, value);
 }
 
 uint32_t host_sdl_gl_create_context(uint32_t window)
 {
-	SDL_Window *object = handle_get(window, _handle_window);
+	SDL_Window *object = host_sdl_handle_get(window, _handle_window);
 
-	return object ? handle_new(_handle_context, SDL_GL_CreateContext(object)) : 0;
+	if (host_renderer_vulkan)
+		return object ? host_sdl_handle_new(_handle_context, &standin_context) : 0;
+	return object ? host_sdl_handle_new(_handle_context, SDL_GL_CreateContext(object)) : 0;
 }
 
 int host_sdl_gl_make_current(uint32_t window, uint32_t context)
 {
-	return SDL_GL_MakeCurrent(handle_get(window, _handle_window), handle_get(context, _handle_context));
+	if (host_renderer_vulkan)
+		return host_sdl_handle_get(window, _handle_window) != NULL && host_sdl_handle_get(context, _handle_context) == &standin_context;
+	return SDL_GL_MakeCurrent(host_sdl_handle_get(window, _handle_window), host_sdl_handle_get(context, _handle_context));
 }
+
+static int swap_interval = 1;
 
 int host_sdl_gl_set_swap_interval(int interval)
 {
+	swap_interval = interval;
+	if (host_renderer_vulkan)
+		return 1;
 	return SDL_GL_SetSwapInterval(interval);
+}
+
+/* The stand-in swap: until the Vulkan backend presents (host_vk_presenting) and
+its swapchain waits for the display, frames are held to the display's refresh
+rate here, as the swap's vsync holds them under GL ES, and every ten seconds
+the log says how many were swapped. */
+static int standin_swap(SDL_Window *window)
+{
+	static Uint64 next, reported;
+	static unsigned frames;
+	Uint64 now = SDL_GetTicksNS();
+
+	if (swap_interval > 0 && !host_vk_presenting)
+	{
+		SDL_DisplayID display = SDL_GetDisplayForWindow(window);
+		const SDL_DisplayMode *mode = display ? SDL_GetCurrentDisplayMode(display) : NULL;
+		Uint64 interval = (Uint64)(1e9f / (mode && mode->refresh_rate > 1.0f ? mode->refresh_rate : 60.0f));
+
+		if (next > now)
+		{
+			SDL_DelayPrecise(next - now);
+			now = next;
+		}
+		/* a frame more than an interval late starts the count again */
+		next = now - next > interval ? now + interval : next + interval;
+	}
+	frames++;
+	host_gl_frame();
+	if (!reported)
+		reported = now;
+	if (now - reported >= 10000000000ull)
+	{
+		SDL_DisplayID display = SDL_GetDisplayForWindow(window);
+		const SDL_DisplayMode *mode = display ? SDL_GetCurrentDisplayMode(display) : NULL;
+
+		host_logf(HOST_LOG_INFO, "vk: %u frames swapped in %.1f s%s (the display mode says %.1f Hz)", frames,
+			(double)(now - reported) / 1e9,
+			host_vk_presenting ? ", paced by the swapchain" : ", paced by the stand-in swap",
+			mode ? mode->refresh_rate : 0.0f);
+		frames = 0;
+		reported = now;
+	}
+	return 1;
 }
 
 int host_sdl_gl_swap_window(uint32_t window)
 {
-	SDL_Window *object = handle_get(window, _handle_window);
+	SDL_Window *object = host_sdl_handle_get(window, _handle_window);
 
+	if (host_renderer_vulkan)
+		return object ? standin_swap(object) : 0;
+	/* (the GL calls' counts, every ten seconds: debug.gpu_stats) */
+	host_gl_frame();
 	return object ? SDL_GL_SwapWindow(object) : 0;
 }
 
@@ -218,7 +298,7 @@ its text events are not (their text is a pointer) */
 
 int host_sdl_text_input(uint32_t window, int type)
 {
-	SDL_Window *object = handle_get(window, _handle_window);
+	SDL_Window *object = host_sdl_handle_get(window, _handle_window);
 	SDL_PropertiesID properties;
 
 	if (!object)
@@ -259,14 +339,24 @@ uint32_t host_sdl_open_gamepad(uint32_t id)
 	SDL_Gamepad *gamepad = SDL_OpenGamepad((SDL_JoystickID)id);
 
 	if (gamepad)
-		host_logf(HOST_LOG_INFO, "gamepad %u: %s (type %d, %04x:%04x)", (unsigned)id, SDL_GetGamepadName(gamepad),
-			(int)SDL_GetGamepadType(gamepad), SDL_GetGamepadVendor(gamepad), SDL_GetGamepadProduct(gamepad));
-	return handle_new(_handle_gamepad, gamepad);
+	{
+		char guid[64];
+		char const *serial = SDL_GetGamepadSerial(gamepad);
+		char const *path = SDL_GetGamepadPath(gamepad);
+
+		/* (the serial, path and GUID tell two pads of the same model apart,
+		which share a name) */
+		SDL_GUIDToString(SDL_GetGamepadGUIDForID((SDL_JoystickID)id), guid, sizeof(guid));
+		host_logf(HOST_LOG_INFO, "gamepad %u: %s (type %d, %04x:%04x, serial %s, path %s, guid %s)", (unsigned)id,
+			SDL_GetGamepadName(gamepad), (int)SDL_GetGamepadType(gamepad), SDL_GetGamepadVendor(gamepad),
+			SDL_GetGamepadProduct(gamepad), serial ? serial : "none", path ? path : "none", guid);
+	}
+	return host_sdl_handle_new(_handle_gamepad, gamepad);
 }
 
 uint32_t host_sdl_gamepad_from_id(uint32_t id)
 {
-	return handle_new(_handle_gamepad, SDL_GetGamepadFromID((SDL_JoystickID)id));
+	return host_sdl_handle_new(_handle_gamepad, SDL_GetGamepadFromID((SDL_JoystickID)id));
 }
 
 /* (the event thread, when the controller goes: sdl_platform.c) */
@@ -280,28 +370,28 @@ void host_sdl_close_gamepad(uint32_t gamepad)
 
 int host_sdl_gamepad_axis(uint32_t gamepad, int axis)
 {
-	SDL_Gamepad *object = handle_get(gamepad, _handle_gamepad);
+	SDL_Gamepad *object = host_sdl_handle_get(gamepad, _handle_gamepad);
 
 	return object ? SDL_GetGamepadAxis(object, (SDL_GamepadAxis)axis) : 0;
 }
 
 int host_sdl_gamepad_button(uint32_t gamepad, int button)
 {
-	SDL_Gamepad *object = handle_get(gamepad, _handle_gamepad);
+	SDL_Gamepad *object = host_sdl_handle_get(gamepad, _handle_gamepad);
 
 	return object ? SDL_GetGamepadButton(object, (SDL_GamepadButton)button) : 0;
 }
 
 int host_sdl_gamepad_type(uint32_t gamepad)
 {
-	SDL_Gamepad *object = handle_get(gamepad, _handle_gamepad);
+	SDL_Gamepad *object = host_sdl_handle_get(gamepad, _handle_gamepad);
 
 	return object ? SDL_GetGamepadType(object) : SDL_GAMEPAD_TYPE_UNKNOWN;
 }
 
 int host_sdl_rumble_gamepad(uint32_t gamepad, uint32_t low, uint32_t high, uint32_t milliseconds)
 {
-	SDL_Gamepad *object = handle_get(gamepad, _handle_gamepad);
+	SDL_Gamepad *object = host_sdl_handle_get(gamepad, _handle_gamepad);
 
 	return object ? SDL_RumbleGamepad(object, (Uint16)low, (Uint16)high, milliseconds) : 0;
 }
@@ -418,7 +508,7 @@ uint32_t host_sdl_open_audio_stream(uint32_t device, const void *spec, uint32_t 
 	if (!callback)
 	{
 		stream = SDL_OpenAudioDeviceStream((SDL_AudioDeviceID)device, spec, NULL, NULL);
-		return stream ? handle_new(_handle_audio, stream) : 0;
+		return stream ? host_sdl_handle_new(_handle_audio, stream) : 0;
 	}
 	binding = SDL_calloc(1, sizeof(*binding));
 	if (!binding)
@@ -436,7 +526,7 @@ uint32_t host_sdl_open_audio_stream(uint32_t device, const void *spec, uint32_t 
 		return 0;
 	}
 	/* the device starts paused, so no callback can run before this */
-	binding->handle = handle_new(_handle_audio, stream);
+	binding->handle = host_sdl_handle_new(_handle_audio, stream);
 	if (!binding->handle)
 	{
 		SDL_DestroyAudioStream(stream);
@@ -456,7 +546,7 @@ uint32_t host_sdl_open_audio_stream(uint32_t device, const void *spec, uint32_t 
 
 int host_sdl_put_audio_stream_data(uint32_t stream, const void *data, int length)
 {
-	SDL_AudioStream *object = handle_get(stream, _handle_audio);
+	SDL_AudioStream *object = host_sdl_handle_get(stream, _handle_audio);
 
 	if (!object)
 		return 0;
@@ -467,7 +557,7 @@ int host_sdl_put_audio_stream_data(uint32_t stream, const void *data, int length
 
 int host_sdl_resume_audio_stream_device(uint32_t stream)
 {
-	SDL_AudioStream *object = handle_get(stream, _handle_audio);
+	SDL_AudioStream *object = host_sdl_handle_get(stream, _handle_audio);
 
 	return object ? SDL_ResumeAudioStreamDevice(object) : 0;
 }
@@ -475,14 +565,14 @@ int host_sdl_resume_audio_stream_device(uint32_t stream)
 /* (voice chat's microphone: port/linux/src/voice_audio.c) */
 int host_sdl_get_audio_stream_data(uint32_t stream, void *data, int length)
 {
-	SDL_AudioStream *object = handle_get(stream, _handle_audio);
+	SDL_AudioStream *object = host_sdl_handle_get(stream, _handle_audio);
 
 	return object ? SDL_GetAudioStreamData(object, data, length) : -1;
 }
 
 int host_sdl_get_audio_stream_available(uint32_t stream)
 {
-	SDL_AudioStream *object = handle_get(stream, _handle_audio);
+	SDL_AudioStream *object = host_sdl_handle_get(stream, _handle_audio);
 
 	return object ? SDL_GetAudioStreamAvailable(object) : -1;
 }
@@ -531,7 +621,17 @@ int host_sdl_open_url(const char *url)
 
 int host_sdl_show_toast(const char *message, int duration, int gravity, int x, int y)
 {
+#ifdef __ANDROID__
 	return SDL_ShowAndroidToast(message, duration, gravity, x, y) ? 1 : 0;
+#else
+	/* (the desktop guest shows none: Linux arm64, port/linux/host) */
+	(void)message;
+	(void)duration;
+	(void)gravity;
+	(void)x;
+	(void)y;
+	return 0;
+#endif
 }
 
 /* ---------- a message for the player (a host of another network version) */
@@ -543,32 +643,37 @@ int host_sdl_show_simple_message_box(uint32_t flags, const char *title, const ch
 
 /* ---------- a question for the player (the mods at startup: port_mods.c) */
 
-int host_sdl_show_message_box(uint32_t flags, const char *title, const char *message, int default_index,
-	const char *button0, const char *button1, const char *button2)
+/* 1 and the button chosen in box->chosen, else 0 (the structure: host.h) */
+int host_sdl_show_message_box(struct host_message_box *box)
 {
-	const char *labels[3] = { button0, button1, button2 };
-	SDL_MessageBoxButtonData buttons[3];
+	SDL_MessageBoxButtonData buttons[HOST_MESSAGE_BOX_BUTTONS];
 	SDL_MessageBoxData question;
-	int count = 0;
+	const char *texts = (const char *)(uintptr_t)box->button_texts;
+	uint32_t used = 0;
 	int answer = -1;
 	int index;
 
-	for (index = 0; index < 3; index++)
+	if (box->button_count < 0 || box->button_count > HOST_MESSAGE_BOX_BUTTONS)
+		return 0;
+	for (index = 0; index < box->button_count; index++)
 	{
-		if (!labels[index])
-			continue;
-		buttons[count].flags = index == default_index ?
-			SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT | SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT : 0;
-		buttons[count].buttonID = index;
-		buttons[count].text = labels[index];
-		count++;
+		const char *end = used < box->button_texts_size ? memchr(texts + used, 0, box->button_texts_size - used) : NULL;
+
+		if (!end)
+			return 0;
+		buttons[index].flags = (SDL_MessageBoxButtonFlags)box->button_flags[index];
+		buttons[index].buttonID = box->button_ids[index];
+		buttons[index].text = texts + used;
+		used = (uint32_t)(end - texts) + 1;
 	}
-	question.flags = (SDL_MessageBoxFlags)flags;
-	question.window = NULL;
-	question.title = title;
-	question.message = message;
-	question.numbuttons = count;
+	memset(&question, 0, sizeof(question));
+	question.flags = (SDL_MessageBoxFlags)box->flags;
+	question.title = (const char *)(uintptr_t)box->title;
+	question.message = (const char *)(uintptr_t)box->message;
+	question.numbuttons = box->button_count;
 	question.buttons = buttons;
-	question.colorScheme = NULL;
-	return SDL_ShowMessageBox(&question, &answer) ? answer : -1;
+	if (!SDL_ShowMessageBox(&question, &answer))
+		return 0;
+	box->chosen = answer;
+	return 1;
 }

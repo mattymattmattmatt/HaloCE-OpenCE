@@ -168,6 +168,36 @@ symbols in this file:
 #include "rasterizer_xbox_draw_primitives.h"
 #include "rasterizer_xbox_internal.h"
 
+
+/* port: the margin past the dynamic lights' distance attenuation's box
+(0 to 1 in its coordinates) inside which their passes on the level are
+still drawn (halo_texture_clip_stage): its texture, filtered linearly, is
+black at its border, and a texel's reach past the edge of a texture of 16
+or more texels keeps whatever its edge lets through */
+#define RASTERIZER_ENVIRONMENT_PORT_LIGHT_CLIP (1.0f / 16.0f)
+
+/* port: the light being drawn, its position and the reach of its distance
+attenuation's box (its radius, or the specular's), for the screen's
+rectangle its passes are rasterized in (rasterizer_port_scissor_points) */
+static real_point3d rasterizer_environment_port_light_position;
+static real rasterizer_environment_port_light_radius;
+
+static void rasterizer_environment_port_light_scissor(
+	void)
+{
+	real_point3d corners[8];
+	real reach = rasterizer_environment_port_light_radius * (1.0f + 2.0f * RASTERIZER_ENVIRONMENT_PORT_LIGHT_CLIP);
+	short corner;
+
+	for (corner = 0; corner < 8; corner++)
+	{
+		corners[corner].x = rasterizer_environment_port_light_position.x + ((corner & 1) ? reach : -reach);
+		corners[corner].y = rasterizer_environment_port_light_position.y + ((corner & 2) ? reach : -reach);
+		corners[corner].z = rasterizer_environment_port_light_position.z + ((corner & 4) ? reach : -reach);
+	}
+	rasterizer_port_scissor_points(corners, 8);
+}
+
 /* ---------- constants */
 
 enum
@@ -1166,6 +1196,9 @@ void _rasterizer_environment_diffuse_light_begin(
 			"c:\\halo\\SOURCE\\rasterizer\\xbox\\rasterizer_xbox_environment.c",
 			0x2DC,
 			light->radius>0.0f);
+		/* port: its box, for its passes' rectangle on the screen */
+		rasterizer_environment_port_light_position = light->position;
+		rasterizer_environment_port_light_radius = light->radius;
 
 		rasterizer_set_texture(1, 2, 1, light->definition->gel.map.index, 0);
 		D3DDevice_SetTextureState_Deferred(1, D3DTSS_ADDRESSU, D3DTADDRESS_CLAMP);
@@ -1318,11 +1351,19 @@ void _rasterizer_environment_diffuse_light_draw(
 				D3DRS_PSFINALCOMBINERCONSTANT0,
 				real_rgb_color_to_pixel32(&shader_environment->environment.diffuse.material_color));
 
+			/* port: drawn only inside the light's box, where its distance
+			attenuation (stage 2, black past its border) lets anything through
+			(halo_texture_clip_stage; RASTERIZER_ENVIRONMENT_PORT_LIGHT_CLIP) */
+			halo_texture_clip_stage(2, TRUE, -RASTERIZER_ENVIRONMENT_PORT_LIGHT_CLIP,
+				1.0f + RASTERIZER_ENVIRONMENT_PORT_LIGHT_CLIP);
+			rasterizer_environment_port_light_scissor();
 			rasterizer_draw_dynamic_triangles_static_vertices(
 				dynamic_triangle_buffer_index,
 				first_triangle_index,
 				triangle_count,
 				vertex_buffer);
+			rasterizer_port_scissor_points(NULL, 0);
+			halo_texture_clip_stage(NONE, FALSE, 0.0f, 0.0f);
 			if (rasterizer_debug_options.statistics_mode == _rasterizer_statistics_mode_enabled)
 			{
 				rasterizer_frame_statistics.environment_dynamic_draw_count++;
@@ -1849,6 +1890,10 @@ void _rasterizer_environment_specular_light_begin(
 				real_rgb_color_brightness(&light->color);
 			inverse_radius = 1.0f /
 				(light->definition->geometry.specular_radius_multiplier * light->radius);
+			/* port: its box, for its passes' rectangle on the screen */
+			rasterizer_environment_port_light_position = light->position;
+			rasterizer_environment_port_light_radius =
+				light->definition->geometry.specular_radius_multiplier * light->radius;
 			vertex_constants[0].i = light->position.x;
 			vertex_constants[0].j = light->position.y;
 			vertex_constants[0].k = light->position.z;
@@ -2040,11 +2085,22 @@ void _rasterizer_environment_specular_light_draw(
 			}
 			rasterizer_set_pixel_shader(&pixel_shader);
 
+			/* port: a point light (no gel) drawn only inside its box, where its
+			distance attenuation (stage 1, black past its border) lets anything
+			through (halo_texture_clip_stage); a spot light has none */
+			if (specular_light_vertex_shader_permutation_index == 0)
+			{
+				halo_texture_clip_stage(1, TRUE, -RASTERIZER_ENVIRONMENT_PORT_LIGHT_CLIP,
+					1.0f + RASTERIZER_ENVIRONMENT_PORT_LIGHT_CLIP);
+				rasterizer_environment_port_light_scissor();
+			}
 			rasterizer_draw_dynamic_triangles_static_vertices(
 				dynamic_triangle_buffer_index,
 				first_triangle_index,
 				triangle_count,
 				vertex_buffer);
+			rasterizer_port_scissor_points(NULL, 0);
+			halo_texture_clip_stage(NONE, FALSE, 0.0f, 0.0f);
 			if (rasterizer_debug_options.statistics_mode == _rasterizer_statistics_mode_enabled)
 			{
 				rasterizer_frame_statistics.specular_light_dynamic_draw_count++;

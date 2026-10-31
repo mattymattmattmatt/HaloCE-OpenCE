@@ -53,6 +53,13 @@ void host_gl_read_buffer(unsigned int buffer, unsigned int offset, unsigned int 
 void host_gl_buffer_write(unsigned int target, unsigned int offset, unsigned int size, const void *data);
 void host_gl_fence_frame(unsigned int slot);
 void host_gl_wait_frame(unsigned int slot);
+#elif defined(HALO_GUEST)
+/* a Linux guest's desktop renderer (port/android/host/host_gl.c) */
+void host_gl_buffer_write(unsigned int target, unsigned int offset, unsigned int size, const void *data);
+void host_gl_fence_frame(unsigned int slot);
+void host_gl_wait_frame(unsigned int slot);
+int host_gl_map_results(unsigned int buffer, unsigned int size);
+void host_gl_read_results(void *data, unsigned int size);
 #endif
 
 /* ---------- GL state
@@ -159,8 +166,6 @@ struct nv2a_pixel_shader_key
 	/* Discrete meter thresholds in texture 0's red are read at level zero,
 	without filtering. Coverage/brightness still use the filtered lookup. */
 	unsigned char point_threshold;
-	/* A CE meter draw sampling a sheet also used as ordinary artwork. */
-	unsigned char ce_meter_channels;
 	/* a model lighting program's draw lit for each pixel
 	(display.per_pixel_lighting): nv2a_vertex_lighting's lights, or 0 for
 	the diffuse color the vertex shader computed */
@@ -175,8 +180,15 @@ struct nv2a_pixel_shader_key
 	blend of a constant color factor with a constant alpha one, as the
 	meters' (shader_transparent_meter) */
 	unsigned char source_blend;
-	/* blood over the surface (the gore mod's on vehicles: xgpu_set_blood) */
+	/* A CE meter draw sampling a sheet also used as ordinary artwork. (Here,
+	past the 256 bytes the Switch's shader cards keep of a key and hash,
+	port/switch/guest/dk_shaders.c: deko3d never sets it; padded to whole
+	words, which the OpenGL and Vulkan renderers hash the key by) */
+	unsigned char ce_meter_channels;
+	/* blood over the surface (the gore mod's on vehicles: xgpu_set_blood),
+	in the padding's first byte */
 	unsigned char blood;
+	unsigned char ce_meter_padding[2];
 };
 
 char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key);

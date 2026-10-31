@@ -75,7 +75,7 @@ ZLIB_DEFINES = ("-DZ_PREFIX", "-Dz_errmsg=z_port_errmsg")
 
 def updater_defines(release: bool) -> str:
     """the self-updater's build (port/linux/src/updater.c): its number, from
-    HALO_BUILD_NUMBER (tools/ci_build.py gives it for builds of main; none
+    HALO_BUILD_NUMBER (tools/ci_build.py gives it for a release tag's builds; none
     elsewhere, which never look for updates), and its configuration"""
     number = os.environ.get("HALO_BUILD_NUMBER", "0")
     if not number.isdigit():
@@ -403,9 +403,13 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
             f"-include {tags_header}",
             f"-I{crt_include}",
             f"-I{PORT_DIR / 'include'}",
-            # the port's headers the game's units include (halo_keyboard.h,
-            # halo_menus.h), but not the Linux build's C runtime wrappers
-            # next to them, which no game unit includes in quotes
+            # the shared port headers (halo_port_window.h and the capacity
+            # limits they build on) are reached by a quoted include, as below
+            # for the platform sources: -I would shadow the Windows SDK's own
+            # headers of the same names. The game's own units include the
+            # port's headers (halo_keyboard.h, halo_menus.h), but not the
+            # Linux build's C runtime wrappers next to them, which is why the
+            # whole directory is offered rather than the individual headers
             f"-iquote {LINUX_DIR / 'include'}",
             # the headers of the port's own game units (port/linux/game), for
             # the game sources that call them

@@ -275,6 +275,7 @@ symbols in this file:
 #include "scenario/scenario.h"
 #include "structures/structure_bsp_definitions.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
+#include "biped_ragdoll.h" /* port: port/linux/game/biped_ragdoll.c */
 
 /* port: port/linux/game/network_objects.c's (a client deletes the host's
 objects on the host's word alone) */
@@ -4232,6 +4233,7 @@ boolean biped_update(
 	struct biped_datum *biped = biped_get(biped_index);
 	struct biped_definition *definition = biped_definition_get(biped->definition_index);
 	struct unit_animation_update_data animation;
+	boolean ragdoll = FALSE;
 
 	if (debug_biped_skip_update)
 		return TRUE;
@@ -4334,10 +4336,24 @@ boolean biped_update(
 			biped_verify_object_vectors(biped_index, "post-turning");
 		}
 
-		biped_update_moving(biped_index, &animation);
-		biped_verify_object_vectors(biped_index, "post-moving");
+		/* port: a body falls as a ragdoll, which moves it in place of its
+		physics (game.ragdoll_players, game.ragdoll_ai,
+		port/linux/game/biped_ragdoll.c), but for a network game's host's,
+		which moves as before and is only drawn as its ragdoll lies */
+		ragdoll = TEST_FLAG(biped->object.damage_flags, _object_dead_bit) &&
+			biped_ragdoll_update(biped_index);
+		if (!ragdoll)
+		{
+			biped_update_moving(biped_index, &animation);
+			biped_verify_object_vectors(biped_index, "post-moving");
+		}
 
-		if (TEST_FLAG(biped->object.damage_flags, _object_dead_bit))
+		if (ragdoll)
+		{
+			animation.state_desired = _unit_state_dying;
+			animation.crouching = FALSE;
+		}
+		else if (TEST_FLAG(biped->object.damage_flags, _object_dead_bit))
 		{
 			biped_update_dead(biped_index, &animation);
 		}

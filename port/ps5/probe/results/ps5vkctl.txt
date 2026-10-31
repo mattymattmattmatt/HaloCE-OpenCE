@@ -1,0 +1,23 @@
+ps5vkctl (PS5_Vulkan 8aee3af, payload/ps5vkctl), loaded on 2026-10-17 through the user's payload manager
+(itsPLK/ps5-payload-manager 0.5.2: /manage:upload, then /loadpayload:, which hands it to the console's
+local ELF loader on 9021); one command per connection to 192.168.2.157:9111, times measured on the PC.
+
+> ping  (5 ms)
+ok ps5vkctl 1 pid=180
+> status  (5 ms)
+ok idle
+> users  (5 ms)
+ok users init=0x00000000 foreground=372994645 list=0x00000000 [372994645,-1,-1,-1]
+> procs  (5 ms)
+ok procs app=4294967295 title= count=0 pids=
+> launch PPSA99103  (662 ms)
+ok launched PPSA99103 result=0x0000a018 via lncUtilApp/foreground as user 372994645 (the console reports the title running)
+first report line in the kernel log 0.80 s after the launch command was sent
+> status (3 s after the first report line)
+ok running app=40984 title=PPSA99103
+> procs
+ok procs app=40984 title=PPSA99103 count=1 pids=181
+> status (after the run)
+ok idle
+> kill PPSA99103 (the title had already exited: the refusal is the safety check)  (9 ms)
+ok idle PPSA99103: no application is running

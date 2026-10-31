@@ -10,10 +10,19 @@ levels above the executable (the repository root for build/linux/halo).
 h:\ is the Halo Custom Edition install paths.custom_edition names, if any
 (its maps folder holds the resource maps Custom Edition maps need, and more
 maps).
+d:\maps and d:\custom_maps are the folders game.maps.path and
+game.custom_maps.path name, when they name one (a relative one under the
+data root), read once, at the first path translated.
 Every other drive letter X:\ is the subdirectory X/ of the save root (z:\ holds the persistent cache and saves,
 u:\ user data, t:\ title data): paths.saves, else
 $XDG_DATA_HOME/halo-linux or ~/.local/share/halo-linux. Path components are
-matched case-insensitively, like the Xbox's FATX volumes.
+matched case-insensitively, like the Xbox's FATX volumes: each is looked for
+as it is spelt first, one stat, and only if that is not there is its folder
+read for another spelling - on a file system that ignores case itself (the
+Switch's card, Windows), not even then. A folder read for each name looked
+up in it made a folder of many files cost the square of their number: the
+custom maps' scan, which looks up each map and its description, took
+seconds.
 */
 
 #include "platform.h"
@@ -24,12 +33,21 @@ matched case-insensitively, like the Xbox's FATX volumes.
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 /* ---------- paths */
+
+/* whether the file system tells names apart by case (else a name not there
+as it is spelt is not there in any spelling) */
+#if defined(HALO_SWITCH) || defined(_WIN32)
+#define FILE_SYSTEM_HAS_CASE 0
+#else
+#define FILE_SYSTEM_HAS_CASE 1
+#endif
 
 static BOOL directory_exists(const char *path)
 {
@@ -208,6 +226,56 @@ const char *platform_custom_edition_root(void)
 	return root;
 }
 
+/* the folder a setting names (game.maps.path, game.custom_maps.path) into
+folder, a relative one under the data root; empty if it names none */
+static void configured_folder(const char *setting, char *folder, unsigned long size)
+{
+	const char *path = config_string(setting);
+
+	folder[0] = 0;
+	if (!path || !*path)
+		return;
+	/* (absolute: /..., a drive's C:\... or C:/..., the Switch's sdmc:/...) */
+	if (path[0] == '/' || path[0] == '\\' || strstr(path, ":/") || strstr(path, ":\\"))
+		snprintf(folder, size, "%s", path);
+	else
+		snprintf(folder, size, "%s/%s", platform_data_root(), path);
+	trim_separators(folder);
+	platform_log("%s: %s", setting, folder);
+}
+
+/* whether two names are the same, whatever their case */
+static BOOL same_name(const char *first, const char *second)
+{
+	while (*first && tolower((unsigned char)*first) == tolower((unsigned char)*second))
+	{
+		first++;
+		second++;
+	}
+	return !*first && !*second;
+}
+
+/* d:\'s maps and custom_maps folders, if game.maps.path or
+game.custom_maps.path moves them (the path's first name, which is matched
+whatever its case): the folder, else NULL */
+static const char *moved_folder(const char *name)
+{
+	static char maps[MAX_PATH], custom_maps[MAX_PATH];
+	static int read;
+
+	if (!read)
+	{
+		read = 1;
+		configured_folder("game.maps.path", maps, sizeof(maps));
+		configured_folder("game.custom_maps.path", custom_maps, sizeof(custom_maps));
+	}
+	if (maps[0] && same_name(name, "maps"))
+		return maps;
+	if (custom_maps[0] && same_name(name, "custom_maps"))
+		return custom_maps;
+	return NULL;
+}
+
 /* whether the first length characters of a and b match, ignoring case
 (the Windows build has no strings.h); a shorter string matches only up to
 its end, which must come at the same place in both */
@@ -264,11 +332,14 @@ void platform_translate_path(const char *xbox_path, char *host_path, unsigned lo
 	char resolved[1024];
 	const char *cursor = xbox_path;
 	unsigned long length;
+	BOOL on_data_root = TRUE;
 
 	snprintf(resolved, sizeof(resolved), "%s", platform_data_root());
 	if (((cursor[0] >= 'a' && cursor[0] <= 'z') || (cursor[0] >= 'A' && cursor[0] <= 'Z')) && cursor[1] == ':')
 	{
 		char drive = (char)(cursor[0] | 0x20);
+
+		on_data_root = drive == 'd';
 
 		if (drive == 'h' && platform_custom_edition_root()[0])
 		{
@@ -276,6 +347,9 @@ void platform_translate_path(const char *xbox_path, char *host_path, unsigned lo
 		}
 		else if (drive == 'd' && translate_elsewhere(cursor + 2, resolved, sizeof(resolved), &cursor))
 		{
+			/* (its folder already where the setting keeps it: game.maps.path
+			and game.custom_maps.path do not move it again) */
+			on_data_root = FALSE;
 			cursor -= 2;
 		}
 		else if (drive != 'd')
@@ -306,20 +380,29 @@ void platform_translate_path(const char *xbox_path, char *host_path, unsigned lo
 		leave the root */
 		if (!component_length || strspn(component, ". ") == component_length)
 			continue;
-
-		if (posix_find_entry_case_insensitive(resolved, component, on_disk, sizeof(on_disk)))
+		/* (d:\'s first name, if it is a folder a setting moved) */
+		if (on_data_root)
 		{
-			/* prefer an exact match when several spellings exist */
+			const char *moved = moved_folder(component);
+
+			on_data_root = FALSE;
+			if (moved)
+			{
+				snprintf(resolved, sizeof(resolved), "%s", moved);
+				continue;
+			}
+		}
+
+		/* (as it is spelt first, which also wins when several spellings
+		are there; the folder read for another only where case counts) */
+		{
 			char exact[1100];
 			struct posix_file_information information;
 
-			snprintf(exact, sizeof(exact), "%s/%s", resolved, component);
-			if (posix_stat(exact, &information) == 0)
-				snprintf(on_disk, sizeof(on_disk), "%s", component);
-		}
-		else
-		{
 			snprintf(on_disk, sizeof(on_disk), "%s", component);
+			snprintf(exact, sizeof(exact), "%s/%s", resolved, component);
+			if (posix_stat(exact, &information) != 0 && FILE_SYSTEM_HAS_CASE)
+				posix_find_entry_case_insensitive(resolved, component, on_disk, sizeof(on_disk));
 		}
 		length = strlen(resolved);
 		snprintf(resolved + length, sizeof(resolved) - length, "/%s", on_disk);
@@ -441,16 +524,23 @@ void platform_maps_folder_check(struct platform_maps_folder *maps)
 
 /* ---------- file handles */
 
+struct read_ahead;
+
 struct platform_file
 {
 	int descriptor;
 	char path[1024];
+	/* platform_file_read_ahead's, or NULL */
+	struct read_ahead *read_ahead;
 };
+
+static void read_ahead_stop(struct platform_file *file);
 
 static void file_destroy(struct platform_handle *handle)
 {
 	struct platform_file *file = handle->data;
 
+	read_ahead_stop(file);
 	close(file->descriptor);
 	free(file);
 }
@@ -460,6 +550,27 @@ static struct platform_file *file_from_handle(HANDLE handle)
 	struct platform_handle *record = platform_handle_get(handle, _platform_handle_file);
 
 	return record ? record->data : NULL;
+}
+
+/* The game is about to write a new map over one of its map cache files
+(source/cache/cache_files_windows.c). The Switch's host keeps those files in
+memory (port/switch/host/host_memory_files.c): the file is emptied and given
+its size back, so the old map's memory goes before the new map's is taken.
+A file on a disk is written over as it is. */
+void platform_file_discard(HANDLE handle)
+{
+#ifdef HALO_SWITCH
+	struct platform_file *file = file_from_handle(handle);
+	struct posix_file_information information;
+
+	if (file && posix_fstat(file->descriptor, &information) == 0)
+	{
+		posix_truncate(file->descriptor, 0, 0);
+		posix_truncate(file->descriptor, information.size_low, information.size_high);
+	}
+#else
+	(void)handle;
+#endif
 }
 
 HANDLE WINAPI CreateFileA(LPCSTR file_name, DWORD desired_access, DWORD share_mode,
@@ -564,8 +675,16 @@ static BOOL read_at(struct platform_file *file, LPVOID buffer, DWORD count, LPDW
 	faulting. Guest memory is therefore filled through a bounce buffer: the
 	copy faults like any other write, at the moment the data really lands,
 	so a texture uploaded while the read is in flight is refreshed. */
+#ifdef HALO_SWITCH
+	/* The console will not write-protect guest memory (host_mman.c), so
+	there is no watch for a bounce to keep honest, and the staging buffer
+	was a 128 KB malloc and free per read - each one a map and an unmap in
+	the host - that made loading a map crawl. */
+	BOOL bounce = FALSE;
+#else
 	BOOL bounce = platform_is_contiguous(buffer) ||
 		platform_is_contiguous((char *)buffer + (count ? count - 1 : 0));
+#endif
 	char *staging = bounce ? malloc(count < READ_BOUNCE_SIZE ? count : READ_BOUNCE_SIZE) : NULL;
 
 	if (bounce && !staging)
@@ -603,6 +722,12 @@ static BOOL read_at(struct platform_file *file, LPVOID buffer, DWORD count, LPDW
 		total += (DWORD)result;
 	}
 	free(staging);
+#ifdef HALO_SWITCH
+	/* read straight into guest memory, past the write watch (above): if it
+	was texture memory, its textures are drawn again from it */
+	if (total && platform_is_contiguous(buffer))
+		memory_watch_prepare_write(buffer, total);
+#endif
 	if (bytes_read)
 		*bytes_read = total;
 	return TRUE;
@@ -682,6 +807,187 @@ BOOL WINAPI WriteFile(HANDLE handle, LPCVOID buffer, DWORD count, LPDWORD bytes_
 	return result;
 }
 
+/* ---------- read ahead (platform_file_read_ahead)
+
+A map unpacked into the cache was read 128 KB at a time, each read waited
+for before zlib took it, so the card and zlib took turns: a campaign
+level's copy was its reads' time and zlib's added (2.9 s and 2.3 s of a30's
+5.3 s on the Switch). A thread of the file's own reads it from its start,
+a megabyte at a time, into a ring READ_AHEAD_SIZE ahead of the game's
+reads, which are copied out of it as it fills; a read behind the ring or
+past it (none, as the game reads the map) goes to the file as before. */
+
+enum
+{
+	READ_AHEAD_SIZE = 8 * 1024 * 1024,
+	READ_AHEAD_CHUNK = 1024 * 1024,
+};
+
+struct read_ahead
+{
+	pthread_t thread;
+	pthread_mutex_t lock;
+	pthread_cond_t changed;
+	char *ring;
+	unsigned long long file_size;
+	/* the ring holds the file's bytes from consumed to filled, each at its offset modulo the ring's size */
+	unsigned long long consumed, filled;
+	int stop, error;
+	/* the reader's time reading, and waiting for room (the game behind it), and the game's waiting for it */
+	unsigned long long read_us, room_us, waited_us;
+};
+
+static unsigned long long read_ahead_now_us(void)
+{
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (unsigned long long)now.tv_sec * 1000000ULL + (unsigned long long)now.tv_nsec / 1000ULL;
+}
+
+static void *read_ahead_thread(void *context)
+{
+	struct platform_file *file = context;
+	struct read_ahead *ahead = file->read_ahead;
+
+	pthread_mutex_lock(&ahead->lock);
+	while (!ahead->stop && !ahead->error && ahead->filled < ahead->file_size)
+	{
+		unsigned long long at = ahead->filled, room = ahead->consumed + READ_AHEAD_SIZE - ahead->filled;
+		size_t wanted = READ_AHEAD_CHUNK, position = (size_t)(at % READ_AHEAD_SIZE);
+		ssize_t result;
+		unsigned long long started;
+
+		if (room < READ_AHEAD_CHUNK && room < ahead->file_size - at)
+		{
+			started = read_ahead_now_us();
+			pthread_cond_wait(&ahead->changed, &ahead->lock);
+			ahead->room_us += read_ahead_now_us() - started;
+			continue;
+		}
+		if (wanted > room)
+			wanted = (size_t)room;
+		if (wanted > ahead->file_size - at)
+			wanted = (size_t)(ahead->file_size - at);
+		if (wanted > READ_AHEAD_SIZE - position)
+			wanted = READ_AHEAD_SIZE - position;
+		pthread_mutex_unlock(&ahead->lock);
+		started = read_ahead_now_us();
+		result = pread(file->descriptor, ahead->ring + position, wanted, (off_t)at);
+		pthread_mutex_lock(&ahead->lock);
+		ahead->read_us += read_ahead_now_us() - started;
+		if (result < 0 && errno == EINTR)
+			continue;
+		if (result <= 0)
+			ahead->error = 1;
+		else
+			ahead->filled += (unsigned long long)result;
+		pthread_cond_broadcast(&ahead->changed);
+	}
+	pthread_mutex_unlock(&ahead->lock);
+	return NULL;
+}
+
+void platform_file_read_ahead(HANDLE handle)
+{
+	struct platform_file *file = file_from_handle(handle);
+	struct read_ahead *ahead;
+	off_t size;
+
+	if (!file || file->read_ahead)
+		return;
+	size = lseek(file->descriptor, 0, SEEK_END);
+	ahead = calloc(1, sizeof(*ahead));
+	if (size <= 0 || !ahead)
+	{
+		free(ahead);
+		return;
+	}
+	ahead->ring = malloc(READ_AHEAD_SIZE);
+	if (!ahead->ring)
+	{
+		free(ahead);
+		return;
+	}
+	ahead->file_size = (unsigned long long)size;
+	pthread_mutex_init(&ahead->lock, NULL);
+	pthread_cond_init(&ahead->changed, NULL);
+	file->read_ahead = ahead;
+	if (pthread_create(&ahead->thread, NULL, read_ahead_thread, file) != 0)
+	{
+		file->read_ahead = NULL;
+		pthread_cond_destroy(&ahead->changed);
+		pthread_mutex_destroy(&ahead->lock);
+		free(ahead->ring);
+		free(ahead);
+	}
+}
+
+/* a read from the ring: TRUE with *done its bytes, or FALSE for one it does not hold, read from the file instead */
+static BOOL read_ahead_read(struct platform_file *file, void *buffer, DWORD count, DWORD *done,
+	unsigned long long offset)
+{
+	struct read_ahead *ahead = file->read_ahead;
+	unsigned long long end, started;
+	DWORD copied = 0;
+
+	pthread_mutex_lock(&ahead->lock);
+	if (offset < ahead->consumed || offset > ahead->file_size ||
+		(unsigned long long)count > READ_AHEAD_SIZE || offset + count > ahead->consumed + READ_AHEAD_SIZE)
+	{
+		pthread_mutex_unlock(&ahead->lock);
+		return FALSE;
+	}
+	end = offset + count < ahead->file_size ? offset + count : ahead->file_size;
+	started = read_ahead_now_us();
+	while (ahead->filled < end && !ahead->error)
+		pthread_cond_wait(&ahead->changed, &ahead->lock);
+	ahead->waited_us += read_ahead_now_us() - started;
+	if (ahead->filled < end)
+	{
+		pthread_mutex_unlock(&ahead->lock);
+		return FALSE;
+	}
+	while (offset + copied < end)
+	{
+		size_t position = (size_t)((offset + copied) % READ_AHEAD_SIZE);
+		size_t piece = (size_t)(end - offset - copied);
+
+		if (piece > READ_AHEAD_SIZE - position)
+			piece = READ_AHEAD_SIZE - position;
+		memcpy((char *)buffer + copied, ahead->ring + position, piece);
+		copied += (DWORD)piece;
+	}
+	/* (what is before the read is not wanted again: room for the reader) */
+	ahead->consumed = end;
+	pthread_cond_broadcast(&ahead->changed);
+	pthread_mutex_unlock(&ahead->lock);
+	*done = copied;
+	return TRUE;
+}
+
+static void read_ahead_stop(struct platform_file *file)
+{
+	struct read_ahead *ahead = file->read_ahead;
+
+	if (!ahead)
+		return;
+	pthread_mutex_lock(&ahead->lock);
+	ahead->stop = 1;
+	pthread_cond_broadcast(&ahead->changed);
+	pthread_mutex_unlock(&ahead->lock);
+	pthread_join(ahead->thread, NULL);
+	platform_log("read ahead: %s: %.1f MB read in %.2f s (%.1f MB/s), %.2f s waiting for room, the reads waited "
+		"%.2f s for it%s", file->path, ahead->filled / 1e6, ahead->read_us / 1e6,
+		ahead->read_us ? ahead->filled / (double)ahead->read_us : 0.0, ahead->room_us / 1e6, ahead->waited_us / 1e6,
+		ahead->error ? " (a read failed: the rest from the file)" : "");
+	pthread_cond_destroy(&ahead->changed);
+	pthread_mutex_destroy(&ahead->lock);
+	free(ahead->ring);
+	free(ahead);
+	file->read_ahead = NULL;
+}
+
 /* ReadFileEx/WriteFileEx complete immediately; as on Win32, the completion
 routine runs during the issuing thread's next alertable wait. */
 
@@ -706,7 +1012,10 @@ BOOL WINAPI ReadFileEx(HANDLE handle, LPVOID buffer, DWORD count, LPOVERLAPPED o
 			SetLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
-	result = read_at(file, buffer, count, &done, TRUE, overlapped_offset(overlapped));
+	if (file->read_ahead && read_ahead_read(file, buffer, count, &done, overlapped_offset(overlapped)))
+		result = TRUE;
+	else
+		result = read_at(file, buffer, count, &done, TRUE, overlapped_offset(overlapped));
 	overlapped->Internal = result ? ERROR_SUCCESS : GetLastError();
 	if (result && done == 0 && count > 0)
 		overlapped->Internal = ERROR_HANDLE_EOF;

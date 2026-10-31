@@ -87,7 +87,7 @@ public final class TouchLayoutTest {
         reject(sizedText.replace("rumble=false", "rumble=invalid"));
         reject(sizedText.replace("gyroscope=true", "gyroscope=invalid"));
         String legacy = sizedText.replace("version=4", "version=1").replaceAll("(?m)^.*\\.size=.*\\R", "")
-            .replaceAll("(?m)^(rumble|gyroscope|opacity|floating-stick|buttons-aim|options\\.x|options\\.y)=.*\\R", "");
+            .replaceAll("(?m)^(rumble|gyroscope|opacity|floating-stick|menu-fingers|buttons-aim|options\\.x|options\\.y)=.*\\R", "");
         TouchLayout.Configuration old = TouchLayout.importConfiguration(legacy);
         check(old.layout.sizeScale(copy) == 1 && old.layout.rumbleEnabled && !old.layout.gyroscopeEnabled,
               "Legacy layouts must load with default sizes and gyro disabled");
@@ -102,13 +102,24 @@ public final class TouchLayoutTest {
               "The floating stick must survive export/import");
         sized.layout.floatingStick = false;
         reject(translucent.replace("floating-stick=false", "floating-stick=maybe"));
-        String version2 = translucent.replace("version=4", "version=2").replaceAll("(?m)^(opacity|floating-stick|buttons-aim)=.*\\R", "");
+        String version2 = translucent.replace("version=4", "version=2").replaceAll("(?m)^(opacity|floating-stick|menu-fingers|buttons-aim)=.*\\R", "");
         check(TouchLayout.importConfiguration(version2).layout.opacity == 1f
               && !TouchLayout.importConfiguration(version2).layout.floatingStick,
               "Version 2 layouts load fully opaque, with the stick in its place");
         reject(translucent.replaceAll("(?m)^opacity=.*\\R", ""));
+        // The cheat menu's fingers (version 4): 3 or 4, 3 for older files.
+        check(TouchLayout.importConfiguration(translucent).layout.menuFingers == 3, "Three menu fingers by default");
+        sized.layout.menuFingers = 4;
+        String fourFingers = sized.layout.exportConfiguration(2.25f);
+        sized.layout.menuFingers = 3;
+        check(TouchLayout.importConfiguration(fourFingers).layout.menuFingers == 4,
+              "The menu fingers must survive export/import");
+        reject(fourFingers.replace("menu-fingers=4", "menu-fingers=5"));
+        reject(fourFingers.replace("menu-fingers=4", "menu-fingers=2"));
+        reject(fourFingers.replace("menu-fingers=4", "menu-fingers=four"));
+        reject(fourFingers.replaceAll("(?m)^menu-fingers=.*\\R", ""));
         // Held buttons aim (version 4) unless turned off.
-        check(TouchLayout.importConfiguration(translucent).layout.buttonsAim, "Held buttons aim by default");
+        check(TouchLayout.importConfiguration(fourFingers).layout.buttonsAim, "Held buttons aim by default");
         sized.layout.buttonsAim = false;
         String buttonsStill = sized.layout.exportConfiguration(2.25f);
         sized.layout.buttonsAim = true;
@@ -117,7 +128,7 @@ public final class TouchLayoutTest {
         reject(buttonsStill.replace("buttons-aim=false", "buttons-aim=maybe"));
         reject(buttonsStill.replaceAll("(?m)^buttons-aim=.*\\R", ""));
         // Options stays at the top right until dragged; a dragged place round-trips and scales.
-        check(!TouchLayout.importConfiguration(translucent).layout.optionsMoved(), "Options starts in its place");
+        check(!TouchLayout.importConfiguration(fourFingers).layout.optionsMoved(), "Options starts in its place");
         sized.layout.moveOptions(300, 200);
         String movedOptions = sized.layout.exportConfiguration(2.25f);
         TouchLayout.Configuration placed = TouchLayout.importConfiguration(movedOptions);
@@ -133,8 +144,11 @@ public final class TouchLayoutTest {
         reject(movedOptions.replaceAll("(?m)^options\\.x=.*", "options.x=5000"));
         sized.layout.resetDefaults();
         check(!sized.layout.optionsMoved(), "Reset puts Options back in its place");
-        String version3 = buttonsStill.replace("version=4", "version=3").replaceAll("(?m)^buttons-aim=.*\\R", "");
-        check(TouchLayout.importConfiguration(version3).layout.buttonsAim, "Version 3 layouts' held buttons aim");
+        String version3 = fourFingers.replace("version=4", "version=3")
+            .replaceAll("(?m)^(menu-fingers|buttons-aim)=.*\\R", "");
+        check(TouchLayout.importConfiguration(version3).layout.menuFingers == 3
+              && TouchLayout.importConfiguration(version3).layout.buttonsAim,
+              "Version 3 layouts open the menu with three fingers, and their held buttons aim");
         try {
             sized.layout.setOpacity(1.5f);
             throw new AssertionError("Out-of-range opacity was accepted");

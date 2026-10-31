@@ -20,23 +20,61 @@ from xml.sax.saxutils import quoteattr
 
 PE = "main_menu/settings_select/player_setup/player_profile_edit"
 # the mods' screen, and its rows (_mods); the main menu's items
-# (ce/main_menu.xml): MODS in Credits' place (Credits is left out:
-# tools/ce_menus.py's LEFT_OUT), Quit a row below it (its CHILD_OFFSETS)
+# (ce/main_menu.xml), MAIN_MENU_ITEM_SPACING apart (the PC version's 36
+# leaves no room below Quit for a seventh): Campaign and Multiplayer, THEATER
+# below it (_theater), the PC version's Profiles and Settings, MODS in
+# Credits' place (Credits is left out: tools/ce_menus.py's LEFT_OUT), and
+# Quit (their CHILD_OFFSETS); the list's order is its up and down's
 MODS = "main_menu/mods"
 MOD_ROWS = 11
-MODS_ITEM_PLACE = (192, 391)
-QUIT_ITEM_PLACE = (192, 427)
+MAIN_MENU_ITEM_TOP = 247
+MAIN_MENU_ITEM_SPACING = 32
+MAIN_MENU_ITEMS = ["load_camp", "multiplayer", "theater", "profile", "settings", "mods", "quit_game"]
+
+
+def main_menu_item_place(item: str) -> tuple:
+    """where the main menu's item is (Campaign's 2 units right of the rest,
+    as the PC version has it)"""
+    return (194 if item == "load_camp" else 192,
+            MAIN_MENU_ITEM_TOP + MAIN_MENU_ITEM_SPACING * MAIN_MENU_ITEMS.index(item))
+
+
+MODS_ITEM_PLACE = main_menu_item_place("mods")
+THEATER_ITEM_PLACE = main_menu_item_place("theater")
+QUIT_ITEM_PLACE = main_menu_item_place("quit_game")
+# the Theater (port/linux/REPLAY.md): the replays a host records, its rows
+# (_theater)
+THEATER = "main_menu/theater"
+# the profile settings' rows, in order: the PC version's nine and Gameplay,
+# second to last, all in the nine's room (78 to About's top, 342) so the
+# last one's 32-unit highlight stays beside the description panel. Each is
+# moved from its tag's top (the second number; Gameplay's is ours) by its
+# list's child offset (tools/ce_menus.py's CHILD_OFFSETS)
+PROFILE_ROWS = [("name_profile_item", 78), ("controller_setup_profile_item", 111),
+                ("gamepads_profile_item", 144), ("mouse_settings_profile_item", 177),
+                ("audio_settings_profile_item", 210), ("video_settings_profile_item", 243),
+                ("network_settings_profile_item", 277), ("color_profile_item", 277),
+                ("gameplay_profile_item", None), ("about_item", 310)]
+PROFILE_ROWS_TOP = 78
+PROFILE_ROWS_LAST_TOP = 342
+
+
+def profile_row_top(row: str) -> int:
+    """where a profile settings row is: the rows evenly spaced"""
+    index = [name for name, _ in PROFILE_ROWS].index(row)
+    return PROFILE_ROWS_TOP + round(index * (PROFILE_ROWS_LAST_TOP - PROFILE_ROWS_TOP) / (len(PROFILE_ROWS) - 1))
+
+
+def profile_row_offset(row: str) -> int:
+    """a PC row's child offset in the list, to its place"""
+    return profile_row_top(row) - dict(PROFILE_ROWS)[row]
+
+
 YES_NO = [("YES", "true"), ("NO", "false")]
 ON_OFF = [("ON", "true"), ("OFF", "false")]
 # the multiplayer armor colors, in the profile's order (player_profile.c)
 SHIELD_COLORS = ["white", "black", "red", "blue", "gray", "yellow", "green", "pink", "purple", "cyan", "cobalt",
                  "orange", "teal", "sage", "brown", "tan", "maroon", "salmon"]
-XBOX_BUTTON_STYLES = [("XBOX CLASSIC", "classic"), ("XBOX GEMS", "gems"),
-                     ("XBOX DARK GEMS", "menu_gems"), ("XBOX MODERN", "xbox_modern")]
-PS_BUTTON_STYLES = [("PS CLASSIC", "ps_classic"), ("PS GEMS", "ps_gems"),
-                   ("PS DARK GEMS", "ps_dark_gems"), ("PS MODERN", "ps_modern")]
-SWITCH_BUTTON_STYLES = [("SWITCH CLASSIC", "switch_classic"), ("SWITCH GEMS", "switch_gems"),
-                       ("SWITCH MODERN", "switch_modern")]
 SENSITIVITIES = [(f"{value:g}", f"{value:g}") for value in (0.1, 0.15, 0.25, 0.4, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4)]
 VOLUMES = [(str(step), f"{step / 10:g}") for step in range(11)]
 # an HDR display's paper white and peak in nits (display.hdr_paper_white,
@@ -52,30 +90,39 @@ PEAK_BRIGHTNESSES = [("AUTO", "0")] + [(str(nits), str(nits)) for nits in
 # menu opens), its header (widget, bitmap), the row spacing, and its rows:
 # (label, setting, [(shown, value)], help, platform[, key]): platform is None
 # for every platform, else the platforms the row is for, separated by spaces
-# ("desktop", "android", "web": the menus' platform attribute,
-# port/linux/src/menu_files.c); key names the row's widgets where two rows set
-# one setting (one for each platform), else the setting's name does
+# ("desktop", "android" (the Android app), "switch", "ps5", "web": the menus'
+# platform attribute, port/linux/src/menu_files.c); key names the row's widgets where
+# two rows set one setting (one for each platform), else the setting's name does
 SCREENS = {
     "video_settings": {
         "screen": "video_settings_screen",
         "header": ("header_profile_video_settings", f"{PE}/video_settings/header_profile_video_settings"),
-        # a 28px step (the other screens' 30 would take the desktop's ten
-        # rows into the help: Graphics' is 27). each platform packs its own
-        # rows, so a row hidden on this machine does not leave a gap
-        "spacing": 28,
-        # (below the desktop's last row, 353: its two lines clear of the
-        # buttons, 414)
-        "help_top": 358, "help_height": 54,
+        # the other screens' 30px step. each platform packs its own rows, so
+        # a row hidden on this machine does not leave a gap
+        "spacing": 30,
+        "help_top": 364,
         "platform_places": True,
         # (rows in the place of the row before them: Window Size in
         # Resolution's, port/linux/game/menu_functions.c showing the one the
-        # display mode chosen uses; Android's anti-aliasing in the desktop's)
+        # display mode chosen uses; Android's anti-aliasing in the desktop's.
+        # Android's backend and Vulkan driver take places of their own:
+        # platform_places packs each platform's rows)
         "same_place": ["display.window_size", "anti_aliasing_android"],
+        # lines of text among the rows, in a place no row of theirs uses:
+        # (text, platform, place), None the place after the platform's last
+        # row. Below Android's rows, wherever they end (place 6 was below
+        # them until Maximum Resolution and Extra Effects came)
+        "notes": [("The graphics backend and driver change when the game restarts.", "android", None)],
         "rows": [
             ("DISPLAY MODE:", "display.mode",
              [("FULLSCREEN", "fullscreen"), ("BORDERLESS", "borderless"), ("WINDOWED", "windowed")],
              "Fullscreen takes the display; borderless covers it\nwith a window. F11 switches to the window.",
              "desktop"),
+            # (read by the Android app as the game starts, which loads the game
+            # image built with that renderer: port/android/host/host_main.c)
+            ("GRAPHICS BACKEND:", "display.renderer", [("VULKAN", "vulkan"), ("OPENGL", "gl")],
+             "How the game draws: Vulkan, or OpenGL ES. Takes\neffect the next time the game starts.",
+             "android"),
             # (port/linux/game/menu_tags.c adds the display's resolutions)
             ("RESOLUTION:", "display.resolution", [("NATIVE", "native")],
              "What fullscreen and borderless draw at. Fullscreen\nsets the display to it; borderless scales it.",
@@ -84,9 +131,27 @@ SCREENS = {
             # in place of this one)
             ("WINDOW SIZE:", "display.window_size", [("1280 x 960", "1280x960")],
              "The window's size: 4:3, then 16:10, 16:9 and 21:9\n(its edges can also be dragged).", "desktop"),
-            ("RESOLUTION SCALING:", "display.resolution_scaling",
-             [("NATIVE", "native"), ("75%", "75%"), ("50%", "50%"), ("25%", "25%"), ("ORIGINAL", "original")],
-             "Native draws at the resolution, 75% to 25% that\npart each way; Original, the Xbox's 480 lines.", None),
+            # (port/linux/game/menu_functions.c shows it while the backend
+            # shown is Vulkan; a driver archive's name left there by hand is
+            # kept unless another is chosen: port/android/host/host_vk_driver.c)
+            ("VULKAN DRIVER:", "display.vk_driver", [("STOCK", ""), ("TURNIP", "auto")],
+             "The phone's own driver, or Turnip on an Adreno\nGPU. Takes effect the next time the game starts.",
+             "android"),
+            ("RESOLUTION SCALING:", "display.resolution_scaling", [("NATIVE", "native"), ("ORIGINAL", "original")],
+             "Native draws at the resolution; Original draws\nthe Xbox's 640x480 and scales it up.", "desktop web"),
+            # (the PS5's own, first: what the game draws at, no more than the
+            # display's mode, port/ps5/host/host_main.c; the Switch's row
+            # below has the same setting with its own values)
+            ("MAXIMUM RESOLUTION:", "display.resolution_limit",
+             [("2160P (4K)", "2160"), ("1440P (2K)", "1440"), ("1080P (FHD)", "1080")],
+             "The most lines the game draws at, no more than\nthe display shows. Changes at once.", "ps5",
+             "resolution_limit_ps5"),
+            # (the phone's: sdl_platform.c's platform_resolution_scale)
+            ("MAXIMUM RESOLUTION:", "display.resolution_limit",
+             [("NATIVE", "native"), ("2160P (4K)", "2160"), ("1440P (2K)", "1440"), ("1080P (FHD)", "1080"),
+              ("720P", "720"), ("480P", "480")],
+             "The most lines the game draws at, no more than\nthe screen has. More are sharper, and slower.", "android",
+             "resolution_limit_android"),
             ("V-SYNC:", "display.vsync", ON_OFF,
              "Wait for the display between frames, so that the\npicture never tears.", None),
             ("FRAME RATE LIMIT:", "display.max_fps",
@@ -101,6 +166,13 @@ SCREENS = {
              "Draw a frame for every display refresh, blending\nbetween the game's 30 ticks a second.", None),
             ("INSTANT AIM:", "display.direct_camera", ON_OFF,
              "In first person, turn the view the moment the\nmouse moves, not up to two ticks later.", "desktop web"),
+            # (the deko3d renderer's screen scale: port/switch/guest/d3d8_dk.c)
+            ("RESOLUTION LIMIT:", "display.resolution_limit",
+             [("480P", "480"), ("720P", "720"), ("900P", "900"), ("1080P", "1080")],
+             "What the game draws at. Shown at 720p in handheld\nand 1080p docked; handheld draws 720p at most.", "switch"),
+            # (port/switch/guest/d3d8_dk.c's dynamic_resolution)
+            ("DYNAMIC RESOLUTION:", "display.dynamic_resolution", ON_OFF,
+             "Draw one step lower while the frame rate would\nfall under 55, and back up once it fits again.", "switch"),
             # (Graphics', with the HUD's rows: Video Setup's own has no room
             # left above its help on the desktop. The game's own counter, main.c's main_framerate_render, which
             # display.show_fps turns on: port/linux/game/frame_rate_display.c)
@@ -108,6 +180,9 @@ SCREENS = {
              "Draw the frame rate at the bottom right of a game,\ncounted over half a second.", None),
             ("HIGH-RES HUD:", "display.high_res_hud", ON_OFF,
              "Draw the HUD from the high-res redraws; off\ndraws the game's own pictures.", None),
+            ("BUTTON STYLE:", "display.hud_button_style",
+             [("CLASSIC", "classic"), ("GEMS", "gems"), ("DARK GEMS", "menu_gems")],
+             "Classic: plain Xbox buttons. Gems: shaded Xbox\nbuttons. Dark Gems: the menu's button artwork.", None),
             ("HIGH-RES TEXT:", "display.high_res_text", ON_OFF,
              "Draw text and titles with high-res fonts; off\ndraws the game's own.", None),
             ("ANTI-ALIASING:", "display.anti_aliasing",
@@ -118,31 +193,42 @@ SCREENS = {
             ("ANTI-ALIASING:", "display.anti_aliasing",
              [("OFF", "off"), ("FXAA", "fxaa"), ("MSAA 2X", "msaa2x"), ("MSAA 4X", "msaa4x")],
              "Smooth jagged edges, which the Xbox did not. FXAA\nis cheap; MSAA is sharper.",
-             "android web", "anti_aliasing_android"),
+             "android web ps5", "anti_aliasing_android"),
             ("TEXTURE FILTERING:", "display.anisotropic_filtering",
              [("OFF", "0"), ("2X", "2"), ("4X", "4"), ("8X", "8"), ("16X", "16")],
-             "Keep floors and walls sharp at a grazing angle,\nwhich the Xbox did not. Off: as the Xbox.", None),
+             "Keep floors and walls sharp at a grazing angle,\nwhich the Xbox did not. Off: as the Xbox.",
+             "desktop android web"),
             ("SHADOW RESOLUTION:", "display.shadow_resolution",
              [("128", "128"), ("256", "256"), ("512", "512"), ("1024", "1024")],
              "The size objects' shadows are drawn at: 128 as on\nthe Xbox; larger for smoother, as soft, edges.",
-             None),
+             "desktop android web ps5"),
+            # (neither is the Switch's: its deko3d renderer draws the Xbox's
+            # shadow maps and lights each vertex, port/switch/guest/d3d8_dk.c)
             ("PER-PIXEL LIGHTING:", "display.per_pixel_lighting", ON_OFF,
-             "Light models for each pixel, without the facets\nof the Xbox's lighting for each vertex.", None),
+             "Light models for each pixel, without the facets\nof the Xbox's lighting for each vertex.",
+             "desktop android web ps5"),
+            # (the OpenGL renderer's: the deko3d and Vulkan ones do not draw
+            # its fade up the body, d3d8_gl_set_height_fade)
             ("OVERSHIELD:", "display.overshield_effect", ON_OFF,
-             "The overshield rises up the body and stays lit,\nin its own color. Online: the host's choice.", None),
+             "The overshield rises up the body and stays lit,\nin its own color. Online: the host's choice.",
+             "desktop android web"),
             ("MODEL DETAIL:", "display.model_detail", [("STOCK", "stock"), ("NATIVE", "native"), ("HIGHEST", "highest")],
              "Stock picks models' detail by the Xbox's 480 lines;\nnative by this display's; highest, always the best.", None),
             ("SHIELD GLOW:", "display.shield_glow", ON_OFF,
              "Shields light their surroundings as they flare.\nOnline: the host's choice.", None),
             ("GLOW INTENSITY:", "display.shield_glow_intensity", [("DEFAULT", "default"), ("LIGHT SHOW", "light_show")],
              "Light Show: three times as far, at full from a\nthird of the flare. Online: the host's choice.", None),
+            # (the OpenGL renderer's alone, as texture filtering: the deko3d
+            # and Vulkan ones draw the Xbox's range)
             ("HDR:", "display.hdr", ON_OFF,
-             "Let explosions, plasma and the sun shine brighter\nthan white, then fit them to the screen.", None),
+             "Let explosions, plasma and the sun shine brighter\nthan white, then fit them to the screen.",
+             "desktop android web"),
             ("HDR DISPLAY:", "display.hdr_output", ON_OFF,
              "On an HDR display (Windows HDR on), show that\nlight truly brighter. From the next start.", "desktop"),
             ("TONE CURVE:", "display.hdr_tone_mapping",
              [("GT7", "gt7"), ("NEUTRAL", "neutral"), ("ACES", "aces"), ("REINHARD", "reinhard")],
-             "GT7: bright light turns white, as on film. Neutral:\nas drawn. ACES: more contrast. Reinhard: softer.", None),
+             "GT7: bright light turns white, as on film. Neutral:\nas drawn. ACES: more contrast. Reinhard: softer.",
+             "desktop android web"),
             ("PAPER WHITE:", "display.hdr_paper_white", PAPER_WHITES,
              "With HDR Display, how bright white is, in nits.\nAuto: Windows' SDR content brightness.", "desktop"),
             ("PEAK BRIGHTNESS:", "display.hdr_peak_brightness", PEAK_BRIGHTNESSES,
@@ -222,14 +308,17 @@ SCREENS = {
         "rows": [
             ("INTERNET PLAY:", "network.online", ON_OFF,
              "Host and join games over the internet by invite\nlinks; off keeps to the local network.",
-             "desktop android web"),
+             "desktop android switch web ps5"),
             ("UPNP PORT FORWARDING:", "network.allow_upnp", ON_OFF,
              "Let internet play ask the router to forward its\nport, for networks that stop connections.",
-             "desktop android"),
+             "desktop android switch ps5"),
+            # (neither of these two is the PS5's: nothing outside a title
+            # can put text on its clipboard, and a title is updated by
+            # installing it again, port/ps5/host/host_update_none.c)
             ("JOIN FROM CLIPBOARD:", "network.join_from_clipboard", ON_OFF,
-             "Join the game of an invite link copied before\nswitching to the game.", "desktop android"),
+             "Join the game of an invite link copied before\nswitching to the game.", "desktop android switch"),
             ("CHECK FOR UPDATES:", "update.auto", ON_OFF,
-             "Look for a new version when the game starts.", "desktop android"),
+             "Look for a new version when the game starts.", "desktop android switch"),
             ("PLAYER NAMES:", "display.player_names",
              [("ALL", "all"), ("ALLIES", "allies"), ("ENEMIES", "enemies"), ("NONE", "none")],
              "In multiplayer, whose names are drawn above their\nheads.", None),
@@ -245,7 +334,7 @@ SCREENS = {
     "gamepad_setup": {
         "screen": "gamepad_setup_screen",
         "header": ("header_profile_controller_setting", f"{PE}/controller_edit/header_profile_controller_setting"),
-        "spacing": 27,
+        "spacing": 30,
         "rows": [
             ("LOOK SENSITIVITY:", "profile.look_sensitivity", [(str(step), str(step)) for step in range(1, 11)],
              "How fast the right stick turns the view.", None),
@@ -256,7 +345,12 @@ SCREENS = {
              "Level the view while walking.", None),
             ("BUTTON LAYOUT:", "profile.button_preset",
              [("DEFAULT", "0"), ("SWAP TRIGGERS", "1"), ("SWAP A, L TRIGGER", "2"), ("SWAP B, L TRIGGER", "3"),
-              ("SWAP B, R STICK", "4"), ("BUMPER JUMPER", "5"), ("FISHSTICKS", "6"), ("RECON", "7")],
+              ("SWAP B, R STICK", "4"),
+              # (the port's: the later games' layouts as Halo: CE's controls
+              # go, source/interface/player_ui.c; upstream's Fishsticks and
+              # Recon after this fork's, whose numbers saved profiles keep)
+              ("BOXER", "5"), ("GREEN THUMB", "6"), ("BUMPER JUMPER", "7"), ("RECLAIMER", "8"),
+              ("FISHSTICKS", "9"), ("RECON", "10")],
              "Which of the controller's buttons does what (not\nthe keyboard's: Controls Setup sets those).", None),
             ("STICK LAYOUT:", "profile.joystick_preset",
              [("DEFAULT", "0"), ("SOUTHPAW", "1"), ("LEGACY", "2"), ("LEGACY SOUTHPAW", "3")],
@@ -264,60 +358,139 @@ SCREENS = {
             ("VIBRATION:", "profile.vibration", ON_OFF, "Rumble the controller.", None),
             ("IN-GAME HELP:", "profile.ingame_help", ON_OFF, "Show the game's hints about its controls.", None),
         ],
-        "categories": [("BUTTON REMAPPING", "controller_remapping",
-                        "Custom button layouts for P1-P4.\nUse / Reload stays combined."),
-                       ("BUTTON APPEARANCE", "controller_appearance",
-                        "Controller artwork and bumper style.\nRequires High-Res HUD in Graphics.")],
-    },
-    "controller_appearance": {
-        "screen": "controller_appearance_screen", "spacing": 30,
-        "header": ("header_profile_controller_setting", f"{PE}/controller_edit/header_profile_controller_setting"),
-        "same_place": ["hud_button_style_xbox", "hud_button_style_ps", "hud_button_style_switch"],
-        "rows": [
-            ("AUTO BUTTON DETECTION:", "input.auto_button_detection", ON_OFF,
-             "Show styles for your controller's family.\nRequires High-Res HUD in Graphics.", None),
-            ("BUTTON STYLE:", "display.hud_button_style", XBOX_BUTTON_STYLES + PS_BUTTON_STYLES + SWITCH_BUTTON_STYLES,
-             "Manual gameplay button artwork, kept when auto\ndetection is on. Requires High-Res HUD.", None),
-            ("BUTTON STYLE:", "display.hud_button_style_xbox", XBOX_BUTTON_STYLES,
-             "Preferred Xbox artwork for automatic detection.\nRequires High-Res HUD in Graphics.", None),
-            ("BUTTON STYLE:", "display.hud_button_style_ps", PS_BUTTON_STYLES,
-             "Preferred PlayStation artwork for auto detection.\nRequires High-Res HUD in Graphics.", None),
-            ("BUTTON STYLE:", "display.hud_button_style_switch", SWITCH_BUTTON_STYLES,
-             "Preferred Switch artwork for automatic detection.\nRequires High-Res HUD in Graphics.", None),
-            ("BUMPER STYLE:", "display.hud_bumper_style",
-             [("ORIGINAL XBOX", "original"), ("MODERN XBOX", "modern")],
-             "Original: black/white buttons. Modern: LB/RB.\nKept when automatic detection is on.", None),
-        ],
-    },
-    "controller_remapping": {
-        "screen": "controller_remapping_screen", "spacing": 30,
-        "dynamic_help": True, "help_top": 320, "help_height": 90,
-        "header": ("header_profile_controller_setting", f"{PE}/controller_edit/header_profile_controller_setting"),
-        "rows": [],
     },
 }
+
+# Gyro Aim is its own screen, opened from Gamepads: the controller's gyroscope
+# on the Switch and the PS5, the phone's on Android. The other platforms do not show the
+# row, and it takes the place after the last row, so they have no gap.
+_gamepads = SCREENS["gamepad_setup"]
+_gamepads["categories"] = [
+    ("GYRO AIM:", "gamepad_setup/gyro",
+     "Turn the view with the gyroscope,\nas well as the stick.", "android switch ps5"),
+]
+SCREENS["gamepad_setup/gyro"] = {
+    "screen": "gyro_aim_screen", "header": _gamepads["header"], "spacing": 30,
+    "rows": [
+        ("GYRO AIM:", "input.gyro_aim", ON_OFF + [("ONLY ON ZOOM", "zoom")],
+         "Turn the view with the gyroscope,\nalways, or only while zoomed in.", None),
+        ("HORIZONTAL SENSITIVITY:", "input.gyro_sensitivity_horizontal",
+         [(f"{value:g}", f"{value:g}") for value in
+          (0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10)],
+         "How far the view turns left and right.\n1 is the sensor's own turn.", None),
+        ("VERTICAL SENSITIVITY:", "input.gyro_sensitivity_vertical",
+         [(f"{value:g}", f"{value:g}") for value in
+          (0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10)],
+         "How far the view turns up and down.\n1 is the sensor's own turn.", None),
+        ("INVERT HORIZONTAL:", "input.gyro_invert_horizontal", YES_NO,
+         "Turning it right looks left.", None),
+        ("INVERT VERTICAL:", "input.gyro_invert_vertical", YES_NO,
+         "Tilting it up looks down.", None),
+    ],
+    # The other controller rows are profile fields, written when the profile
+    # is saved. These are config.toml, and B (and Cancel) only went back, so
+    # a change was kept for this run and gone after quitting.
+    "save_on_leave": True,
+}
+
+# BUTTON LAYOUT is its own screen, opened from Gamepads: the button and stick
+# layouts, and below them the overlay of the layout shown, a picture of the
+# controller with what the layout puts by each button (_layout_overlays)
+LAYOUT = f"{PE}/gamepad_setup/layout"
+_layout_rows = {"profile.button_preset", "profile.joystick_preset"}
+_gamepads["categories"].insert(0, (
+    "BUTTON LAYOUT:", "gamepad_setup/layout", "See what each button does in each layout,\nand choose one."))
+SCREENS["gamepad_setup/layout"] = {
+    "screen": "button_layout_screen", "header": _gamepads["header"], "spacing": 30, "help_top": 133,
+    "rows": [row for row in _gamepads["rows"] if row[1] in _layout_rows],
+}
+_gamepads["rows"] = [row for row in _gamepads["rows"] if row[1] not in _layout_rows]
+
+# the overlay's controllers: AL2009man's Gamepad Asset Pack's
+# (port/assets/menus/controllers, MIT), the platform's, and where each of its
+# buttons is (a fraction of the picture's width and height), by the Xbox's
+# names (the others' by place, as xinput_sdl.c reads them: the PS5's cross is
+# a, the Switch's B is a); a trigger and a bumper where they show, above the
+# controller. Back and Start in the middle are labelled above it (top), not
+# across the buttons by them
+CONTROLLERS = {
+    "xbox_series": {"platform": "desktop android web", "aspect": 1.6087, "top": ("back", "start"), "buttons": {
+        "a": (0.767, 0.538), "b": (0.838, 0.426), "x": (0.697, 0.437), "y": (0.770, 0.326),
+        "trigger_left": (0.198, 0.04), "trigger_right": (0.792, 0.04), "white": (0.19, 0.15), "black": (0.81, 0.15),
+        "back": (0.422, 0.440), "start": (0.576, 0.440), "stick_left": (0.229, 0.464),
+        "stick_right": (0.636, 0.703), "dpad": (0.363, 0.686)}},
+    "dualsense": {"platform": "ps5", "aspect": 1.7981, "buttons": {
+        "a": (0.820, 0.636), "b": (0.897, 0.522), "x": (0.746, 0.527), "y": (0.824, 0.411),
+        "trigger_left": (0.184, 0.05), "trigger_right": (0.815, 0.05), "white": (0.178, 0.17), "black": (0.822, 0.17),
+        "back": (0.256, 0.335), "start": (0.744, 0.335), "stick_left": (0.335, 0.776),
+        "stick_right": (0.665, 0.777), "dpad": (0.178, 0.524)}},
+    "switch_pro": {"platform": "switch", "aspect": 1.3762, "top": ("back", "start"), "buttons": {
+        "a": (0.762, 0.413), "b": (0.841, 0.319), "x": (0.685, 0.319), "y": (0.762, 0.224),
+        "trigger_left": (0.23, 0.03), "trigger_right": (0.77, 0.03), "white": (0.20, 0.11), "black": (0.80, 0.11),
+        "back": (0.377, 0.215), "start": (0.621, 0.215), "stick_left": (0.224, 0.318),
+        "stick_right": (0.630, 0.510), "dpad": (0.347, 0.510)}},
+}
+# the labels each side of the controller, ordered top to bottom by their
+# buttons, and the lines each has room for (a stick's: what it does, and
+# its button's; the D-pad's: its directions' a layout gives a control)
+LAYOUT_LABELS = {"left": {"trigger_left": 1, "white": 1, "back": 1, "stick_left": 2, "dpad": 2},
+                 "right": {"trigger_right": 1, "black": 1, "y": 1, "b": 1, "x": 1, "a": 1, "start": 1,
+                           "stick_right": 2}}
+# the overlays: Gamepad Setup's BUTTON LAYOUT's, below its rows and their
+# help, and the profile settings' picture's (its 279 by 202, where Gamepad
+# Setup's row shows it: menu_functions.c's profile_gamepad_layout), which is
+# the controller alone, no labels. The area (left, top, width, height), the
+# controller's width and how far right of the middle it is, the labels'
+# widths (each side's) and font, a line's height and the text's top in it.
+# large_ui takes about 10.5 units a letter and its lines are 21 apart (a
+# Switch's screenshots): the left's longest is a stick's PRESS: SWITCH
+# GRENADE (Reclaimer's), the right's ACTION / RELOAD (its stick's button is
+# only ever zoom or melee)
+LAYOUT_OVERLAYS = {
+    "overlay": {"area": (0, 172, 640, 236), "width": 200, "shift": 34,
+                "label_width": {"left": 240, "right": 172}, "font": "ui\\large_ui", "line": 21, "text_y": 2},
+    "overlay_small": {"area": (288, 85, 279, 202), "width": 250, "labels": False},
+}
+# their words: the game's controls (input_abstraction.c's), what a stick
+# does, and the start of a line of a stick's button or a D-pad direction
+# (menu_functions.c's _layout_word_*)
+LAYOUT_WORDS = ["JUMP", "SWITCH GRENADE", "ACTION / RELOAD", "SWITCH WEAPON", "MELEE", "FLASHLIGHT",
+                "THROW GRENADE", "FIRE", "PAUSE", "SCORES", "CROUCH", "ZOOM",
+                "MOVE", "LOOK", "MOVE / TURN", "STRAFE / LOOK", "PRESS:", "UP:", "DOWN:", "LEFT:", "RIGHT:"]
+# the controller tinted as the Xbox's pictures of its controller are: its
+# lightness from the dark blue to the light
+LAYOUT_TINT = ((0.02, 0.09, 0.20), (0.62, 0.84, 1.0))
+LAYOUT_LINE_COLOR = "#2896FF"
+# (BUTTON LAYOUT's, each platform's controller)
+SCREENS["gamepad_setup/layout"]["screen_children"] = [
+    f'<child widget="{LAYOUT}/{controller}/overlay" platform="{spec["platform"]}"/>'
+    for controller, spec in CONTROLLERS.items()]
 
 # Video Setup's categories open ordinary settings screens. Each has the same
 # pending edits, Defaults, OK and Cancel as the other settings screens.
 _video = SCREENS["video_settings"]
-_graphics = {"display.show_fps", "display.high_res_hud",
+_graphics = {"display.show_fps", "display.high_res_hud", "display.hud_button_style",
              "display.high_res_text", "display.anti_aliasing",
              "display.anisotropic_filtering", "display.shadow_resolution", "display.per_pixel_lighting",
              "display.model_detail"}
 # (the visual modifiers: a screen of their own, Extra Effects)
 _extra_effects = {"display.shield_glow", "display.shield_glow_intensity",
-                  "display.overshield_effect", "display.hdr", "display.hdr_output", "display.hdr_tone_mapping", "display.hdr_paper_white",
-                  "display.hdr_peak_brightness", "game.gore_level", "game.gore_duration", "game.gore_corpse_bleed", "game.manual_respawn"}
+                  "display.overshield_effect", "display.hdr", "display.hdr_output", "display.hdr_tone_mapping",
+                  "display.hdr_paper_white", "display.hdr_peak_brightness", "game.gore_level", "game.gore_duration",
+                  "game.gore_corpse_bleed", "game.manual_respawn"}
+# (each platform's rows packed: the Switch has none of the renderer's rows
+# between the text and the model detail, which left it gaps; the two
+# anti-aliasing rows land in the same place, each its platforms' next)
 SCREENS["video_settings/graphics"] = {
-    "screen": "graphics_settings_screen", "header": _video["header"], "spacing": 27,
-    "same_place": ["anti_aliasing_android"],
+    "screen": "graphics_settings_screen", "header": _video["header"], "spacing": 30,
+    "platform_places": True,
     "rows": [row for row in _video["rows"] if row[1] in _graphics],
 }
 SCREENS["video_settings/extra_effects"] = {
     # (the gore mod's four rows with upstream's nine: closer together, and
     # the help lower, so that all thirteen fit above it on the desktop)
     "screen": "extra_effects_settings_screen", "header": _video["header"], "spacing": 22,
-    "help_top": 362, "help_height": 50,
+    "help_top": 362, "help_height": 50, "platform_places": True,
     "rows": [row for row in _video["rows"] if row[1] in _extra_effects],
     # (shown only with an HDR display: menu_functions.c's
     # hdr_calibration_row_show)
@@ -345,9 +518,19 @@ _video["categories"] = [
     ("GRAPHICS:", "video_settings/graphics", "The HUD, text, anti-aliasing, shadows,\nlighting and HDR."),
     ("FOV AND VIEWMODELS:", "video_settings/fov_viewmodels",
      "The field of view and the first-person\nweapon. Their defaults keep the stock view."),
+    ("PERFORMANCE:", "video_settings/performance",
+     "How fast the console runs the game: a steadier\nframe rate, or a cooler console.", "switch"),
     ("EXTRA EFFECTS:", "video_settings/extra_effects",
      "Modifiers the stock game does not have,\nsuch as the shield glow, gore and respawning."),
 ]
+# the Switch's clocks (port/switch/host/host_sdl2.c)
+SCREENS["video_settings/performance"] = {
+    "screen": "performance_settings_screen", "header": _video["header"], "spacing": 30,
+    "rows": [
+        ("CPU CLOCK:", "performance.cpu_clock", [("STOCK", "stock"), ("1 GHZ", "1020"), ("1.7 GHZ", "1785")],
+         "1.7 GHz is the fastest Nintendo's games use.\n1 GHz and stock run cooler, and the battery lasts.", None),
+    ],
+}
 SCREENS["video_settings/fov_viewmodels"] = {
     "screen": "fov_viewmodel_settings_screen", "header": _video["header"], "spacing": 30,
     "rows": [
@@ -403,7 +586,7 @@ _network["rows"] = [row for row in _network["rows"] if row[1] not in _hud_settin
 _network["categories"] = [
     ("MAP SHARING:", "network_setup/map_sharing",
      "Downloading Custom Edition maps you do not have,\nand helping send them to other players.",
-     "desktop android"),
+     "desktop android ps5"),
     ("MULTIPLAYER HUD:", "network_setup/multiplayer_hud",
      "Players' names above their heads, the\nscoreboard, the text chat and the match clock."),
     ("STREAMER MODE:", "network_setup/streamer_mode",
@@ -427,6 +610,26 @@ SCREENS["network_setup/map_sharing"] = {
     ],
 }
 
+# Gameplay, a screen of its own from Settings (a row of the profile menu)
+SCREENS["gameplay"] = {
+    "screen": "gameplay_settings_screen",
+    "header": ("header_gameplay", f"{PE}/gameplay/header_gameplay"),
+    "spacing": 30,
+    "rows": [
+        ("PLAYER RAGDOLLS:", "game.ragdoll_players",
+         [("NONE", "none"), ("WOODY", "woody"), ("HALO 2", "halo2")],
+         "How a player's body falls:\nthe animation, a loose ragdoll, or Halo 2's.",
+         None),
+        ("AI RAGDOLLS:", "game.ragdoll_ai",
+         [("NONE", "none"), ("WOODY", "woody"), ("HALO 2", "halo2")],
+         "How an AI's body falls:\nthe animation, a loose ragdoll, or Halo 2's.",
+         None),
+        ("TERMINAL OUTPUT:", "game.terminal_output",
+         [("NONE", "none"), ("MENUS ONLY", "menus"), ("ALWAYS", "always")],
+         "The game's messages at the bottom left: never,\nin the menus only, or in games too.",
+         None),
+    ],
+}
 # Network Setup's server browser (menu_functions.c's lobby_browser_update): where
 # its games come from (network.listings, master_list.c), the Filters screen's
 # settings and its order; the master servers that answered, shown, not set
@@ -537,7 +740,8 @@ CONTROL_ROWS = 7
 
 # the settings whose rows have the wider spinner (a device's name)
 WIDE_SETTINGS = {"audio.output_device", "audio.input_device", "streamer.slurs", "streamer.swearing",
-                 "streamer.insults", "network.listings", "network.browser_maps", "network.browser_sort"}
+                 "streamer.insults", "network.listings", "network.browser_maps", "network.browser_sort",
+                 "profile.button_preset"}
 
 # Teamplay Options' rows of the port's (_teamplay_options_extras): the
 # gametype's FORCE TEAM SPAWNS, then the host's voice chat and vote kicks;
@@ -600,6 +804,7 @@ STRING_OVERRIDES = {
         "Choose a window or the full\\nscreen, the frame rate and more.\\n\\nProfile:",
         "Internet play, updates and the\\nmultiplayer HUD.\\n\\nProfile:",
         "Change the current profile's\\nfree-for-all multiplayer color.\\n\\nProfile:",
+        "How players and the AI fall:\\nthe animation, or a ragdoll.\\n\\nProfile:",
         "Halo: Combat Evolved, the Xbox\\ngame, on this computer.\\n\\nProfile:",
     ],
 }
@@ -631,17 +836,30 @@ def _screen(folder: str, spec: dict, rows: list, list_inputs: list, list_handler
     base = folder if folder.startswith("main_menu/") else f"{PE}/{folder}"
     header, header_bitmap = spec["header"]
     lines = []
+    # (save_on_leave: B and Cancel write the screen, as OK does, then go back)
+    leave = ['<on event="b" run="port settings save" back="true"/>',
+             '<on event="back" run="port settings save" back="true"/>'] if spec.get("save_on_leave") else \
+        ['<on event="b" back="true"/>', '<on event="back" back="true"/>']
     lines += _widget(f"{base}/{spec['screen']}",
                      [("width", 640), ("height", 480), ("flags", "pass_unhandled_to_focused_child pause_game"),
                       ("bitmap", "bitmaps/gradient")],
-                     ['<on event="b" back="true"/>', '<on event="back" back="true"/>',
+                     [*leave,
                       f'<child{attributes([("widget", f"{base}/{header}")])}/>',
-                      f'<child{attributes([("widget", f"{base}/options_menu")])}/>'])
+                      f'<child{attributes([("widget", f"{base}/options_menu")])}/>',
+                      *[f'<child{attributes([("widget", f"{base}/note_{index}"), ("x", 54), ("y", 73 + place * spec["spacing"]), ("platform", platform)])}/>'
+                        for index, (_, platform, place) in enumerate(spec.get("notes", []))],
+                      *spec.get("screen_children", [])])
     lines += _widget(f"{base}/{header}", [("controller", 1), ("left", 35), ("top", 11), ("width", 605), ("height", 59),
                                           ("bitmap", header_bitmap)], [])
+    # (a note is text alone, which the focus never lands on)
+    for index, (text, platform, _) in enumerate(spec.get("notes", [])):
+        lines += _widget(f"{base}/note_{index}", [("type", "text"), ("width", 512), ("height", 24), ("text", text),
+                                                  ("font", "ui\\small_ui"), ("color", "#FF2896FF"), ("text_x", 13),
+                                                  ("text_y", 5), ("text_flags", "no_focus_test"),
+                                                  ("platform", platform)], [])
     lines += _widget(f"{base}/help", [("type", "text"), ("controller", 1), ("left", 68),
                                       ("top", spec.get("help_top", 350)), ("width", 482),
-                                      ("height", spec.get("help_height", 60)), ("string_list", None if spec.get("dynamic_help") else f"{base}/help_strings"),
+                                      ("height", spec.get("help_height", 60)), ("string_list", f"{base}/help_strings"),
                                       ("font", "ui\\large_ui"), ("color", "#FFFFFFFF")], [])
     children = [f'<data input="{name}"/>' for name in list_inputs] + list_handlers
     # (each row: its widget, platform, and the place it is in, else the next)
@@ -681,8 +899,9 @@ def _setting_screen(folder: str, spec: dict) -> list:
     place = -1
     # (platform_places: each platform's rows in places of their own, with
     # no gap where the others' are; a row in one place for all its
-    # platforms, else a child for each place)
-    places = {"desktop": -1, "android": -1, "web": -1}
+    # platforms, else a child for each place. The Switch's are its own: a row
+    # for "android" is the Android app's, port/linux/src/menu_files.c)
+    places = {"desktop": -1, "android": -1, "switch": -1, "ps5": -1, "web": -1}
     for index, (label, setting, choices, _, platform, *named) in enumerate(spec["rows"]):
         key = named[0] if named else setting.split(".", 1)[1]
         row = f"{base}/op_{key}"
@@ -719,29 +938,25 @@ def _setting_screen(folder: str, spec: dict) -> list:
         # (a device's name wants the wider spinner Server Setup's co-op rows
         # have: WIDE_SETTINGS)
         wide = setting in WIDE_SETTINGS
-        bumper_style = setting == "display.hud_bumper_style"
-        controller_style = setting.startswith("display.hud_button_style")
-        # Dynamic captions retain their help index without a string list that
-        # would overwrite the player number during the engine's text update.
         extra += _widget(row, [("width", 512), ("height", 28), ("flags", "pass_unhandled_to_focused_child"),
                                ("bitmap", "bitmaps/option_bkds"), ("color", "#FF2896FF"), ("platform", platform)],
                          [f'<child{attributes([("widget", f"{base}/{key}_label")])}/>',
-                          f'<child{attributes([("widget", f"{base}/{key}_spinner"), ("x", 240 if controller_style or bumper_style else 286 if wide else 320), ("y", 1)])}/>'])
+                          f'<child{attributes([("widget", f"{base}/{key}_spinner"), ("x", 286 if wide else 320), ("y", 1)])}/>'])
         extra += _widget(f"{base}/{key}_label",
                          [("type", "text"), ("controller", 1), ("width", 300), ("height", 22),
-                          ("string_list", None if controller_style else f"{base}/labels"),
-                          ("string_index", index), ("font", "ui\\large_ui"),
+                          ("string_list", f"{base}/labels"), ("string_index", index), ("font", "ui\\large_ui"),
                           ("color", "#FF2896FF"), ("text_x", 13), ("text_y", 4)], [])
         extra += _widget(f"{base}/{key}_spinner",
-                         [("type", "spinner"), ("left", None if wide else 3), ("top", 2), ("width", 252 if controller_style or bumper_style else 206 if wide else 147),
+                         [("type", "spinner"), ("left", None if wide else 3), ("top", 2), ("width", 206 if wide else 147),
                           ("height", 20), ("flags", "pass_unhandled_to_focused_child left_right_tabs_items"),
                           ("strings", "|".join(shown for shown, _ in choices)), ("setting", setting),
                           ("values", "|".join(value for _, value in choices)), ("font", "ui\\large_ui"),
                           ("color", "#FF2896FF"), ("align", "center"), ("text_y", 4 if wide else 1),
                           ("header_bitmap", "bitmaps/arrow_sm_left"), ("footer_bitmap", "bitmaps/arrow_sm_right"),
                           ("header_bounds", "7 -13 19 -7" if wide else "7 -6 19 0"),
-                          ("footer_bounds", "7 254 19 260" if controller_style or bumper_style else "7 208 19 214" if wide else "7 150 19 156")],
-                         ['<on event="created" run="port setting load"/>'])
+                          ("footer_bounds", "7 208 19 214" if wide else "7 150 19 156")],
+                         ['<on event="created" run="port setting load"/>'] +
+                         (['<on event="deleted" run="port setting save"/>'] if spec.get("save_on_leave") else []))
     # (each category's row: its label, the screen it opens, its help, and the
     # platforms it is for, as a row's: every one's when it names none)
     for index, (label, category_folder, _, *category_platform) in enumerate(spec.get("categories", ())):
@@ -777,6 +992,10 @@ def _setting_screen(folder: str, spec: dict) -> list:
     extra += _strings(f"{base}/help_strings",
                       [""] + [help_text.replace("\n", "\\n") for _, _, _, help_text, *_ in spec["rows"]] +
                       [help_text.replace("\n", "\\n") for _, _, help_text, *_ in spec.get("categories", ())])
+    # (a note's place None: the one after its platform's last row)
+    if spec.get("notes"):
+        spec = dict(spec, notes=[(text, platform, places[platform] + 1 if place is None else place)
+                                 for text, platform, place in spec["notes"]])
     return _screen(folder, spec, rows, ["port settings help", *spec.get("inputs", ())], [], extra)
 
 
@@ -835,61 +1054,157 @@ def _controls_screen() -> list:
             for line in lines]
 
 
-def _controller_screen() -> list:
-    folder = "controller_remapping"
-    base = f"{PE}/{folder}"
-    rows, extra = [], []
-    for key, label, choices in [("player", "PLAYER:", "P1|P2|P3|P4"),
-                                ("group", "SHOW:", "MOVEMENT|COMBAT|GENERAL|COMMUNICATION|DEBUG")]:
-        row = f"{base}/op_{key}"
-        rows.append((row, None))
-        extra += _widget(row, [("width", 512), ("height", 28), ("flags", "pass_unhandled_to_focused_child"),
-                               ("bitmap", "bitmaps/option_bkds"), ("color", "#FF2896FF")],
-                         [f'<child widget="{base}/{key}_label"/>', f'<child widget="{base}/pad_{key}" x="200" y="1"/>'])
-        extra += _widget(f"{base}/{key}_label", [("type", "text"), ("controller", 1), ("width", 200),
-                         ("height", 22), ("text", label), ("font", "ui\\large_ui"),
-                         ("color", "#FF2896FF"), ("text_x", 13), ("text_y", 4)], [])
-        extra += _widget(f"{base}/pad_{key}", [("type", "spinner"), ("left", 3), ("top", 2),
-                         ("width", 297), ("height", 20), ("strings", choices),
-                         ("flags", "pass_unhandled_to_focused_child left_right_tabs_items"),
-                         ("font", "ui\\large_ui"), ("color", "#FF2896FF"), ("align", "center"), ("text_y", 1),
-                         ("header_bitmap", "bitmaps/arrow_sm_left"), ("footer_bitmap", "bitmaps/arrow_sm_right"),
-                         ("header_bounds", "7 -6 19 0"), ("footer_bounds", "7 300 19 306")], [])
-    for index in range(6):
-        row = f"{base}/op_pad_{index + 1}"
-        rows.append((row, None))
-        extra += _widget(row, [("width", 512), ("height", 28), ("flags", "pass_unhandled_to_focused_child"),
-                               ("bitmap", "bitmaps/option_bkds"), ("color", "#FF2896FF")],
-                         ['<on event="a start" run="port controller bind"/>',
-                          '<on event="x" run="port controller clear"/>',
-                          '<on event="left_mouse" run="mouse emit accept event"/>',
-                          '<on event="left" run="port controller left"/>',
-                          '<on event="right" run="port controller right"/>',
-                          f'<child widget="{base}/pad_action"/>',
-                          f'<child widget="{base}/pad_binding" x="220"/>'])
-    extra += _widget(f"{base}/pad_action", [("type", "text"), ("controller", 1), ("width", 220),
-                     ("height", 22), ("font", "ui\\small_ui"), ("color", "#FF2896FF"),
-                     ("text_x", 13), ("text_y", 4)], [])
-    extra += _widget(f"{base}/pad_binding", [("type", "text"), ("controller", 1), ("width", 280),
-                     ("height", 22), ("font", "ui\\large_ui"), ("color", "#FF2896FF"),
-                     ("align", "center"), ("text_y", 4), ("text_flags", "no_focus_test")], [])
-    extra += _button(f"{base}/button_defaults", 3, ['<on event="a start" run="port controller defaults"/>'])
-    extra += _button(f"{base}/button_ok", 1, ['<on event="a start" run="port controller save" back="true"/>'])
-    lines = _screen(folder, SCREENS[folder], rows, ["port controller update"],
-                   ['<on event="created" run="port controller init"/>',
-                    '<on event="deleted" run="port controller close"/>'], extra)
+def _gameplay_profile_item() -> list:
+    """Settings' Gameplay row, before About: the screen is this folder's"""
+    name = f"{PE}/gameplay_profile_item"
+    return _widget(name, [("type", "text"), ("left", 51), ("top", profile_row_top("gameplay_profile_item")), ("width", 232), ("height", 32),
+                          ("bitmap", "bitmaps/list_item_bkd"), ("text", "GAMEPLAY"), ("font", "ui\\large_ui"),
+                          ("color", "#FF2896FF"), ("text_x", 13), ("text_y", 5)],
+                   [f'<on event="a" open="{PE}/gameplay/gameplay_settings_screen"/>',
+                    f'<on event="start" open="{PE}/gameplay/gameplay_settings_screen"/>',
+                    '<on event="left_mouse" run="mouse emit accept event"/>'])
 
-    return [line.replace('<on event="b" back="true"/>', '<on event="b" run="port controller cancel" back="true"/>')
-            .replace('<on event="back" back="true"/>', '<on event="back" run="port controller cancel" back="true"/>')
-            for line in lines]
+
+def layout_overlay_places(controller: str, size: str) -> tuple:
+    """where an overlay's picture of the controller is (left, top, width,
+    height), its picture (the controller and the labels' lines: the same
+    for every layout) and each label's line's middle: {button: (x, y)},
+    all in the menu's units"""
+    spec, overlay = CONTROLLERS[controller], LAYOUT_OVERLAYS[size]
+    left, top, width, height = overlay["area"]
+    picture_width = overlay["width"]
+    picture_height = picture_width / spec["aspect"]
+    x0 = left + (width - picture_width) / 2 + overlay.get("shift", 0)
+    y0 = top + (height - picture_height) / 2
+    anchors = {button: (x0 + x * picture_width, y0 + y * picture_height) for button, (x, y) in spec["buttons"].items()}
+    # (the controller alone: no labels, so no lines)
+    if not overlay.get("labels", True):
+        return (x0 - 8, top, picture_width + 16, height), anchors, {}
+    line = overlay["line"]
+    # (those above it, just above it: Back's ending left of its middle,
+    # Start's from right of it)
+    middle = x0 + picture_width / 2
+    tops = spec.get("top", ())
+    middles = {button: (middle - 4 if index == 0 else middle + 4, max(top + line / 2, y0 - line))
+               for index, button in enumerate(tops)}
+    for side, labels in LAYOUT_LABELS.items():
+        labels = {button: count for button, count in labels.items() if button not in tops}
+        order = sorted(labels, key=lambda button: anchors[button][1])
+        # (each as near its button's height as the ones above leave it,
+        # then those that would go past the bottom moved up)
+        ys = []
+        for index, button in enumerate(order):
+            least = top + line / 2 if not index else ys[-1] + labels[order[index - 1]] * line + 2
+            ys.append(max(anchors[button][1], least))
+        for index in reversed(range(len(order))):
+            most = top + height - (labels[order[index]] - 0.5) * line if index == len(order) - 1 else \
+                ys[index + 1] - labels[order[index]] * line - 2
+            ys[index] = min(ys[index], most)
+        edge = x0 - 6 if side == "left" else x0 + picture_width + 6
+        middles.update({button: (edge, y) for button, y in zip(order, ys)})
+    return (x0 - 8, top, picture_width + 16, height), anchors, middles
+
+
+def layout_overlay_svg(controller: str, size: str) -> str:
+    """an overlay's picture: the controller (port_svg/controllers' copy),
+    tinted, and from each label's place a line to its button"""
+    (left, top, width, height), anchors, middles = layout_overlay_places(controller, size)
+    overlay = LAYOUT_OVERLAYS[size]
+    picture_width = overlay["width"]
+    picture_height = picture_width / CONTROLLERS[controller]["aspect"]
+    dark, light = LAYOUT_TINT
+    matrix = " ".join(" ".join(f"{(high - low) * weight:.4f}" for weight in (0.2126, 0.7152, 0.0722)) + f" 0 {low:.4f}"
+                      for low, high in zip(dark, light)) + " 0 0 0 1 0"
+    lines = [f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
+             f'width="{width:g}" height="{height:g}" viewBox="{left:g} {top:g} {width:g} {height:g}">',
+             '  <defs><filter id="tint" color-interpolation-filters="sRGB">'
+             f'<feColorMatrix type="matrix" values="{matrix}"/></filter></defs>',
+             f'  <image xlink:href="{controller}.svg" href="{controller}.svg" x="{left + 8:.2f}" '
+             f'y="{top + (height - picture_height) / 2:.2f}" width="{picture_width:g}" height="{picture_height:.2f}" '
+             'preserveAspectRatio="none" filter="url(#tint)"/>']
+    for button, (x, y) in sorted(middles.items()):
+        ax, ay = anchors[button]
+        # (from below a label above the controller)
+        if button in CONTROLLERS[controller].get("top", ()):
+            y += overlay["line"] / 2
+        lines.append(f'  <line x1="{x:.2f}" y1="{y:.2f}" x2="{ax:.2f}" y2="{ay:.2f}" stroke="{LAYOUT_LINE_COLOR}" '
+                     'stroke-width="0.75" stroke-linecap="round"/>')
+        lines.append(f'  <circle cx="{ax:.2f}" cy="{ay:.2f}" r="1.75" fill="#FFFFFF" stroke="{LAYOUT_LINE_COLOR}" '
+                     'stroke-width="0.75"/>')
+    lines.append("</svg>")
+    return "\n".join(lines) + "\n"
+
+
+def browser_hint_pictures() -> list:
+    """the server browser's shoulder pictures (BROWSER_HINT_PICTURES):
+    Kenney's, as large as a hint's: (name, frames), as layout_overlay_pictures"""
+    sources = {"hints/switch_l": "switch/kenney/switch_button_l", "hints/switch_r": "switch/kenney/switch_button_r",
+               "hints/ps5_l1": "ps5/kenney/playstation_trigger_l1", "hints/ps5_r1": "ps5/kenney/playstation_trigger_r1",
+               "hints/switch_dpad": "switch/kenney/switch_dpad_all", "hints/ps5_dpad": "ps5/kenney/playstation_dpad_all"}
+    pictures = []
+    for name, source in sources.items():
+        text = (Path(__file__).resolve().parents[1] / "port/assets/buttons/platforms" / f"{source}.svg").read_text()
+        text = text.replace('<svg width="64" height="64"', '<svg width="14" height="14" viewBox="0 0 64 64"', 1)
+        pictures.append((name, [(text, 14, 14)]))
+    return pictures
+
+
+def layout_overlay_pictures() -> list:
+    """the overlays' bitmaps (tools/ce_menus.py draws them): (name, frames)"""
+    pictures = []
+    for controller in CONTROLLERS:
+        for size in LAYOUT_OVERLAYS:
+            (_, _, width, height), _, _ = layout_overlay_places(controller, size)
+            pictures.append((f"controllers/{controller}_{size}",
+                             [(layout_overlay_svg(controller, size), round(width), round(height))]))
+    return pictures
+
+
+def _layout_overlays() -> list:
+    """the overlays, a picture of each platform's controller and its labels,
+    which menu_functions.c's gamepad_layout_overlay fills in: BUTTON
+    LAYOUT's, and the profile settings' controller alone (Edit Profile
+    Settings' picture's children: WIDGET_PATCHES)"""
+    lines = []
+    for controller, spec in CONTROLLERS.items():
+        for size, overlay in LAYOUT_OVERLAYS.items():
+            name = f"{LAYOUT}/{controller}/{size}"
+            (left, top, width, height), _, middles = layout_overlay_places(controller, size)
+            labels = {button: count for side in LAYOUT_LABELS.values() for button, count in side.items()}
+            # (the controller alone needs nothing filled in)
+            children = ['<data input="port gamepad layout overlay"/>'] if middles else []
+            for button, (x, y) in sorted(middles.items()):
+                right = x < left + width / 2
+                label_width = overlay["label_width"]["left" if right else "right"]
+                label_x = x - 2 - label_width if right else x + 2
+                label_y = y - overlay["line"] / 2 - overlay["text_y"]
+                children.append(f'<child{attributes([("widget", f"{name}/label_{button}"), ("x", round(label_x)), ("y", round(label_y))])}/>')
+                lines += _widget(f"{name}/label_{button}",
+                                 [("type", "text"), ("width", label_width),
+                                  # (a label of two lines a line taller: the
+                                  # font's lines are further apart than the
+                                  # labels' places, and the second was cut)
+                                  ("height", (2 * labels[button] - 1) * overlay["line"] + 2 * overlay["text_y"]),
+                                  ("font", overlay["font"]), ("color", "#FF2896FF"),
+                                  ("align", "right" if right else "left"), ("text_y", overlay["text_y"]),
+                                  ("text_flags", "no_focus_test")], [])
+            lines += _widget(name, [("left", round(left)), ("top", round(top)), ("width", round(width)),
+                                    ("height", round(height)), ("bitmap", f"controllers/{controller}_{size}"),
+                                    ("platform", spec["platform"])], children)
+    lines += _strings(f"{LAYOUT}/words", LAYOUT_WORDS)
+    return lines
 
 
 def settings_files() -> dict:
     """the files of the port's screens, by their names in ce/"""
     files = {}
     for folder, spec in SCREENS.items():
-        files[f"{PE}/{folder}".replace("/", ".") + ".xml"] = (
-            _controller_screen() if folder == "controller_remapping" else _setting_screen(folder, spec))
+        lines = _setting_screen(folder, spec)
+        if folder == "gameplay":
+            lines += _gameplay_profile_item()
+        if folder == "gamepad_setup/layout":
+            lines += _layout_overlays()
+        files[f"{PE}/{folder}".replace("/", ".") + ".xml"] = lines
     files[f"{PE}/controls_setup".replace("/", ".") + ".xml"] = _controls_screen()
     return {name: ['<?xml version="1.0" encoding="UTF-8"?>',
                    "<!-- The port's settings screen, in the PC version's style (tools/port_settings.py) -->",
@@ -1094,17 +1409,97 @@ OVERRIDE_ORIGINALS = {
 # CUSTOM MULTIPLAYER maps (_map_kind)
 MAP_KIND_CHOOSER = "main_menu/new_select/list_item_0_map_kind"
 
+# the main menu's news: the latest release's notes (tools/embed_assets.py's
+# news_text) in a window the main menu's X opens (WIDGET_PATCHES), its lines
+# filled and scrolled by menu_functions.c's news screen ("port news ...")
+NEWS = "main_menu/news"
+NEWS_ROWS = 12
+# the window's panel (bitmaps/controller_border, drawn a texel a unit from
+# its widget's corner: the panel is its texels 49 to 556 across and 104 to
+# 349 down), placed in the middle of the screen
+NEWS_PANEL = (17, 14)
+
+
 # changes to the PC version's widgets (by our names): attributes set, all
 # their handlers replaced, children added, game data inputs added
+# the Switch's and the PS5's server browser buttons as hints, a widget each
+# (_join_game_extras), and where they are in the button bar's place; the
+# mode's own shown (menu_functions.c's browser_list_show: LAN's and Direct
+# Link's join and go back alone)
+BROWSER_HINTS = [("browser_hint_join", "%a-button JOIN GAME"), ("browser_hint_refresh", "%y-button REFRESH"),
+                 ("browser_hint_filters", "%x-button FILTERS"), ("browser_hint_mode", "MODE"),
+                 ("browser_hint_sort", "SORT"), ("browser_hint_back", "%b-button BACK")]
+# (the shoulders' pictures before MODE, Kenney's: the menus' text has the
+# Xbox's black and white alone; port/assets/menus/ce/port/hints)
+BROWSER_HINT_PICTURES = [("browser_hint_l_switch", "hints/switch_l"), ("browser_hint_r_switch", "hints/switch_r"),
+                         ("browser_hint_l_ps5", "hints/ps5_l1"), ("browser_hint_r_ps5", "hints/ps5_r1"),
+                         # (the d-pad: left and right the column, up and
+                         # down its order)
+                         ("browser_hint_dpad_switch", "hints/switch_dpad"),
+                         ("browser_hint_dpad_ps5", "hints/ps5_dpad")]
+# (the first four together at the left, BACK at the right, as the buttons were)
+BROWSER_HINT_PLACES = [("browser_hint_join", 24, 452, "switch ps5"), ("browser_hint_refresh", 135, 452, "switch ps5"),
+                       ("browser_hint_filters", 229, 452, "switch ps5"),
+                       ("browser_hint_l_switch", 327, 455, "switch"), ("browser_hint_r_switch", 343, 455, "switch"),
+                       ("browser_hint_l_ps5", 327, 455, "ps5"), ("browser_hint_r_ps5", 343, 455, "ps5"),
+                       ("browser_hint_mode", 361, 452, "switch ps5"),
+                       ("browser_hint_dpad_switch", 417, 455, "switch"), ("browser_hint_dpad_ps5", 417, 455, "ps5"),
+                       ("browser_hint_sort", 435, 452, "switch ps5"), ("browser_hint_back", 540, 452, "switch ps5")]
+
+# the Switch's and the PS5's Mods buttons as hints (_mods): A saves, the
+# north turns the mod on or off, the shoulders move it, B cancels
+MOD_HINTS = [("mod_hint_save", "%a-button SAVE"), ("mod_hint_toggle", "%y-button ON / OFF"),
+             ("mod_hint_move", "MOVE"), ("mod_hint_cancel", "%b-button CANCEL")]
+MOD_HINT_PICTURES = [("mod_hint_l_switch", "hints/switch_l"), ("mod_hint_r_switch", "hints/switch_r"),
+                     ("mod_hint_l_ps5", "hints/ps5_l1"), ("mod_hint_r_ps5", "hints/ps5_r1")]
+MOD_HINT_PLACES = [("mod_hint_save", 8, 415, "switch ps5"), ("mod_hint_toggle", 80, 415, "switch ps5"),
+                   ("mod_hint_l_switch", 184, 418, "switch"), ("mod_hint_r_switch", 200, 418, "switch"),
+                   ("mod_hint_l_ps5", 184, 418, "ps5"), ("mod_hint_r_ps5", 200, 418, "ps5"),
+                   ("mod_hint_move", 218, 415, "switch ps5"), ("mod_hint_cancel", 510, 415, "switch ps5")]
+# ... and Select Profile's (main_menu.profile_manager.xml: A chooses the
+# profile, its own Y and X create one and delete it, B goes back)
+PROFILE = "main_menu/profile_manager"
+PROFILE_HINTS = [("profile_hint_select", "%a-button SELECT"), ("profile_hint_new", "%y-button CREATE NEW"),
+                 ("profile_hint_delete", "%x-button DELETE"), ("profile_hint_back", "%b-button BACK")]
+PROFILE_HINT_PLACES = [("profile_hint_select", 8, 415, "switch ps5"), ("profile_hint_new", 92, 415, "switch ps5"),
+                       ("profile_hint_delete", 214, 415, "switch ps5"), ("profile_hint_back", 510, 415, "switch ps5")]
+
+
+def _hint_widgets(base: str, hints: list, pictures: list = ()) -> list:
+    """the consoles' hints of a screen's buttons: each a text, its button's
+    picture first, and the shoulders' pictures (Kenney's: hints/)"""
+    lines = []
+    for key, text in hints:
+        lines += _widget(f"{base}/{key}", [("type", "text"), ("controller", 1), ("width", 160), ("height", 24),
+                                          ("text", text), ("font", "ui\\small_ui"), ("color", "#FFFFFFFF"),
+                                          ("text_y", 2), ("text_flags", "no_focus_test")], [])
+    for key, bitmap in pictures:
+        lines += _widget(f"{base}/{key}", [("width", 14), ("height", 14), ("bitmap", bitmap)], [])
+    return lines
+
+
 WIDGET_PATCHES = {
     # The host returns here after a round with no menu history. Back must
     # reopen the main menu when it closes the last screen, as the lobby does.
     f"{MT}/connected/connected_map_select_wrapper": {"set": {
         "flags": "pass_unhandled_to_focused_child pause_game main_menu_if_no_history tag_controller_index force_handle_mouse",
     }},
-    # (the main menu's MODS, before Quit: _mods)
-    "main_menu/main_menu_select_list": {"insert_before": {"main_menu/main_menu_item_quit_game": [
-        f'<child widget="main_menu/main_menu_item_mods" x="{MODS_ITEM_PLACE[0]}" y="{MODS_ITEM_PLACE[1]}"/>']}},
+    # (the main menu's THEATER, after Multiplayer, and MODS, before Quit:
+    # _theater, _mods)
+    "main_menu/main_menu_select_list": {"insert_before": {
+        "main_menu/main_menu_item_profile": [
+            f'<child widget="main_menu/main_menu_item_theater" x="{THEATER_ITEM_PLACE[0]}" y="{THEATER_ITEM_PLACE[1]}"/>'],
+        "main_menu/main_menu_item_quit_game": [
+            f'<child widget="main_menu/main_menu_item_mods" x="{MODS_ITEM_PLACE[0]}" y="{MODS_ITEM_PLACE[1]}"/>']},
+        # (the main menu's X - the west face button: Y on a Switch, Square on
+        # a PS5 - opens the news, the latest release's notes: _news_screen;
+        # on the main menu alone)
+        "handlers": ['<on event="down"/>', f'<on event="x" open="{NEWS}/news_screen"/>']},
+    # (and the hint that X opens it, over the build number: a tap or a click
+    # on it presses X, its picture a key's icon to the pointer, x_butn_news)
+    "main_menu/main_menu": {"insert_before": {"main_menu/build_number": [
+        f'<child widget="{NEWS}/x_butn_news" x="450" y="380"/>',
+        f'<child widget="{NEWS}/news_hint" x="450" y="380"/>']}},
     f"{PLAYER_EDIT}/player_options_menu": {"insert_before": {
         f"{PLAYER_EDIT}/player_button_bar": [
             f'<child widget="{PLAYER_EDIT}/op_aim_assist" x="54" y="289"/>',
@@ -1116,10 +1511,18 @@ WIDGET_PATCHES = {
     f"{PLAYLIST_EDIT}/edit_playlist_select_list": {
         "insert_before": {f"{PLAYLIST_EDIT}/playlist_edit_button_bar": [f'<child widget="{OPENCE_ITEM}"/>']},
         "inputs": ["port playlist edit desc"]},
-    # (the profile settings' picture: on Gamepad Setup's row, the profile's
-    # button settings, BITMAP_FRAMES; menu_functions.c's
-    # profile_gamepad_layout)
+    # (the profile settings' picture: on Gamepad Setup's row, the overlay's
+    # controller alone in its place, _layout_overlays;
+    # menu_functions.c's profile_gamepad_layout)
     f"{PE}/profile_edit_extended_desc_pic": {"inputs": ["port gamepad layout preview"]},
+    f"{PE}/profile_edit_extended_description": {"children": [
+        f'<child widget="{LAYOUT}/{controller}/overlay_small" x="4" platform="{spec["platform"]}"/>'
+        for controller, spec in CONTROLLERS.items()]},
+    # (Gameplay, before About: its screen is the gameplay file's; the rows'
+    # places, PROFILE_ROWS)
+    f"{PE}/profile_edit_select_list": {"insert_before": {
+        f"{PE}/about_item": [f'<child widget="{PE}/gameplay_profile_item"/>'],
+    }},
     # (straight to their screens: no "checking for updates" dialog, which
     # asked the PC version's servers)
     f"{MT}/multiplayer_type_join_internet_item": {"set": {"string_index": 6}, "handlers": [
@@ -1240,30 +1643,51 @@ WIDGET_PATCHES = {
     f"{MT}/join_game/join_game_button_bar": {"swap": {
         f"{MT}/join_game/join_game_button_refresh": f"{MT}/join_game/button_clipboard",
         f"{MT}/join_game/join_game_button_update": f"{MT}/join_game/join_game_button_refresh",
-    }},
-}
-
-# frames added after a PC bitmap's (by our names): (the Xbox map's bitmap,
-# its frame, the size drawn at, where in the widget). The profile settings'
-# picture gets the Xbox's Controller Setup's pictures of its five button
-# settings (its first four frames are the thumbstick settings'), which show
-# 512 by 235 of their 512 by 512: drawn at 279 wide, in the middle of the
-# picture's 279 by 202
-XBOX_CONTROLLER_PICTURES = f"ui\\shell\\{PE.replace('/', chr(92))}\\controller_edit\\config_controller"
-BITMAP_FRAMES = {
-    f"{PE}/profile_options": [(XBOX_CONTROLLER_PICTURES, 4 + preset, 279, 279, 0, 34) for preset in range(5)],
+    },
+        # (the Switch's and the PS5's: hints of the buttons in their place,
+        # browser_hints; a touchscreen keeps the buttons)
+        "child_platforms": {f"{MT}/join_game/{button}": "desktop android web"
+                            for button in ("join_game_button_refresh", "join_game_button_filters",
+                                           "join_game_button_join")} | {"common_button_back": "desktop android web"}},
+    # (the server browser's buttons, whatever row has the focus: the north
+    # face button - Y, a Switch's X, a PS5's Triangle - refreshes, the west -
+    # X, a Switch's Y, a PS5's Square - opens the filters, the shoulders
+    # change the source tab: menu_functions.c's browser_shortcut)
+    f"{MT}/join_game/join_game_items_list": {"handlers": [
+        '<on event="y" run="port browser refresh"/>', '<on event="x" run="port browser filters"/>',
+        '<on event="white" run="port browser mode previous"/>', '<on event="black" run="port browser mode next"/>',
+        # (the d-pad: left and right highlight a column, up sorts by it the
+        # fewest or A first, down the most or Z first, as the column's arrow
+        # points; the stick goes through the rows: ui_widget.c's
+        # ui_widget_port_dpad_updown_taken)
+        '<on event="left" run="port browser column previous"/>', '<on event="right" run="port browser column next"/>',
+        '<on event="up" run="port browser sort increasing"/>', '<on event="down" run="port browser sort decreasing"/>']},
+    # (Select Profile's buttons as hints on the Switch and the PS5,
+    # PROFILE_HINTS; a touchscreen keeps them)
+    f"{PROFILE}/profile_manager_button_bar": {"child_platforms": {
+        f"{PROFILE}/{button}": "desktop android web"
+        for button in ("profile_manager_button_new", "profile_manager_button_delete", "profile_manager_button_ok")}
+        | {"common_button_back": "desktop android web"}},
+    f"{PROFILE}/player_profile_manager_screen": {"children": [
+        f'<child widget="{PROFILE}/{key}" x="{x}" y="{y}" platform="{platform}"/>'
+        for key, x, y, platform in PROFILE_HINT_PLACES]},
+    f"{MT}/join_game/join_game_screen": {"children": [
+        f'<child widget="{MT}/join_game/{key}" x="{x}" y="{y}" platform="{platform}"/>'
+        for key, x, y, platform in BROWSER_HINT_PLACES]},
 }
 
 # the titles this port has that the PC version has not, set as its headers
 # are (port/assets/menus/port_svg): bitmap name, text
 TITLES = {
     "main_menu/mods/header_mods": "MODS",
+    "main_menu/theater/header_theater": "THEATER",
     f"{MT}/join_game/header_server_browser": "SERVER BROWSER",
     f"{MT}/join_game/header_direct_link": "DIRECT LINK",
     f"{MT}/join_game/header_password": "PASSWORD",
     f"{MT}/lobby/header_lobby": "GAME LOBBY",
     f"{MT}/coop/header_player_2": "PLAYER 2 PROFILE",
     f"{MT}/lobby/header_add_player": "ADD PLAYER",
+    f"{PE}/gameplay/header_gameplay": "GAMEPLAY",
 }
 
 
@@ -1441,6 +1865,18 @@ def _join_game_extras() -> list:
                                              ("bitmap", "bitmaps/alert_bkd"), ("font", "ui\\large_ui"),
                                              ("color", "#FF2896FF"), ("text_x", 9),
                                              ("text_y", 35), ("text_flags", "no_focus_test")], [])
+    # (the Switch's and the PS5's button bar: what each button does, the
+    # server browser's or LAN's and Direct Link's, browser_initialize showing
+    # the mode's)
+    # (a hint a widget, its picture first: the menus' text draws a picture
+    # amid centred words out of its place. The shoulders by name, the
+    # menus' pictures of them the Xbox's black and white)
+    for key, text in BROWSER_HINTS:
+        lines += _widget(f"{base}/{key}", [("type", "text"), ("controller", 1), ("width", 128), ("height", 22),
+                                          ("text", text), ("font", "ui\\small_ui"), ("color", "#FFFFFFFF"),
+                                          ("text_flags", "no_focus_test")], [])
+    for key, bitmap in BROWSER_HINT_PICTURES:
+        lines += _widget(f"{base}/{key}", [("width", 14), ("height", 14), ("bitmap", bitmap)], [])
     lines += _header(f"{base}/header_server_browser", f"{base}/header_server_browser")
     lines += _header(f"{base}/header_direct_link", f"{base}/header_direct_link")
     lines += _widget(f"{base}/button_clipboard", [("type", "text"), ("width", 128), ("height", 24),
@@ -1982,6 +2418,7 @@ def _lobby() -> list:
                                                        ("flags", "pass_unhandled_to_focused_child"),
                                                        ("bitmap", "bitmaps/gradient")],
                      ['<on event="created" run="net server defer start"/>',
+                      '<on event="deleted" run="net server allow start"/>',
                       '<child widget="main_menu/new_select/sel_list_desc_bkd"/>',
                       f'<child widget="{base}/player_profile_list"/>',
                       f'<child widget="{base}/header_add_player"/>',
@@ -2315,6 +2752,93 @@ def _map_kind() -> list:
     return lines
 
 
+def _news_screen() -> list:
+    """the news window: its title over a panel (bitmaps/controller_border)
+    of NEWS_ROWS lines of the notes, and under it the buttons that scroll
+    (the menus' scroll arrows, shown while there is more than the panel
+    holds) and close it (B as the console's picture of it: the menus'
+    %-codes); the title's and the lines' texts menu_functions.c's alone,
+    which makes them as long as it needs.
+    Up and down (the D-pad, the sticks, the mouse wheel) scroll a line, left
+    and right a page, B, Back or X again close it. And the main menu's hint
+    that X opens it (WIDGET_PATCHES)"""
+    base = NEWS
+    left, top = NEWS_PANEL[0] + 49, NEWS_PANEL[1] + 104
+    close = ['<on event="b" run="port news close"/>', '<on event="back" run="port news close"/>',
+             '<on event="x" run="port news close"/>']
+    scroll = [f'<on event="{event}" run="port news up"/>' for event in ("up", "stick_up", "right_stick_up")]
+    scroll += [f'<on event="{event}" run="port news down"/>' for event in ("down", "stick_down", "right_stick_down")]
+    scroll += ['<on event="left" run="port news page up"/>', '<on event="right" run="port news page down"/>']
+    lines = _widget(f"{base}/news_screen", [("width", 640), ("height", 480), ("bitmap", "bitmaps/gradient_big")],
+                    ['<data input="port news update"/>', '<on event="created" run="port news init"/>', *close,
+                     *scroll, f'<child widget="{base}/news_panel" x="{NEWS_PANEL[0]}" y="{NEWS_PANEL[1]}"/>',
+                     f'<child widget="{base}/news_title" x="{left}" y="{top - 34}"/>',
+                     *[f'<child widget="{base}/news_line" x="{left + 16}" y="{top + 12 + 18 * row}"/>'
+                       for row in range(NEWS_ROWS)],
+                     # (under the panel, the buttons left to right from a little
+                     # left of its middle: the up arrow, "Scroll", the down
+                     # arrow, B's picture and "Back"; widgets of their own,
+                     # which the menus' centring of a text with pictures in it
+                     # put apart; no picture of the D-pad is drawn in text, so
+                     # the menus' own scroll arrows. The arrows are the d-pad's
+                     # up and down to a tap or a click (a key's icon by their
+                     # names: ui_widget.c's ui_mouse_key_button), each further
+                     # than a key's label from "Scroll", so that it is neither's.
+                     # Their pictures sit high in their 16 texels: 7 down puts
+                     # their middles at the text's)
+                     f'<child widget="{base}/dpad_up_butn_news" x="{left + 164}" y="{top + 253 + 7}"/>',
+                     f'<child widget="{base}/news_scroll_text" x="{left + 198}" y="{top + 253}"/>',
+                     f'<child widget="{base}/dpad_down_butn_news" x="{left + 254}" y="{top + 253 + 7}"/>',
+                     # (Back's tap and click: B's, as the hint's is X's)
+                     f'<child widget="{base}/b_butn_news_back" x="{left + 300}" y="{top + 253}"/>',
+                     f'<child widget="{base}/news_back_text" x="{left + 300}" y="{top + 253}"/>'])
+    lines += _widget(f"{base}/news_panel", [("width", 640), ("height", 480), ("bitmap", "bitmaps/controller_border")],
+                     [])
+    lines += _widget(f"{base}/news_title", [("type", "text"), ("controller", 1), ("width", 507), ("height", 30),
+                                           ("font", "ui\\large_ui"), ("color", "#FF2896FF")], [])
+    lines += _widget(f"{base}/news_line", [("type", "text"), ("controller", 1), ("width", 475), ("height", 18),
+                                          ("font", "ui\\small_ui"), ("color", "#FFFFFFFF"),
+                                          ("text_flags", "no_focus_test")], [])
+    for name in ("up", "down"):
+        lines += _widget(f"{base}/dpad_{name}_butn_news", [("width", 16), ("height", 16),
+                                                           ("bitmap", f"bitmaps/arrow_sm_{name}")], [])
+    for name, text, width in (("scroll", "Scroll", 48), ("back", "%b-button Back", 120)):
+        lines += _widget(f"{base}/news_{name}_text", [("type", "text"), ("controller", 1), ("width", width),
+                                                      ("height", 20), ("text", text), ("font", "ui\\small_ui"),
+                                                      ("color", "#FFFFFFFF"), ("text_flags", "no_focus_test")], [])
+    # (the hint's tap and click: a widget named as a screen key's icon is X's
+    # to the pointer, and the text beside it its label, ui_widget.c's
+    # ui_mouse_key_button; nothing of it drawn, the hint's own picture is)
+    lines += _widget(f"{base}/x_butn_news", [("width", 16), ("height", 20)], [])
+    lines += _widget(f"{base}/b_butn_news_back", [("width", 16), ("height", 20)], [])
+    lines += _widget(f"{base}/news_hint", [("type", "text"), ("controller", 1), ("width", 150), ("height", 20),
+                                          ("text", "%x-button NEWS"), ("font", "ui\\small_ui"),
+                                          ("color", "#FFCCCCCC"), ("text_flags", "no_focus_test")], [])
+    return lines
+
+
+def _invite_qr_screen() -> list:
+    """(the Switch's) Server Setup's invite link as a QR code, for a phone
+    to read: its own screen, opened by the invite row's A (menu_functions.c's
+    invite_copy), which only B closes; the code is drawn above its line of
+    text (menu_functions.c's link_qr_draw)"""
+    base = f"{MT}/server_settings/invite_qr"
+    lines = _widget(f"{base}/invite_qr_screen", [("width", 640), ("height", 480), ("flags", "pause_game"),
+                                                 ("bitmap", "bitmaps/gradient")],
+                    ['<on event="b" run="ss invite qr back"/>',
+                     f'<child widget="{base}/invite_qr_title"/>',
+                     f'<child widget="{base}/invite_qr_text"/>'])
+    lines += _widget(f"{base}/invite_qr_title", [("type", "text"), ("controller", 1), ("left", 35), ("top", 24),
+                                                 ("width", 570), ("height", 30), ("text", "INVITE LINK"),
+                                                 ("font", "ui\\large_ui"), ("color", "#FF2896FF")], [])
+    lines += _widget(f"{base}/invite_qr_text", [("type", "text"), ("controller", 1), ("left", 40), ("top", 410),
+                                                ("width", 560), ("height", 18),
+                                                ("text", "Scan it with your phone for the invite link. B: back"),
+                                                ("font", "ui\\small_ui"), ("color", "#FFFFFFFF"), ("align", "center"),
+                                                ("text_flags", "no_focus_test")], [])
+    return lines
+
+
 def multiplayer_files() -> dict:
     """the port's multiplayer widgets: the browser's additions, the server
     settings, the lobby"""
@@ -2322,16 +2846,22 @@ def multiplayer_files() -> dict:
             "<!-- The port's multiplayer screens, in the PC version's style (tools/port_settings.py) -->", "<menus>"]
     return {
         f"{MT}/join_game".replace("/", ".") + ".port.xml": head + _join_game_extras() + ["</menus>", ""],
-        f"{MT}/server_settings".replace("/", ".") + ".xml": head + _server_settings() + ["</menus>", ""],
+        f"{MT}/server_settings".replace("/", ".") + ".xml": head + _server_settings() + _invite_qr_screen() +
+        ["</menus>", ""],
         f"{MT}/lobby".replace("/", ".") + ".xml": head + _lobby() + ["</menus>", ""],
         f"{MT}/coop".replace("/", ".") + ".xml": head + _coop() + ["</menus>", ""],
         "main_menu/new_select".replace("/", ".") + ".port.xml": head + _map_kind() + ["</menus>", ""],
+        PROFILE.replace("/", ".") + ".port.xml": head + _hint_widgets(PROFILE, PROFILE_HINTS) + ["</menus>", ""],
+        # (and the main menu's news)
+        NEWS.replace("/", ".") + ".xml": head + _news_screen() + ["</menus>", ""],
         "main_menu/settings_select/multiplayer_setup/item_options_edit".replace("/", ".") + ".port.xml": head + _item_options_extras() + ["</menus>", ""],
         PLAYER_EDIT.replace("/", ".") + ".port.xml": head + _player_options_extras() + ["</menus>", ""],
         TEAMPLAY_EDIT.replace("/", ".") + ".port.xml": head + _teamplay_options_extras() + ["</menus>", ""],
         OPENCE_EDIT.replace("/", ".") + ".port.xml": head + _opence_options() + ["</menus>", ""],
         MODS.replace("/", ".") + ".xml": [head[0], "<!-- The port's Mods screen, in the PC version's style "
                                           "(tools/port_settings.py) -->", head[2]] + _mods() + ["</menus>", ""],
+        THEATER.replace("/", ".") + ".xml": [head[0], "<!-- The port's Theater screen, in the PC version's style "
+                                             "(tools/port_settings.py) -->", head[2]] + _theater() + ["</menus>", ""],
     }
 
 
@@ -2351,7 +2881,10 @@ MENU_ITEM_TOP, MENU_ITEM_SCALE, MENU_ITEM_MIDDLE = 6.57, 0.9037, 130.0
 # these pairs, so each is the sum of a space after the first letter and one
 # before the second, fitted (least squares) to the 53 pairs the redraws' items
 # and headers have (D-I, of the main menu's Credits, gives D's right side)
-MENU_ITEM_SPACES = {"MO": 3.17, "OD": 2.8, "DS": 2.3}
+MENU_ITEM_SPACES = {"MO": 3.17, "OD": 2.8, "DS": 2.3,
+                    # (THEATER's: ER as the redraws' PLAYER has it; the
+                    # others set by eye beside the PC version's items)
+                    "TH": 2.5, "HE": 2.6, "EA": 1.5, "AT": 0.5, "TE": 1.5, "ER": 3.24}
 # the mods' status icons (port/assets/icons/lucide): a mod out of the order it
 # asks for, and one that cannot be played (another mod says it cannot be
 # played with it, or this build cannot play it): menu_functions.c's
@@ -2443,7 +2976,11 @@ def _mods() -> list:
                      ['<on event="b" back="true"/>', '<on event="back" back="true"/>',
                       '<child widget="main_menu/new_select/sel_list_desc_bkd"/>',
                       f'<child widget="{base}/mods_list"/>',
-                      f'<child widget="{base}/header_mods"/>'])
+                      f'<child widget="{base}/header_mods"/>',
+                      # (the Switch's and the PS5's buttons as hints where the
+                      # button bar's are, which a touchscreen keeps)
+                      *[f'<child widget="{base}/{key}" x="{x}" y="{y}" platform="{platform}"/>'
+                        for key, x, y, platform in MOD_HINT_PLACES]])
     lines += _header(f"{base}/header_mods", f"{base}/header_mods")
     # (the lobby's rows, MOD_ROWS of them, scrolling over more mods)
     rows = [f'<child widget="{base}/op_mod_{index + 1}" x="20" y="{73 + 30 * index}"/>' for index in range(MOD_ROWS)]
@@ -2451,14 +2988,22 @@ def _mods() -> list:
                                            ("flags", "pass_unhandled_to_focused_child up_down_tabs_children"),
                                            ("description", f"{base}/mod_details")],
                      ['<data input="port mods update"/>', '<on event="created" run="port mods init"/>',
-                      '<on event="deleted" run="port mods close"/>', *rows,
+                      '<on event="deleted" run="port mods close"/>',
+                      # (the north face button - Y, a Switch's X, a PS5's
+                      # Triangle - turns the mod chosen on or off, the
+                      # shoulders move it: the list's, whatever row has the
+                      # focus)
+                      '<on event="y" run="port mods toggle"/>', '<on event="white" run="port mods move up"/>',
+                      '<on event="black" run="port mods move down"/>', *rows,
                       f'<child widget="{base}/button_bar" y="414"/>'])
     for index in range(MOD_ROWS):
         lines += _widget(f"{base}/op_mod_{index + 1}",
                          [("width", 390), ("height", 28), ("flags", "pass_unhandled_to_focused_child"),
                           ("bitmap", "bitmaps/sel_list_item_bkd_top" if index == 0 else "bitmaps/sel_list_item_bkd"),
                           ("color", "#FF2896FF")],
-                         ['<on event="a" run="port mods toggle"/>', '<on event="start" run="port mods toggle"/>',
+                         # (A: on the Switch and the PS5 OK, elsewhere, and a
+                         # tap, on or off: menu_functions.c's mods_accept)
+                         ['<on event="a" run="port mods accept"/>', '<on event="start" run="port mods accept"/>',
                           '<on event="left" run="port mods move up"/>', '<on event="right" run="port mods move down"/>',
                           '<on event="left_mouse" run="mouse emit accept event"/>',
                           f'<child widget="{base}/mod_status" x="8" y="2"/>',
@@ -2488,13 +3033,139 @@ def _mods() -> list:
     lines += _widget(f"{base}/button_bar",
                      [("type", "column_list"), ("width", 640), ("height", 28),
                       ("flags", "pass_unhandled_to_focused_child left_right_tabs_items")],
-                     [f'<child widget="{base}/button_up" y="1"/>', f'<child widget="{base}/button_down" x="130" y="1"/>',
-                      f'<child widget="{base}/button_ok" x="380" y="1"/>',
-                      '<child widget="common_button_cancel" x="510" y="1"/>'])
+                     [f'<child widget="{base}/button_up" y="1" platform="desktop android web"/>',
+                      f'<child widget="{base}/button_down" x="130" y="1" platform="desktop android web"/>',
+                      f'<child widget="{base}/button_ok" x="380" y="1" platform="desktop android web"/>',
+                      '<child widget="common_button_cancel" x="510" y="1" platform="desktop android web"/>'])
     lines += _text_button(f"{base}/button_up", "MOVE UP", ['<on event="a" run="port mods move up"/>',
                                                           '<on event="start" run="port mods move up"/>'])
     lines += _text_button(f"{base}/button_down", "MOVE DOWN", ['<on event="a" run="port mods move down"/>',
                                                               '<on event="start" run="port mods move down"/>'])
     lines += _button(f"{base}/button_ok", 1, ['<on event="a" run="port mods save" back="true"/>',
                                               '<on event="start" run="port mods save" back="true"/>'])
+    lines += _hint_widgets(base, MOD_HINTS, MOD_HINT_PICTURES)
+    return lines
+
+
+# ---------- the Theater (port/linux/REPLAY.md): the main menu's THEATER,
+# the replays a host or a client records (port/linux/game/network_replay.c),
+# laid out as the Mods screen is: on the left the replays, a row each, the
+# newest first (its map and when, and its length), scrolling over more, A
+# playing the one chosen (network_replay_playback.c); on the right, in the
+# lobby's frame, what the one chosen is; and the buttons: RECORD (ON or OFF,
+# network.record_replays), DELETE (the one chosen, at a second press), EXPORT
+# (Android's: the app's folder picker, HaloActivity.exportReplays) and BACK
+# (menu_functions.c's "port theater" functions). The Switch and the PS5 have
+# fewer rows: under them a QR code of their replay page
+# (network_replay_page.c)
+
+THEATER_ROWS = 10
+THEATER_QR_ROWS = 6
+THEATER_ROW_TOP = 73
+
+
+def _theater() -> list:
+    base = THEATER
+    lines = _widget("main_menu/main_menu_item_theater",
+                    [("type", "text"), ("width", 256), ("height", 33), ("bitmap", "main_menu/menu_theater")],
+                    [f'<on event="a" open="{base}/theater_screen"/>', f'<on event="start" open="{base}/theater_screen"/>',
+                     '<on event="left_mouse" run="mouse emit accept event"/>'])
+    lines += _widget(f"{base}/theater_screen", [("width", 640), ("height", 480),
+                                                ("flags", "pass_unhandled_to_focused_child pause_game"),
+                                                ("bitmap", "bitmaps/gradient")],
+                     ['<on event="b" back="true"/>', '<on event="back" back="true"/>',
+                      '<child widget="main_menu/new_select/sel_list_desc_bkd"/>',
+                      f'<child widget="{base}/theater_list"/>',
+                      f'<child widget="{base}/header_theater"/>',
+                      f'<child widget="{base}/theater_qr_text" platform="switch ps5"/>',
+                      # (the consoles' RECORD and DELETE: hints of the north
+                      # and west buttons where the button bar's would be,
+                      # which a touchscreen keeps; theater_list's bar at 414)
+                      f'<child widget="{base}/theater_record_hint" x="8" y="415" platform="switch ps5"/>',
+                      f'<child widget="{base}/theater_delete_hint" x="128" y="415" platform="switch ps5"/>',
+                      f'<child widget="{base}/theater_back_hint" x="510" y="415" platform="switch ps5"/>'])
+    lines += _header(f"{base}/header_theater", f"{base}/header_theater")
+    rows = []
+    for index in range(THEATER_ROWS):
+        rows.append(f'<child{attributes([("widget", f"{base}/op_replay_{index + 1}"), ("x", 20), ("y", THEATER_ROW_TOP + 30 * index), ("platform", "desktop android web" if index >= THEATER_QR_ROWS else None)])}/>')
+    lines += _widget(f"{base}/theater_list", [("type", "column_list"), ("width", 640), ("height", 480),
+                                              ("flags", "pass_unhandled_to_focused_child up_down_tabs_children"),
+                                              ("description", f"{base}/theater_details")],
+                     ['<data input="port theater update"/>',
+                      # (the west face button - X, a Switch's Y, a PS5's
+                      # Square - deletes the replay chosen, asking first; the
+                      # north - Y, a Switch's X, a PS5's Triangle - turns
+                      # RECORD on or off: the list's, as the main menu's X is,
+                      # whatever row has the focus)
+                      '<on event="x" run="port theater delete"/>',
+                      '<on event="y" run="port theater record"/>',
+                      *rows, f'<child widget="{base}/button_bar" y="414"/>'])
+    for index in range(THEATER_ROWS):
+        lines += _widget(f"{base}/op_replay_{index + 1}",
+                         [("width", 390), ("height", 28), ("flags", "pass_unhandled_to_focused_child"),
+                          ("bitmap", "bitmaps/sel_list_item_bkd_top" if index == 0 else "bitmaps/sel_list_item_bkd"),
+                          ("color", "#FF2896FF")],
+                         ['<on event="a" run="port theater watch"/>', '<on event="start" run="port theater watch"/>',
+                          '<on event="left_mouse" run="mouse emit accept event"/>',
+                          f'<child widget="{base}/theater_replay_name" x="12"/>',
+                          f'<child widget="{base}/theater_replay_length" x="290"/>'])
+    lines += _widget(f"{base}/theater_replay_name",
+                     [("type", "text"), ("controller", 1), ("width", 276), ("height", 22), ("font", "ui\\large_ui"),
+                      ("color", "#FF2896FF"), ("text_y", 4)], [])
+    lines += _widget(f"{base}/theater_replay_length",
+                     [("type", "text"), ("controller", 1), ("width", 90), ("height", 22), ("font", "ui\\large_ui"),
+                      ("color", "#FF2896FF"), ("align", "right"), ("text_y", 4), ("text_flags", "no_focus_test")], [])
+    # (the Switch's and the PS5's: the replay page's QR code, drawn over this
+    # line by menu_functions.c, network_replay_page.c)
+    lines += _widget(f"{base}/theater_qr_text",
+                     [("type", "text"), ("controller", 1), ("left", 20), ("top", 392), ("width", 390), ("height", 18),
+                      ("text", "Scan it to download or upload replays."), ("font", "ui\\small_ui"),
+                      ("color", "#FFFFFFFF"), ("align", "center"), ("text_flags", "no_focus_test")], [])
+    # (in the lobby's frame, sel_list_desc_bkd's, as the mods' details)
+    lines += _widget(f"{base}/theater_details", [("width", 640), ("height", 480)],
+                     [f'<child widget="{base}/theater_details_text"/>'])
+    lines += _widget(f"{base}/theater_details_text",
+                     [("type", "text"), ("controller", 1), ("left", 412), ("top", 84), ("width", 200),
+                      ("height", 318), ("font", "ui\\small_ui"), ("color", "#FF2896FF")], [])
+    lines += _widget(f"{base}/button_bar",
+                     [("type", "column_list"), ("width", 640), ("height", 28),
+                      ("flags", "pass_unhandled_to_focused_child left_right_tabs_items")],
+                     [f'<child widget="{base}/button_record" y="1" platform="desktop android web"/>',
+                      f'<child widget="{base}/button_delete" x="130" y="1" platform="desktop android web"/>',
+                      f'<child widget="{base}/button_export" x="260" y="1" platform="android"/>',
+                      f'<child widget="{base}/button_back" x="510" y="1" platform="desktop android web"/>'])
+    # (its words a string list's, OFF and ON, which "port theater update"
+    # chooses between: a text widget's own words are its string list's again
+    # each time it is drawn, so words set on it would not show)
+    lines += _widget(f"{base}/button_record",
+                     [("type", "text"), ("width", 128), ("height", 24), ("bitmap", "bitmaps/text_button_background"),
+                      ("string_list", f"{base}/record_strings"), ("string_index", 0), ("font", "ui\\small_ui"),
+                      ("color", "#FFFFFFFF"), ("align", "center"), ("text_y", 2)],
+                     ['<on event="a" run="port theater record"/>', '<on event="start" run="port theater record"/>',
+                      '<on event="left_mouse" run="mouse emit accept event"/>'])
+    lines += _strings(f"{base}/record_strings", ["RECORD: OFF", "RECORD: ON"])
+    lines += _text_button(f"{base}/button_delete", "%x-button DELETE", ['<on event="a" run="port theater delete"/>',
+                                                                      '<on event="start" run="port theater delete"/>'])
+    # (its words a string list's, as button_record's: "port theater update"
+    # chooses OFF or ON)
+    lines += _widget(f"{base}/theater_record_hint", [("type", "text"), ("controller", 1), ("width", 150),
+                                                     ("height", 24), ("string_list", f"{base}/record_hint_strings"),
+                                                     ("string_index", 0), ("font", "ui\\small_ui"),
+                                                     ("color", "#FFFFFFFF"), ("text_y", 2),
+                                                     ("text_flags", "no_focus_test")], [])
+    lines += _strings(f"{base}/record_hint_strings", ["%y-button RECORD: OFF", "%y-button RECORD: ON"])
+    lines += _widget(f"{base}/theater_back_hint", [("type", "text"), ("controller", 1), ("width", 128),
+                                                   ("height", 24), ("text", "%b-button BACK"),
+                                                   ("font", "ui\\small_ui"), ("color", "#FFFFFFFF"),
+                                                   ("align", "center"), ("text_y", 2),
+                                                   ("text_flags", "no_focus_test")], [])
+    lines += _widget(f"{base}/theater_delete_hint", [("type", "text"), ("controller", 1), ("width", 200),
+                                                     ("height", 24), ("text", "%x-button DELETE"),
+                                                     ("font", "ui\\small_ui"), ("color", "#FFFFFFFF"),
+                                                     ("text_y", 2),
+                                                     ("text_flags", "no_focus_test")], [])
+    lines += _text_button(f"{base}/button_export", "EXPORT", ['<on event="a" run="port theater export"/>',
+                                                             '<on event="start" run="port theater export"/>'])
+    lines += _text_button(f"{base}/button_back", "BACK", ['<on event="a" back="true"/>',
+                                                         '<on event="start" back="true"/>'])
     return lines

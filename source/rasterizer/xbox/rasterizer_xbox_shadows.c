@@ -195,12 +195,35 @@ static struct rasterizer_model_begin_parameters const *local_parameters = NULL;
 static boolean shadow_setup = FALSE;
 static boolean shadow_used = FALSE;
 
+/* port: the deferred object shadows (rasterizer.h): whether this frame's are
+being deferred, the shadow begun last is, its map is convolved already (its
+casting does not convolve again), and each slot's shadow as it was begun */
+static boolean shadows_deferring = FALSE;
+static boolean shadow_deferred = FALSE;
+static boolean shadow_convolved = FALSE;
+static short shadows_deferred_count = 0;
+
+static struct
+{
+	real_matrix4x3 shadow_matrix;
+	real_rgb_color shadow_color;
+	real object_bounding_radius;
+} deferred_shadows[RASTERIZER_PORT_SHADOW_SLOTS];
+
 /* ---------- public code */
 
 void _rasterizer_environment_shadows_begin(
 	void)
 {
 	rasterizer_profile_begin(_rasterizer_profile_environment_shadows);
+
+	/* port: deferred where the casting would convolve the map (the debug
+	modes draw each shadow as it was) */
+	shadows_deferring = global_window_parameters.rasterizer_target == _rasterizer_target_render_primary &&
+		rasterizer_debug_options.draw_environment_shadows &&
+		rasterizer_debug_options.shadow_convolution_enabled &&
+		!rasterizer_debug_options.shadow_debug_enabled;
+	shadows_deferred_count = 0;
 
 	return;
 }
@@ -322,6 +345,14 @@ boolean _rasterizer_environment_shadow_begin(
 		shadow_setup = FALSE;
 		shadow_used = FALSE;
 		shadow_restored = FALSE;
+		shadow_convolved = FALSE;
+
+		/* port: deferred, its map ends in a slot of its own; else in the
+		game's own, cast at once */
+		shadow_deferred = shadows_deferring && shadows_deferred_count < RASTERIZER_PORT_SHADOW_SLOTS &&
+			rasterizer_port_shadow_slot_select(shadows_deferred_count);
+		if (!shadow_deferred)
+			rasterizer_port_shadow_slot_select(NONE);
 
 		if (rasterizer_debug_options.statistics_mode ==
 			_rasterizer_statistics_mode_enabled)
@@ -580,7 +611,8 @@ void _rasterizer_environment_shadow_draw(
 	{
 		if (!shadow_setup)
 		{
-			if (rasterizer_debug_options.shadow_convolution_enabled)
+			/* (port: a deferred shadow's map was convolved as it was finished) */
+			if (rasterizer_debug_options.shadow_convolution_enabled && !shadow_convolved)
 			{
 				rasterizer_shadow_convolve();
 			}
@@ -817,11 +849,45 @@ void _rasterizer_environment_shadow_draw(
 		}
 
 		rasterizer_set_stencil_mode(RASTERIZER_STENCIL_MODE_REJECT);
+		/* port: drawn only over the shadow's map. Outside it the map's
+		border (0) is read, and the combiners above leave the pixel as it was
+		(r0 is 1, the result 0, and the alpha test takes it), so the
+		triangles the shadow falls on - the level's, much bigger than it -
+		need not be shaded there; a margin of a texel's width keeps the
+		linear filter's fringe at the border. */
+		halo_texture_clip(TRUE, -1.0f / 64.0f, 1.0f + 1.0f / 64.0f);
+		/* port: and rasterized only inside the screen's rectangle of the
+		shadow's volume (render_object_shadow_end's: the map's square, and
+		along the shadow from half the radius before the object to four
+		past, where the corner fade ends it), a tenth more each way
+		(rasterizer_port_scissor_points) */
+		{
+			real_point3d corners[8];
+			real radius = local_object_bounding_radius;
+			short corner;
+
+			for (corner = 0; corner < 8; corner++)
+			{
+				real across = (corner & 1) ? radius * 1.1f : -radius * 1.1f;
+				real side = (corner & 2) ? radius * 1.1f : -radius * 1.1f;
+				real along = (corner & 4) ? radius * 4.4f : -radius * 0.6f;
+
+				corners[corner].x = local_shadow_matrix.position.x + local_shadow_matrix.forward.i * across +
+					local_shadow_matrix.left.i * side + local_shadow_matrix.up.i * along;
+				corners[corner].y = local_shadow_matrix.position.y + local_shadow_matrix.forward.j * across +
+					local_shadow_matrix.left.j * side + local_shadow_matrix.up.j * along;
+				corners[corner].z = local_shadow_matrix.position.z + local_shadow_matrix.forward.k * across +
+					local_shadow_matrix.left.k * side + local_shadow_matrix.up.k * along;
+			}
+			rasterizer_port_scissor_points(corners, 8);
+		}
 		rasterizer_draw_dynamic_triangles_static_vertices(
 			dynamic_triangle_buffer_index,
 			first_triangle_index,
 			triangle_count,
 			vertex_buffer);
+		rasterizer_port_scissor_points(NULL, 0);
+		halo_texture_clip(FALSE, 0.0f, 0.0f);
 
 		if (rasterizer_debug_options.statistics_mode ==
 			_rasterizer_statistics_mode_enabled)
@@ -837,6 +903,53 @@ void _rasterizer_environment_shadow_draw(
 	}
 
 	return;
+}
+
+boolean rasterizer_port_environment_shadow_deferred(
+	void)
+{
+	return shadow_deferred;
+}
+
+short rasterizer_port_environment_shadow_finish(
+	void)
+{
+	short slot = shadows_deferred_count;
+
+	match_assert(__FILE__, __LINE__, shadow_deferred && slot < RASTERIZER_PORT_SHADOW_SLOTS);
+	rasterizer_shadow_convolve();
+	deferred_shadows[slot].shadow_matrix = local_shadow_matrix;
+	deferred_shadows[slot].shadow_color = local_shadow_color;
+	deferred_shadows[slot].object_bounding_radius = local_object_bounding_radius;
+	shadows_deferred_count++;
+	/* (rasterizer_environment_shadow_end leaves the target to the next map) */
+	shadow_restored = TRUE;
+	shadow_deferred = FALSE;
+	return slot;
+}
+
+void rasterizer_port_environment_shadow_cast_begin(
+	short slot)
+{
+	match_assert(__FILE__, __LINE__, slot >= 0 && slot < shadows_deferred_count);
+	rasterizer_port_shadow_slot_select(slot);
+	local_shadow_matrix = deferred_shadows[slot].shadow_matrix;
+	local_shadow_color = deferred_shadows[slot].shadow_color;
+	local_object_bounding_radius = deferred_shadows[slot].object_bounding_radius;
+	local_parameters = 0;
+	shadow_setup = FALSE;
+	shadow_used = TRUE;
+	shadow_restored = FALSE;
+	shadow_convolved = TRUE;
+	shadow_deferred = FALSE;
+}
+
+void rasterizer_port_environment_shadows_cast(
+	void)
+{
+	rasterizer_port_shadow_slot_select(NONE);
+	shadows_deferred_count = 0;
+	shadow_convolved = FALSE;
 }
 
 void _rasterizer_environment_shadows_end(

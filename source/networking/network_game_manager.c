@@ -326,6 +326,11 @@ void network_game_invalidate_player(
 void network_game_end_and_load_ui(
 	struct network_game *game)
 {
+	/* port: leaving disposes the session; a frame that has already let
+	the server and the client go has no game to read */
+	if (!game)
+		return;
+
 	if (game->local_data.game_objects_loaded)
 		main_load_ui_scenario(TRUE);
 

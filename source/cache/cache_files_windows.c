@@ -592,6 +592,10 @@ boolean cache_files_precache_map_loaded(
 
 /* (the port's, port/linux/src/sdl_platform.c) */
 void platform_log(char const *format, ...);
+/* (the port's, port/linux/src/xbox_files.c) a cache file about to be written
+over with a new map: the Switch, which keeps them in memory, lets the old
+one's go first */
+void platform_file_discard(HANDLE handle);
 
 boolean cache_files_precache_map_begin(
 	const char *map_name,
@@ -673,6 +677,7 @@ boolean cache_files_precache_map_begin(
 			cache_file_globals.copying_to_map_file_name[
 				sizeof(cache_file_globals.copying_to_map_file_name) - 1] = 0;
 			cache_file_get_map_path(cache_map_name, path);
+			platform_file_discard(cached_map_file_get_handle(map_file_index));
 			error(_error_silent, "starting precaching of map '%s'", cache_map_name);
 			cache_copy_begin(
 				buffer,

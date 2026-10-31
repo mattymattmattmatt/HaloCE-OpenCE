@@ -12,6 +12,7 @@ game. The platform layer cannot see the game's types, so it asks here
 #include "input/input.h"
 #include "input/input_abstraction.h"
 #include "interface/ui_widget.h"
+#include "network_replay.h"
 
 /* asks whether a cinematic is playing that A would skip
 (player_control.c, player_control_action_test_check_reset_input_blob); tests
@@ -64,4 +65,11 @@ unsigned char manual_respawn_waiting(void);
 int touch_game_respawn_waiting(void)
 {
 	return cinematic_globals && game_in_progress() && manual_respawn_waiting();
+}
+
+/* asks whether a replay plays (port/linux/game/network_replay_playback.c):
+the touch controls show its buttons and their stick alone */
+int touch_game_replay_playing(void)
+{
+	return network_replay_playing();
 }

@@ -1983,6 +1983,55 @@ int p2p_signal_connected(void)
 	return 0;
 }
 
+int p2p_signal_stop_if_idle(void)
+{
+	static const unsigned char disconnect[2] = { 0, 0 };
+	int index;
+
+	if (!signalling.started || signalling.hosting || joins_active() || signalling.lobby_listed ||
+		signalling.lobby_browsing)
+	{
+		return 0;
+	}
+	for (index = 0; index < P2P_MAXIMUM_PROBES; index++)
+	{
+		if (signalling.probes[index].join.active)
+			return 0;
+	}
+	for (index = 0; index < signalling.broker_count; index++)
+	{
+		struct broker const *broker = &signalling.brokers[index];
+		int flight;
+
+		/* (a tombstone or a slot's clearing still to go out) */
+		if (broker->lobby_clear_pending ||
+			(signalling.lobby_listing_size && broker->lobby_version != signalling.lobby_version))
+		{
+			return 0;
+		}
+		for (flight = 0; flight < MAXIMUM_IN_FLIGHT; flight++)
+		{
+			if (broker->in_flight[flight].used)
+				return 0;
+		}
+	}
+	for (index = 0; index < signalling.broker_count; index++)
+	{
+		struct broker *broker = &signalling.brokers[index];
+
+		/* DISCONNECT, as p2p_signal_lobby_quit's */
+		if (broker->state == _broker_ready)
+		{
+			broker_send(broker, 0xE0, disconnect, broker->protocol == 5 ? 2 : 0);
+			broker_flush(broker);
+		}
+		broker_close(broker, 0);
+	}
+	signalling.broker_count = 0;
+	signalling.started = 0;
+	return 1;
+}
+
 void p2p_signal_reconnect(void)
 {
 	int index;

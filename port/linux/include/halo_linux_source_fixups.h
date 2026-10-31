@@ -103,6 +103,44 @@ void halo_vertex_shader_lighting(unsigned long handle);
 /* display.anti_aliasing's pass over a window's 3D view, before the HUD and
 menus (source/render/render.c): the window's bounds on the screen */
 void halo_screen_anti_alias(short x0, short y0, short x1, short y1);
+/* the part of a frame the game is about to draw (source/render/render.c):
+the Switch's renderer keeps it in its record of the commands it ran, for
+the log after a GPU fault (port/switch/host/host_dk.c); nothing elsewhere */
+void halo_render_marker(char const *name);
+/* whether the sun's glow is drawn from the glow the frame before made at its end, rather than from a copy of the
+screen made in the middle of the frame (source/rasterizer/xbox/rasterizer_xbox_lights.c): Android's Vulkan renderer,
+whose phones' GPUs pay for that copy by storing the screen out of their tile memory and loading it back
+(debug.original_sun_glow turns it off); not elsewhere */
+int halo_render_defer_sun_glow(void);
+/* the same for the water's ripples' bump map (source/rasterizer/xbox/rasterizer_xbox_water.c): the water drawn with
+the one the frame before made at its end, rather than one made in the middle of the frame, its 128 by 128 target
+ending the screen's rendering; Android's Vulkan renderer (debug.original_water turns it off), not elsewhere */
+int halo_render_defer_water(void);
+/* the draws that follow drawn only where texture coordinate 0's u and v are
+in [low, high], or (clip FALSE) everywhere: a shadow cast on the level
+(source/rasterizer/xbox/rasterizer_xbox_shadows.c), which changes nothing
+outside its map; the Switch's renderer clips there (port/switch/guest/
+d3d8_dk.c), the others draw it all */
+void halo_texture_clip(unsigned char clip, float low, float high);
+/* the same for a stage's coordinates, in two or three (stage -1 for none):
+the dynamic lights' passes on the level, which add nothing past their
+distance attenuation's box (source/rasterizer/xbox/rasterizer_xbox_environment.c) */
+void halo_texture_clip_stage(short stage, unsigned char three_dimensional, float low, float high);
+/* the draws that follow rasterized only inside [x0, x1) x [y0, y1) of the
+target, in its game pixels as the viewport is, and the viewport (on FALSE,
+the viewport alone): a draw that changes nothing outside a box of the world
+(source/rasterizer/xbox/rasterizer_xbox.c, rasterizer_port_scissor_points);
+the Switch's renderer only */
+void halo_draw_scissor(unsigned char on, float x0, float y0, float x1, float y1);
+/* whether the zoom's blur is drawn on a small copy of the screen and blended
+over it once (source/rasterizer/xbox/rasterizer_xbox_screen_effect.c), and
+that blend's shader on or off for the draws that follow: the Switch's
+renderer only (port/switch/guest/d3d8_dk.c; debug.original_zoom) */
+unsigned char halo_screen_fast_warp(void);
+void halo_screen_warp_blend(unsigned char on);
+/* whether a blur screen effect is drawn on small targets (the same file;
+the Switch's renderer only, debug.original_blur) */
+unsigned char halo_screen_fast_blur(void);
 /* display.hdr's tone mapping of a window's 3D view, before its
 anti-aliasing (source/render/render.c) */
 void halo_screen_tone_map(short x0, short y0, short x1, short y1);
@@ -125,6 +163,20 @@ int halo_server_debug_echo(void);
 char const *server_director_first_level(void);
 /* the mouse in the menus (source/interface/ui_widget.c) */
 #include "halo_ui_pointer.h"
+/* the overlay menu (port/linux/game/overlay_menu.c): while it is open the
+menus' pointer is its own, and it is drawn over the screen (interface.c) */
+#include "halo_overlay_menu.h"
+/* TRUE when B steps out of a custom-map folder or the Map screen's
+difficulties and the screen stays (port/linux/game/menu_functions.c) */
+unsigned char menu_port_back(void *widget);
+/* TRUE when a list's d-pad up and down are its own handlers', not a step
+through its rows (the server browser's sort: port/linux/game/menu_functions.c) */
+unsigned char ui_widget_port_dpad_updown_taken(void *widget);
+/* the Switch GPU, waited on before a map's memory goes
+(port/switch/guest/d3d8_dk.c) */
+#ifdef HALO_SWITCH
+void halo_switch_renderer_idle(void);
+#endif
 /* the debug camera's mouse and keys (source/camera/director.c): whether the
 middle button, R and F are held, and the wheel's notches since the last call
 (port/linux/src/xinput_sdl.c) */

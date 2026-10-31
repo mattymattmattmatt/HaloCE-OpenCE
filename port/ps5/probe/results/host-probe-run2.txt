@@ -1,0 +1,138 @@
+host-probe.txt: writing to this file and the kernel log
+system software 13.590.001 (0x13590001)
+RADV's standard error to the kernel log: 0
+
+=== 4. the host's memory, before anything ===
+memory before anything: flexible available 417.0 MB (0x00000000); direct memory's largest free block 12268.0 MB at 0x1400000 (0x00000000); the platform heap maps 16.0 MB, at most 16.0 MB, 0 fallbacks to libc
+
+=== the guest's ranges ===
+image: 0x70000000-0x74000000, 64 MB of direct memory at physical 0x1400000, read, write and execute, zeroed, in 1 ms
+Xbox window: reserving 0x80000000-0xa0000000: placed elsewhere, 0xffffffff
+Xbox window: 0x90000000-0xb0000000, 512 MB of direct memory at physical 0x5400000, zeroed, in 14 ms
+Custom Edition's tag cache: 0x40440000-0x41b40000, 23 MB of direct memory at physical 0x25400000, zeroed, in 0 ms
+pool: 0x10000000-0x20000000, 256 MB of direct memory at physical 0x26b00000, zeroed, in 7 ms
+memory after the guest's ranges: flexible available 417.0 MB (0x00000000); direct memory's largest free block 11413.0 MB at 0x36b00000 (0x00000000); the platform heap maps 16.0 MB, at most 16.0 MB, 0 fallbacks to libc
+
+=== 1. futexes (_umtx_op) ===
+the word at 10000000 (in the pool); _umtx_op is linked, so libkernel exports it
+-- UMTX_OP_WAIT_UINT, UMTX_OP_WAKE (wait 11, wake 3)
+wait for 0 on a word holding 1: returned 0, errno 0 (-), in 4 us
+one waiter (its stack at 0x1004ff7c): the wake returned 0; the waiter returned 0, errno 0
+wake to the waiter's return, 10 runs: min 5 us, median 6 us, max 7 us
+wait with a relative struct timespec of 100 ms: returned -1, errno 60 (Operation timed out), after 100048 us
+wait with a relative struct _umtx_time of 100 ms (CLOCK_MONOTONIC): returned -1, errno 60 (Operation timed out), after 100132 us
+wait with struct _umtx_time, UMTX_ABSTIME, now + 100 ms on CLOCK_MONOTONIC: returned -1, errno 60 (Operation timed out), after 100097 us
+four waiters, wake INT_MAX: the wake returned 0 (errno 0); 4 of 4 had returned 50 ms later
+-- UMTX_OP_WAIT_UINT_PRIVATE, UMTX_OP_WAKE_PRIVATE (wait 15, wake 16)
+wait for 0 on a word holding 1: returned 0, errno 0 (-), in 5 us
+one waiter (its stack at 0x103cff7c): the wake returned 0; the waiter returned 0, errno 0
+wake to the waiter's return, 10 runs: min 5 us, median 5 us, max 11 us
+wait with a relative struct timespec of 100 ms: returned -1, errno 60 (Operation timed out), after 100129 us
+wait with a relative struct _umtx_time of 100 ms (CLOCK_MONOTONIC): returned -1, errno 60 (Operation timed out), after 100127 us
+wait with struct _umtx_time, UMTX_ABSTIME, now + 100 ms on CLOCK_MONOTONIC: returned -1, errno 60 (Operation timed out), after 100125 us
+four waiters, wake INT_MAX: the wake returned 0 (errno 0); 4 of 4 had returned 50 ms later
+-- UMTX_OP_WAIT (a long, 64 bits) on a 32-bit word
+wait for 0 on a word holding 0 whose next word holds 1, 100 ms timeout: returned 0, errno 0 (-), after 2 us
+(it compares the 64 bits from the word's address, 0x100000000 here, so a waiter whose 32-bit word matches does not sleep when the next word is not zero: not to be used on the guest's words)
+
+=== 2. faults ===
+sysconf(_SC_PAGESIZE): 16384
+sigaction(SIGSEGV): 0; sigaction(SIGBUS): 0
+-- 2. faults: sceKernelMprotect on the window
+  the faulting thread's stack is at 1074ff38
+  sceKernelMprotect(0x90100000, 16384 bytes, read only): 0 (0x00000000)
+  the write: 1 fault; then the value reads 0x22222222 (the write completed)
+  signal 11 (SIGSEGV), si_code 2, si_addr 0x90100100
+  mc_rip 0x404de5 mc_rsp 0x1074ff20 mc_rbp 0x1074ff90 mc_rax 0x0 mc_rdi 0x90100000
+  mc_err 0x7 mc_trapno 12 mc_addr 0x90100100 mc_flags 0x5
+  the handler ran on 0x200100f644: inside the alternate stack (0x20010003e0-0x20010103e0); the interrupted stack is below 4 GB
+  the handler's sceKernelMprotect(read, write): 0
+-- 2. faults: mprotect on the window
+  the faulting thread's stack is at 1078ff38
+  mprotect(0x90200000, 16384 bytes, read only): 0 (0x00000000)
+  the write: 1 fault; then the value reads 0x22222222 (the write completed)
+  signal 11 (SIGSEGV), si_code 2, si_addr 0x90200100
+  mc_rip 0x404de5 mc_rsp 0x1078ff20 mc_rbp 0x1078ff90 mc_rax 0x0 mc_rdi 0x90200000
+  mc_err 0x7 mc_trapno 12 mc_addr 0x90200100 mc_flags 0x5
+  the handler ran on 0x200200f644: inside the alternate stack (0x20020003e0-0x20020103e0); the interrupted stack is below 4 GB
+  the handler's mprotect(read, write): 0
+an anonymous mmap of flexible memory: 20001c000
+-- 2. faults: mprotect on flexible memory
+  the faulting thread's stack is at 107cff38
+  mprotect(0x20001c000, 16384 bytes, read only): 0 (0x00000000)
+  the write: 1 fault; then the value reads 0x22222222 (the write completed)
+  signal 11 (SIGSEGV), si_code 2, si_addr 0x20001c100
+  mc_rip 0x404de5 mc_rsp 0x107cff20 mc_rbp 0x107cff90 mc_rax 0x0 mc_rdi 0x20001c000
+  mc_err 0x7 mc_trapno 12 mc_addr 0x20001c100 mc_flags 0x5
+  the handler ran on 0x200300f644: inside the alternate stack (0x20030003e0-0x20030103e0); the interrupted stack is below 4 GB
+  the handler's mprotect(read, write): 0
+-- 2. faults: 1000 cycles, sceKernelMprotect
+  the faulting thread's stack is at 1080ff38
+  1000 cycles of sceKernelMprotect read only, write, fault, the handler's unprotect: 63271 us, 63.27 us a cycle (the protect alone 28.75 us); 1000 faults, 0 failed protects; the value reads 999
+-- 2. faults: 1000 cycles, mprotect
+  the faulting thread's stack is at 1084ff38
+  1000 cycles of mprotect read only, write, fault, the handler's unprotect: 63314 us, 63.31 us a cycle (the protect alone 28.59 us); 1000 faults, 0 failed protects; the value reads 999
+-- 2. faults: a read of unmapped 0x08000000
+  the faulting thread's stack is at 1088ff38
+  the read of 0x8000000 faulted:
+  signal 11 (SIGSEGV), si_code 1, si_addr 0x8000000
+  mc_rip 0x404f7a mc_rsp 0x1088ff20 mc_rbp 0x1088ff90 mc_rax 0x0 mc_rdi 0xc54824
+  mc_err 0x4 mc_trapno 12 mc_addr 0x8000000 mc_flags 0x5
+  the handler ran on 0x200600f644: inside the alternate stack (0x20060003e0-0x20060103e0); the interrupted stack is below 4 GB
+
+=== 3. the data folder ===
+-- /data/halo
+stat(/data/halo): mode 040777, uid 0, gid 0
+  entry ".", d_type 4
+  entry "..", d_type 4
+readdir: 2 entries
+mkdir(/data/halo/probe): 0
+chmod(/data/halo/probe, 0777): 0
+wrote /data/halo/probe/16mb.bin: 16 MB in 1 MB fwrites, fflush, fsync (0): 0.878 s, 18.2 MB/s
+chmod 0666: 0
+wrote /data/halo/probe/100mb.bin: 100 MB in 1 MB fwrites, fflush, fsync (0): 5.431 s, 18.4 MB/s
+chmod 0666: 0
+read 100 MB in one read after open: 104857600 bytes in 1 call, 0.024 s, 4190.4 MB/s
+  one read: the first byte 0x00 (0x00 written), the last 0xf5 (0xf5 written): right
+read it in 64 KB reads: 104857600 bytes, 0.022 s, 4517.9 MB/s
+  64 KB reads: the first byte 0x00 (0x00 written), the last 0xf5 (0xf5 written): right
+read it through fread, a 64 KB buffer: 104857600 bytes, 0.025 s, 3927.1 MB/s
+  fread: the first byte 0x00 (0x00 written), the last 0xf5 (0xf5 written): right
+stat(/data/halo/probe/100mb.bin): st_size 104857600, st_mode 0100666, st_mtime 1792280800 (the clock: 1792280800, +0 s), st_blksize 65536
+access(/data/halo, F_OK | R_OK | W_OK): 0
+access(/data/halo/probe/100mb.bin, F_OK | R_OK | W_OK): 0
+access(/data/halo/probe/missing.bin, F_OK | R_OK | W_OK): -1, No such file or directory
+realpath(/data/halo/probe): Operation not permitted
+rename(100mb.bin, renamed.bin): 0
+unlink of it: 0
+rmdir(/data/halo/probe): 0
+-- /app0
+stat(/app0): mode 040777, uid 0, gid 0
+  entry ".", d_type 4
+  entry "..", d_type 4
+  entry "sce_module", d_type 4
+  entry "sce_sys", d_type 4
+  entry "eboot.bin", d_type 8
+  entry "host-probe.txt", d_type 8
+  entry "host-skip.txt", d_type 8
+readdir: 7 entries
+mkdir(/app0/probe): 0
+chmod(/app0/probe, 0777): 0
+wrote /app0/probe/16mb.bin: 16 MB in 1 MB fwrites, fflush, fsync (0): 0.910 s, 17.6 MB/s
+chmod 0666: 0
+wrote /app0/probe/100mb.bin: 100 MB in 1 MB fwrites, fflush, fsync (0): 5.358 s, 18.7 MB/s
+chmod 0666: 0
+read 100 MB in one read after open: 104857600 bytes in 1 call, 0.040 s, 2483.4 MB/s
+  one read: the first byte 0x00 (0x00 written), the last 0xf5 (0xf5 written): right
+read it in 64 KB reads: 104857600 bytes, 0.036 s, 2773.8 MB/s
+  64 KB reads: the first byte 0x00 (0x00 written), the last 0xf5 (0xf5 written): right
+read it through fread, a 64 KB buffer: 104857600 bytes, 0.040 s, 2526.1 MB/s
+  fread: the first byte 0x00 (0x00 written), the last 0xf5 (0xf5 written): right
+stat(/app0/probe/100mb.bin): st_size 104857600, st_mode 0100666, st_mtime 1792280807 (the clock: 1792280807, +0 s), st_blksize 65536
+access(/app0, F_OK | R_OK | W_OK): 0
+access(/app0/probe/100mb.bin, F_OK | R_OK | W_OK): 0
+access(/app0/probe/missing.bin, F_OK | R_OK | W_OK): -1, No such file or directory
+realpath(/app0/probe): Operation not permitted
+rename(100mb.bin, renamed.bin): 0
+unlink of it: 0
+rmdir(/app0/probe): 0

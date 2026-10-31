@@ -4,14 +4,14 @@ SERVER_MODE.H
 A dedicated server (halo --server: server_mode.c; docs/dedicated_server.md):
 whether this run is one, its start before the game's, its signals, its
 frames' pace and its exit codes. The Linux and Windows builds have it; the
-Android and web builds compile the server's files to nothing
+Android, web and PS5 builds compile the server's files to nothing
 (HALO_SERVER_BUILD 0), and halo_server_mode() is always 0 there.
 */
 
 #ifndef __HALO_LINUX_SERVER_MODE_H
 #define __HALO_LINUX_SERVER_MODE_H
 
-#if defined(HALO_ANDROID) || defined(HALO_WEB)
+#if defined(HALO_ANDROID) || defined(HALO_WEB) || defined(HALO_PS5)
 #define HALO_SERVER_BUILD 0
 #else
 #define HALO_SERVER_BUILD 1

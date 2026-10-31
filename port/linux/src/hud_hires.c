@@ -63,6 +63,9 @@ static struct
 	unsigned long levels;
 	int failed;
 	int other_pixels_logged;
+	/* (the Switch's, Android's and the PS5's: whether its PNG decodes, 1
+	yes, -1 no, 0 not tried) */
+	int decodes;
 	/* (decoded ahead: these, the decoding thread's until it is done, under
 	decode_lock) */
 	int decode_state;
@@ -116,6 +119,46 @@ int hud_hires_ce_stock_matches(long index, unsigned long address, long width, lo
 	stock = &hud_hires_ce_stock[index];
 	return width == stock->width && height == stock->height && size == stock->size &&
 		crc32(0L, (const Bytef *)address, (uInt)size) == stock->crc;
+}
+
+/* whether the asset's picture is right where it is drawn now: in a game (gameplay), or in the menus, whose buttons
+the Switch can swap (controls.nintendo_menu_buttons; xinput_sdl.c); and, where the port has art of its own, whether
+it is the art chosen: the port's, or with display.xbox_buttons the Xbox's */
+int hud_hires_asset_applies(long asset, int gameplay)
+{
+	unsigned int contexts;
+	unsigned int art;
+	unsigned int now = HUD_HIRES_CONTEXT_GAME;
+
+	if (asset < 0 || asset >= hud_hires_asset_count())
+		return 0;
+	contexts = hud_hires_embedded[asset].contexts;
+	if (!contexts)
+		return 1;
+	art = contexts & (HUD_HIRES_CONTEXT_PLATFORM_ART | HUD_HIRES_CONTEXT_XBOX_ART);
+	if (art)
+	{
+#if defined(HALO_SWITCH) || defined(HALO_PS5)
+		unsigned int chosen = config_boolean("display.xbox_buttons") ? HUD_HIRES_CONTEXT_XBOX_ART :
+			HUD_HIRES_CONTEXT_PLATFORM_ART;
+#else
+		unsigned int chosen = HUD_HIRES_CONTEXT_XBOX_ART;
+#endif
+
+		if (!(art & chosen))
+			return 0;
+	}
+	if (!(contexts & HUD_HIRES_CONTEXT_PLACES))
+		return 1;
+	if (!gameplay)
+	{
+#ifdef HALO_SWITCH
+		now = config_boolean("controls.nintendo_menu_buttons") ? HUD_HIRES_CONTEXT_MENUS_SWAPPED : HUD_HIRES_CONTEXT_MENUS;
+#else
+		now = HUD_HIRES_CONTEXT_MENUS;
+#endif
+	}
+	return (contexts & now) != 0;
 }
 
 char const *hud_hires_asset_tag(long asset)
@@ -227,6 +270,8 @@ static struct
 	long asset;
 } placeholders[MAXIMUM_PLACEHOLDERS];
 static long placeholder_count = 0;
+/* counts the placeholders' changes (hud_hires_placeholder_serial) */
+static unsigned long placeholder_serial = 1;
 /* a bit of 1024 for each placeholder's Data (placeholder_filter_bit): a
 texture whose bit is clear is no placeholder, found without searching
 them, as the renderer asks for each texture it binds */
@@ -290,7 +335,31 @@ int hud_hires_sprites_drawable(long asset, unsigned long address, unsigned long 
 		}
 		return 0;
 	}
+#if defined(HALO_SWITCH) || defined(HALO_ANDROID) || defined(HALO_PS5)
+	/* (the texture caches of deko3d and Vulkan make their own images of it,
+	and Android's and the PS5's OpenGL images make theirs where it is drawn: here the
+	PNG need only decode. A GL texture asked for in deko3d's image, which
+	has no GL, was none, and the sprites were drawn as they are) */
+	(void)levels;
+#ifdef HALO_SWITCH
+	/* (the host decodes it, on a thread of its own: should it not, the
+	sprites' own texture is drawn, xbox_textures_dk.c's hud_image) */
+	if (!textures[asset].decodes)
+		textures[asset].decodes = 1;
+#endif
+	if (!textures[asset].decodes)
+	{
+		unsigned long width, height;
+		unsigned char *pixels = hud_hires_png_pixels(hud_hires_embedded[asset].png, hud_hires_embedded[asset].png_size,
+			&width, &height);
+
+		textures[asset].decodes = pixels ? 1 : -1;
+		free(pixels);
+	}
+	return textures[asset].decodes > 0;
+#else
 	return hud_hires_override_texture(asset, &levels) != 0;
+#endif
 }
 
 /* the placeholder the game draws the texture's sprites from: its D3D
@@ -307,23 +376,36 @@ void hud_hires_register_placeholder(long asset, const unsigned long *texture)
 	{
 		placeholders[index].data = texture ? texture[1] : 0;
 		placeholders[index].asset = asset;
+		placeholder_serial++;
 	}
 	placeholder_filter_build();
 }
 
-unsigned int hud_hires_placeholder_texture(unsigned long data, unsigned long *levels)
+long hud_hires_placeholder_asset(unsigned long data)
 {
 	unsigned long bit = placeholder_filter_bit(data);
 	long index;
 
 	if (!(placeholder_filter[bit >> 3] & 1 << (bit & 7)))
-		return 0;
+		return -1;
 	for (index = 0; data && index < placeholder_count; index++)
 	{
 		if (placeholders[index].data == data)
-			return hud_hires_override_texture(placeholders[index].asset, levels);
+			return placeholders[index].asset;
 	}
-	return 0;
+	return -1;
+}
+
+unsigned long hud_hires_placeholder_serial(void)
+{
+	return placeholder_serial;
+}
+
+unsigned int hud_hires_placeholder_texture(unsigned long data, unsigned long *levels)
+{
+	long asset = hud_hires_placeholder_asset(data);
+
+	return asset >= 0 ? hud_hires_override_texture(asset, levels) : 0;
 }
 
 int hud_hires_override_point_threshold(long asset)
@@ -636,6 +718,13 @@ static unsigned int png_pixels_texture(unsigned char *pixels, unsigned long widt
 	return texture;
 }
 
+#if defined(HALO_SWITCH) || defined(HALO_ANDROID) || defined(HALO_PS5)
+unsigned char *hud_hires_png_pixels(const void *png, unsigned long size, unsigned long *width, unsigned long *height)
+{
+	*width = *height = 0;
+	return png_decode(png, size, width, height);
+}
+#endif
 unsigned int hud_hires_png_texture(const void *png, unsigned long size, unsigned long *levels)
 {
 	unsigned long width = 0, height = 0;
@@ -735,8 +824,29 @@ static void *decode_thread_main(void *unused)
 }
 #endif
 
+#if defined(HALO_ANDROID) && !defined(HALO_SWITCH)
+/* Android's Vulkan renderer has its sheets decoded by the host as a map loads (port/android/guest/xbox_textures_vk.c,
+port/android/host/host_vk_hud.c), and defines these; the OpenGL ES renderer's image, sharing this file, decodes each
+when first drawn, as before, and has these do nothing */
+void __attribute__((weak)) textures_hud_prepare(const long *assets, long count)
+{
+	(void)assets;
+	(void)count;
+}
+
+void __attribute__((weak)) textures_hud_forget(void)
+{
+}
+#endif
+
 void hud_hires_map_unloaded(void)
 {
+#ifdef HALO_SWITCH
+	/* (the host's sheets decoded for the map and not drawn) */
+	dk_hud_forget();
+#elif defined(HALO_ANDROID)
+	textures_hud_forget();
+#endif
 #ifdef HUD_HIRES_DECODE_AHEAD
 	long asset;
 
@@ -753,6 +863,10 @@ void hud_hires_map_unloaded(void)
 	}
 #endif
 }
+
+#if (defined(HALO_SWITCH) || defined(HALO_ANDROID)) && !defined(HUD_HIRES_DECODE_AHEAD)
+static long assets_queued[MAXIMUM_TEXTURES];
+#endif
 
 void hud_hires_map_loaded(const long *assets, long count)
 {
@@ -790,6 +904,35 @@ void hud_hires_map_loaded(const long *assets, long count)
 		for (index = 0; index < MAXIMUM_TEXTURES; index++)
 			textures[index].decode_state = _decode_none;
 	}
+#elif defined(HALO_SWITCH)
+	/* (decoded by the host, on a thread of its own, into its own memory:
+	host_dk_hud.c. The titles' are decoded when first drawn) */
+	long index, queued = 0;
+
+	dk_hud_forget();
+	if (!config_boolean("display.high_res_hud"))
+		return;
+	for (index = 0; index < count; index++)
+	{
+		if (assets[index] >= 0 && assets[index] < hud_hires_asset_count() &&
+			!hud_hires_embedded[assets[index]].title)
+			assets_queued[queued++] = assets[index];
+	}
+	dk_hud_prepare(assets_queued, queued);
+#elif defined(HALO_ANDROID)
+	/* (the Vulkan renderer's host decodes them: textures_hud_prepare. The titles' are decoded when first drawn) */
+	long index, queued = 0;
+
+	textures_hud_forget();
+	if (!config_boolean("display.high_res_hud"))
+		return;
+	for (index = 0; index < count; index++)
+	{
+		if (assets[index] >= 0 && assets[index] < hud_hires_asset_count() &&
+			!hud_hires_embedded[assets[index]].title)
+			assets_queued[queued++] = assets[index];
+	}
+	textures_hud_prepare(assets_queued, queued);
 #else
 	(void)assets;
 	(void)count;

@@ -1,0 +1,12 @@
+# Host functions only the PS5's guest imports, beside port/linux/host/host_imports.list
+# and port/android/host_imports_vk.list (defined in port/ps5/host).
+# tools/android_imports.py generates the stubs.
+
+# the DualSense's gyroscope (port/ps5/host/host_pad_ps5.c; the Switch's import,
+# port/switch/host_imports.list). yaw and pitch are guest addresses of the turn
+# since the last call, in radians
+host_sdl_gamepad_gyro
+
+# the server browser's requests to the master servers (port/android/host/host_https.c,
+# on posix_update.c's HTTPS; port/linux/src/master_list.c)
+host_https_get

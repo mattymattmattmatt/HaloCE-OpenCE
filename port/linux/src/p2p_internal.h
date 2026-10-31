@@ -169,6 +169,11 @@ int p2p_signal_probe(const unsigned char *host_hash, const unsigned char *token)
 void p2p_signal_stop_probe(const unsigned char *identifier);
 /* whether any broker is connected */
 int p2p_signal_connected(void);
+/* the brokers' connections closed, if nothing of signalling's is under way:
+no game hosted or answered for, no request to a host, player or probed host,
+no listing listed or still to clear, no browsing; 1 if they were (the next
+p2p_signal_start connects again) */
+int p2p_signal_stop_if_idle(void);
 /* every broker's connection made anew at once: after the p2p thread was
 stopped (the process was suspended, or the machine slept), the old ones
 may carry nothing, and would be noticed only at their silence timeout */
@@ -359,6 +364,9 @@ void p2p_lobby_update(const unsigned char *token, int player_count, int maximum_
 /* whether the game hosted is listed now, and whether the browser is open */
 int p2p_lobby_listed(void);
 int p2p_lobby_browsing(void);
+/* whether the browser closed since the last call (once each time it does);
+under p2p_lock */
+int p2p_lobby_browse_ended(void);
 /* a message on a slot (its key hash in hex) through a broker; retained: the
 slot's retained copy, sent on subscribing */
 void p2p_lobby_slot_heard(const char *hash_text, const unsigned char *payload, int size, int retained);

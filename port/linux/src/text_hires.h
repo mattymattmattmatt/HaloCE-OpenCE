@@ -67,4 +67,12 @@ void text_hires_set_reset_hook(void (*hook)(void));
 /* d3d8_gl.c: the display's pixels for each of the 480 lines */
 float halo_screen_pixel_scale(void);
 
+#if defined(HALO_SWITCH) || defined(HALO_ANDROID) || defined(HALO_PS5)
+/* the deko3d and Vulkan renderers' text_hires_atlas_texture: the atlas's coverage (*size
+texels square, a byte each) if data is its placeholder bitmap's, else NULL,
+and the rows written since the last call, [*top, *bottom) (empty if *top >=
+*bottom; all of them if all), which it then counts as sent */
+const unsigned char *text_hires_atlas_rows(unsigned long data, long *size, int all, long *top, long *bottom);
+#endif
+
 #endif

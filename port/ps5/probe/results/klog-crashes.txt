@@ -1,0 +1,187 @@
+Fatal signals in the kernel log (klogsrv, port 3232) during phase 0 B's runs, de-duplicated.
+Addresses in the eboot are the link address plus 0x400000; the symbols were looked up with llvm-symbolizer
+in build/ps5/probe/work/<ID>/llvm-pie.elf.
+
+==== glslang probe (PPSA99105): after its report's last line, main returned and exit() ended the process with SIGSYS
+# A user thread receives a fatal signal
+#
+# signal: 12 (SIGSYS)
+# thread ID: 101093
+# thread name: eboot.bin
+# proc ID: 161
+# proc name: eboot.bin
+# registers:
+# rax: 0000000000000000  rbx: 00000# process pid=161, eboot.bin calls exit() exit_value=0.
+# rax: 0000000000000000  rbx: 0000000000000000
+# rcx: 0000000000000000  rdx: 0000000000000000
+# rsi: 0000000000000000  rdi: 0000000000000000
+# rbp: 00000007eeffbd80  rsp: 00000007eeffbd58
+# r8 : 0000000000000040  r9 : 0000000000000220
+# r10: 000000000515ca11  r11: 0000000000000246
+# r12: 0000000000000# rcx: 0000000000000000  rdx: 0000000000000000
+# r12: 0000000000000000  r13: 0000000000000000
+# r14: 0000000000000001  r15: 0000000800033fd0
+# rip: 00000008000003ac  eflags: 00000246
+# backtrace:
+# 0000000000400185
+# 0000000000000000
+# dynamic libraries:
+
+==== SDL2 probe (PPSA99104) run 1, step 6: SDL_InitSubSystem(SDL_INIT_VIDEO) -> SDL_VideoInit -> PS5_CreateDevice (return 0x4f3e08) -> PS5_Keyboard_Init calls sceKeyboardInit through a NULL import: libSceKeyboard.sprx is not among the title's loaded modules
+# A user thread receives a fatal signal
+#
+# signal: 11 (SIGSEGV)
+# thread ID: 101752
+# thread name: eboot.bin
+# proc ID: 164
+# proc name: eboot.bin
+# reason: page fault (user read instruction, page not present)
+# fault address: 0000000000000000
+# registers:
+# rax: 0000000080960003  rbx: 00000020000030e0
+# rcx: 0000000000000000  rdx: 0000000000000000
+# rsi: 0000000000000000  rdi: 00000000000002bc
+# rbp: 00000007eeff7c30  rsp: 00000007eeff7c28
+# r8 : 0000000000000000  r9 : 00000020000000a8
+# r10: 0000000000000001  r11: 0000000000000202
+# r12: 0000000000000000  r13: 0000000000401b30
+# r14: 0000000000000020  r15: 00000000ffffffff
+# rip: 0000000000000000  eflags: 00010246
+# backtrace:
+# 00000000004f3e08
+# 00000000004aa2e6
+# 00000000004134db
+# 00000000004016e7
+# 0000000000400174
+# 0000000000000000
+# dynamic libraries:
+
+==== host probe (PPSA99103) run 1, section 2, 1000 cycles: the probe's own bug (its handler fell back to SIG_DFL after the third fault); fixed before run 2
+# A user thread receives a fatal signal
+#
+# signal: 11 (SIGSEGV)
+# thread ID: 101471
+# thread name: 
+# proc ID: 167
+# proc name: eboot.bin
+# reason: page fault (user write data, protection violation)
+# fault address: 0000000090300100
+# registers:
+# rax: 000000000000009d  rbx: 0000000000407c50
+# rcx: 0000000000000000  rdx: 0000000000000005
+# rsi: 0000000090300000  rdi: 0000000090300000
+# rbp: 000000001080ff90  rsp: 000000001080ff20
+# r8 : 0000000000000000  r9 : 0000000000000000
+# r10: 0000000000000000  r11: 0000000000000246
+# r12: 0000000000000000  r13: 00000016a5c3959e
+# r14: 000000000000009d  r15: 0000000000000004
+# rip: 0000000000404ab0  eflags: 00010207
+# backtrace:
+# 0000000000b9f759
+# 0# lb0: ffffffffffffffff  lb1: ffffffffffffffff
+# 000000080000763d
+# 0000000000000000
+# dynamic libraries:
+
+==== SDL2 probe run 2: after SDL_Quit and its report's last line, exit() and SIGSYS
+# A user thread receives a fatal signal
+#
+# signal: 12 (SIGSYS)
+# thread ID: 101054
+# thread name: eboot.bin
+# proc ID: 170
+# proc name: eboot.bin
+# registers:
+# rax: 0000000000000000  rbx: 00000# process pid=170, eboot.bin calls exit() exit_value=0.
+# rax: 0000000000000000  rbx: 0000000000000000
+# rcx: 0000000000000000  rdx: 0000000000000000
+# rsi: 0000000000000000  rdi: 0000000000000000
+# rbp: 00000007eeffbd80  rsp: 00000007eeffbd58
+# r8 : 0080000000000063  r9 : 0000000000000000
+# r10: 000000000515ca11  r11: 0000000000000212
+# r12: 0000000000000000  r13: 0000000000000000
+# r14: 0000000000000001  r15: 0000000800033fd0
+# rip: 00000008000003ac  eflags: 00000246
+# backtrace:
+# 0000000000400185
+# 0000000000000000
+# dynamic libraries:
+
+==== host probe run 2, section 3: getcwd(buffer, 1024) (main.c, probe_data_folder; return 0x400c50) jumps to 0x100026c946, which is not mapped
+# A user thread receives a fatal signal
+#
+# signal: 11 (SIGSEGV)
+# thread ID: 101919
+# thread name: eboot.bin
+# proc ID: 173
+# proc name: eboot.bin
+# reason: page faultrmdir(/app0/probe): 0
+# reason: page fault (user read instruction, page not present)
+# fault address: 000000100026c946
+# registers:
+# rax: bbc9cfb46d5d9736  rbx: 00000007eeff79b0
+# rcx: 0000000000000000  rdx: 0000000001db2500
+# rsi: 0000000000000400  rdi: 00000007eeff75b0
+# rbp: 00000007eeff75a0  rsp: 00000007eeff74b8
+# r8 : 0000000000000000  r9 : 0000000000000000
+# r10: 000000000515ca11  r11: 0000000000000293
+# r12: 00000007eeff75b0  r13: 0000000000ca9015
+# r14: 00000008000751d0  r15: 0000000000000000
+# rip: 000000100026c# rbp: 00000007eeff75a0  rsp: 00000007eeff74b8
+# rip: 000000100026c946  eflags: 00010206
+# backtrace:
+# 0000000000400c50
+# 0000000000400174
+# 0000000000000000
+# dynamic libraries:
+
+==== host probe run 3, the end: the same getcwd crash, now asked last
+# A user thread receives a fatal signal
+#
+# signal: 11 (SIGSEGV)
+# thread ID: 101778
+# thread name: eboot.bin
+# proc ID: 176
+# proc name: eboot.bin
+# reason: page fault (user read instruction, page not present)
+# fault address: 000000100026c946
+# registers:
+# rax: c28127aeb8d3d9b8  rbx: 00000007eeff79b0
+# rcx: 0000000000000000  rdx: 000000080025b160
+# rsi: 0000000000000400  rdi: 00000007eeff75b0
+# rbp: 00000007eeff75a0  rsp: 00000007eeff74b8
+# r8 : 00800000000001e7  r9 : 000000088004f4ae
+# r10: 000000000515ca11  r11: 0000000000000202
+# r12: 00000007eeff75b0  r13: 0000000080a10004
+# r14: 00000008000751d0  r15: 0000000000000000
+# rip: 000000100026c946  eflags: 00010206
+# backtrace:
+# 0000000000403321
+# 0000000000400174
+# 0000000000000000
+# dynamic libraries:
+
+==== host probe run 4 (launched by ps5vkctl): after its report's last line, _exit(0) and SIGSYS
+# A user thread receives a fatal signal
+#
+# signal: 12 (SIGSYS)
+# thread ID: 101888
+# process pid=181, eboot.bin calls exit() exit_value=0.
+# thread name: eboot.bin
+# proc ID: 181
+# proc name: eboot.bin
+# registers:
+# rax: 0000000000000000  rbx: 000000000000000a
+# rcx: 0000000000000000  rdx: 0000000000000000
+# rsi: 0000000000000000  rdi: 0000000000000000
+# rbp: 00000007eeffbd80  rsp: 00000007eeff75a8
+# r8 : 00800000000001e7  r9 : 0000000880005c4e
+# r10: 000000000515ca11  r11: 0000000000000246
+# r12: 0000000080a10004  r13: 0000000080a10004
+# r14: 0000000000000035  r15: 0000000000000035
+# rip: 00000008000003ac  eflags: 00000246
+# backtrace:
+# 0000000000400174
+# 0000000000000000
+# dynamic libraries:
+
