@@ -53,6 +53,7 @@ typedef struct
 #define PTHREAD_MUTEX_DEFAULT PTHREAD_MUTEX_NORMAL
 
 int pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void *(*start)(void *), void *argument);
+int pthread_join(pthread_t thread, void **result);
 int pthread_detach(pthread_t thread);
 pthread_t pthread_self(void);
 int pthread_equal(pthread_t thread1, pthread_t thread2);

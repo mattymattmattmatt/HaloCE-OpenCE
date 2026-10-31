@@ -128,6 +128,21 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void *(*
 	return 0;
 }
 
+int pthread_join(pthread_t thread, void **result)
+{
+	/* (the handle was closed at the start: the thread is found again by its
+	identifier, and one that has already ended is not there to wait for) */
+	HANDLE handle = OpenThread(SYNCHRONIZE, FALSE, (DWORD)thread);
+
+	if (result)
+		*result = NULL;
+	if (!handle)
+		return 0;
+	WaitForSingleObject(handle, INFINITE);
+	CloseHandle(handle);
+	return 0;
+}
+
 int pthread_detach(pthread_t thread)
 {
 	(void)thread;

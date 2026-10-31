@@ -3697,6 +3697,16 @@ static struct vertex_shader_object *current_program(void)
 	return program ? program : device.vertex_shader;
 }
 
+/* ---------- the dynamic resolution's drop (main.c's frame line): the
+Switch's renderer has one (d3d8_dk.c); this one never drops, and defines it
+so that main.c's weak reference resolves in the native builds, whose link
+refuses an undefined one */
+
+int halo_screen_dynamic_resolution_dropped(void)
+{
+	return 0;
+}
+
 /* ---------- blood (the gore mod's, on vehicles) */
 
 static float xgpu_blood[4];
