@@ -90,6 +90,7 @@ ally comes back ALLY_RESPAWN_TICKS later, behind a player. Fewer wanted
 int config_write(char const *name, char const *value);
 
 long config_integer(char const *name);
+int config_boolean(char const *name);
 char const *config_string(char const *name);
 void platform_log(char const *format, ...);
 
@@ -212,9 +213,16 @@ void coop_allies_arm(void)
 	allies_armed = TRUE;
 }
 
+/* an online co-op game's host only with Server Setup's ALLOW ALLIES
+(network.coop_allies); a game alone or in split screen always */
+boolean coop_allies_allowed(void)
+{
+	return game_connection() == _game_connection_local || config_boolean("network.coop_allies");
+}
+
 static short allies_wanted(void)
 {
-	return (short)PIN(config_integer("bots.coop"), 0, ALLY_MAXIMUM);
+	return coop_allies_allowed() ? (short)PIN(config_integer("bots.coop"), 0, ALLY_MAXIMUM) : 0;
 }
 
 static boolean allies_running(void)

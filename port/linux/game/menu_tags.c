@@ -1642,6 +1642,8 @@ static char const *const pause_allies_texts[] =
 	"ALLIES: NONE", "ALLIES: 1", "ALLIES: 2", "ALLIES: 3", "ALLIES: 4",
 	/* (a level with no marine or crewman: menu_functions.c greys it) */
 	"ALLIES: NO MARINES",
+	/* (an online co-op game with Server Setup's ALLOW ALLIES off) */
+	"ALLIES: OFF IN SETUP",
 };
 
 /* the list's buttons: SETTINGS, and the host's END GAME or network co-op's

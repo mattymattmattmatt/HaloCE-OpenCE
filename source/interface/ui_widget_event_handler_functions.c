@@ -1993,8 +1993,9 @@ static boolean pause_game_restart_at_checkpoint(
 	struct event_record *event,
 	boolean *widget_deleted)
 {
-	/* port: in co-op this would revert only this machine */
-	if (network_coop_active())
+	/* port: in co-op a client's would revert only this machine; the host's
+	reverts everyone (main.c's main_coop_host_revert: the clients follow) */
+	if (network_coop_active() && game_connection() != _game_connection_network_server)
 		return FALSE;
 	main_revert_map();
 	return TRUE;

@@ -402,7 +402,7 @@ Computer players (bots) can play a multiplayer game with you: `bots.count`
 (1 to 15) of them join the lobby of a Slayer game this computer plays or
 hosts: Multiplayer > Create Game > Server Setup > BOTS sets how many, how
 well they play and their teams (hidden for a co-op game, whose allies are
-CO-OP OPTIONS > ALLIES), as does Split Screen in the Xbox's menus. The
+the campaign pause menu's ALLIES, allowed by CO-OP OPTIONS > ALLOW ALLIES), as does Split Screen in the Xbox's menus. The
 other machines of a hosted game see them as the host's players. They are players as you are: in the scores, the respawns
 and the game's rules, on the teams that `bots.teams` asks for, and they
 follow the teams' changes in the lobby. They look for enemies, aim, fire,
@@ -430,8 +430,10 @@ only when the last ally dies too. On a level whose map has no armed marine or cr
 search: c20, c40, d20 and d40 among the campaign's), the pause menu's ALLIES
 is grey and reads ALLIES: NO MARINES, and none come. They come in behind you (against the way you run), else beside you, never
 in front; in a fight they keep 8 to 14 m away. One left on a vehicle no
-player rides gets out. Each level starts with none (ALLIES back to NONE) unless
-Server Setup's ALLIES chose them before it. With `game.manual_respawn`, the
+player rides gets out. Each level starts with none (ALLIES back to NONE); the
+pause menu's ALLIES brings them in. In an online co-op game only the host
+can, and only with CO-OP OPTIONS > ALLOW ALLIES on (off: ALLIES: OFF IN
+SETUP). The host's REVERT TO SAVED reverts every player. With `game.manual_respawn`, the
 prompt reads WAITING FOR A SAFE SPOT TO RESPAWN until an ally is safe. Dead,
 the D-pad's left and right (or Y) turn the camera to each living ally from
 behind, and back to the body. Sending or regrouping them gives a short
@@ -595,7 +597,7 @@ the setting for one start of the game. It has priority over the file.
 | `bots.count` | `0` | `HALO_BOTS` | Computer players (bots) in a Slayer game this computer plays or hosts (Server Setup > BOTS): `0` to `15` join its lobby with the players, as far as the game has room. `0`: none, as in the stock game. Refer to "Bots". |
 | `bots.skill` | `"normal"` | `HALO_BOT_SKILL` | How well the bots play: `"recruit"`, `"easy"`, `"normal"`, `"heroic"`, `"veteran"` or `"legendary"`: how soon they react, how far and how wide they see, how large their aim error is and how fast it settles, how fast they turn, and how they fight. `"easy"`, `"normal"`, `"heroic"` and `"legendary"` keep their numbers; `"recruit"` is below `"easy"`, and `"veteran"` halfway from `"heroic"` to `"legendary"`. Refer to "Bots". |
 | `bots.teams` | `"even"` | `HALO_BOT_TEAMS` | In a team game: `"even"` puts the bots on both teams, evening them with the players; `"against"` puts them all on the team the players are not on. |
-| `bots.coop` | `0` | `HALO_COOP_ALLIES` | Campaign allies: 0 to 4 AI marines (crewmen on a level with no marines; none on a level with neither) who follow the nearest player, fight from within about 10 m of them, and come back beside them when killed, left behind or stuck. Solo, split screen and hosted co-op. CO-OP OPTIONS > ALLIES, and the campaign pause menu's ALLIES (solo, or a co-op host), which takes effect at once. |
+| `bots.coop` | `0` | `HALO_COOP_ALLIES` | Campaign allies: 0 to 4 AI marines (crewmen on a level with no marines; none on a level with neither) who follow the nearest player, fight from within about 10 m of them, and come back beside them when killed, left behind or stuck. Solo, split screen and hosted co-op. The campaign pause menu's ALLIES (solo, split screen, or a co-op host with `network.coop_allies`), which takes effect at once; each level starts with none. |
 | `paths.data` | `""` | `HALO_DATA_ROOT` | The data root. Refer to "Start the game". |
 | `paths.saves` | `""` | `HALO_SAVE_ROOT` | The save root. Refer to "Files and folders". |
 | `paths.logs` | `""` | `HALO_LOG_ROOT` | The folder of `debug.txt`, `bans.txt` and `cheaters.txt`. Empty: the data root. With it, the data root can be read-only (a dedicated server's maps mounted so). |
@@ -609,6 +611,7 @@ the setting for one start of the game. It has priority over the file.
 | `network.public_lobby` | `true` | `HALO_NET_PUBLIC_LOBBY` | `true`: the server browser. Public games are listed, and Join Game > Server Browser shows them. `false`: no games are listed or shown. Refer to "Server browser". |
 | `network.host_public` | `true` | `HALO_NET_HOST_PUBLIC` | `true`: a new game of Create Game > Internet starts as PUBLIC. `false`: it starts as PRIVATE. LISTING in Server Setup changes it for each game. Refer to "Server browser". |
 | `network.coop_friendly_fire` | `"on"` | `HALO_NET_COOP_FRIENDLY_FIRE` | Whether the players of an online co-op game hurt each other: `"off"`, `"on"`, `"shields_only"` or `"explosives_only"`. FRIENDLY FIRE in co-op's Server Setup > Co-op Options writes its choice here. Their AI allies they hurt as `network.coop_ally_friendly_fire` says. |
+| `network.coop_allies` | `true` | `HALO_NET_COOP_ALLIES` | Whether the host of an online co-op game may bring in campaign allies from the pause menu's ALLIES; `false` locks that row (ALLIES: OFF IN SETUP). ALLOW ALLIES in co-op's Server Setup > Co-op Options writes its choice here. A game alone or in split screen always may. |
 | `network.coop_ally_friendly_fire` | `true` | `HALO_NET_COOP_ALLY_FRIENDLY_FIRE` | Whether the players of an online co-op game hurt their AI allies (the Marines, Captain Keyes, the Sentinels while they are allies), as in the campaign. `false`: the players' weapons, grenades, melee and vehicles do them no harm, so that no player can kill the allies a level needs. The allies' and enemies' own damage is unchanged. ALLY FRIENDLY FIRE in co-op's Server Setup > Co-op Options writes its choice here; the host sends it with the game's settings. |
 | `network.coop_own_friendly_fire` | `true` | `HALO_NET_COOP_OWN_FRIENDLY_FIRE` | Whether this machine's players hurt, and are hurt by, the other players of an online co-op game. Two players hurt each other only if both have it `true`, and then as the host's `network.coop_friendly_fire` says. FRIENDLY FIRE in that game's pause menu writes its choice here. A player away from the controls for over 70 seconds is hurt by every player, whatever either chose. |
 | `network.coop_player_collisions` | `true` | `HALO_NET_COOP_PLAYER_COLLISIONS` | Whether the players of an online co-op game bump into each other. `false`: they walk through each other, so that one cannot block a doorway or stand on another; they still bump into the AI's characters. PLAYER COLLISIONS in co-op's Server Setup > Co-op Options writes its choice here. |

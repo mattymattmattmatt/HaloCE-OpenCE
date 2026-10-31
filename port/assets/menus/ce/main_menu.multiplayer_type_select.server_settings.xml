@@ -255,7 +255,7 @@
 		<child widget="main_menu/multiplayer_type_select/server_settings/coop_options/op_coop_player_collisions" x="54" y="229"/>
 		<child widget="main_menu/multiplayer_type_select/server_settings/coop_options/op_coop_ally_friendly_fire" x="54" y="255"/>
 		<child widget="main_menu/multiplayer_type_select/server_settings/coop_options/op_coop_team_wipe" x="54" y="281"/>
-		<child widget="main_menu/multiplayer_type_select/server_settings/coop_options/op_coop_allies" x="54" y="307"/>
+		<child widget="main_menu/multiplayer_type_select/server_settings/coop_options/op_coop_allow_allies" x="54" y="307"/>
 		<child widget="main_menu/multiplayer_type_select/server_settings/coop_options/coop_options_button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/multiplayer_type_select/server_settings/coop_options/coop_options_button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items">
@@ -397,21 +397,18 @@
 		<string text="REVERT CHECKPOINT"/>
 		<string text="RESPAWN ONLY"/>
 	</strings>
-	<widget name="main_menu/multiplayer_type_select/server_settings/coop_options/op_coop_allies" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF">
-		<child widget="main_menu/multiplayer_type_select/server_settings/coop_options/coop_allies_label"/>
-		<child widget="main_menu/multiplayer_type_select/server_settings/coop_options/coop_allies_spinner" x="286" y="1"/>
+	<widget name="main_menu/multiplayer_type_select/server_settings/coop_options/op_coop_allow_allies" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF">
+		<child widget="main_menu/multiplayer_type_select/server_settings/coop_options/coop_allow_allies_label"/>
+		<child widget="main_menu/multiplayer_type_select/server_settings/coop_options/coop_allow_allies_spinner" x="286" y="1"/>
 	</widget>
-	<widget name="main_menu/multiplayer_type_select/server_settings/coop_options/coop_allies_label" type="text" controller="1" width="300" height="22" string_list="main_menu/multiplayer_type_select/server_settings/coop_options/coop_options_labels" string_index="9" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4">
+	<widget name="main_menu/multiplayer_type_select/server_settings/coop_options/coop_allow_allies_label" type="text" controller="1" width="300" height="22" string_list="main_menu/multiplayer_type_select/server_settings/coop_options/coop_options_labels" string_index="9" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4">
 	</widget>
-	<widget name="main_menu/multiplayer_type_select/server_settings/coop_options/coop_allies_spinner" type="spinner" top="2" width="206" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" string_list="main_menu/multiplayer_type_select/server_settings/coop_options/var_coop_allies" font="ui\large_ui" color="#FF2896FF" align="center" text_y="4" list_flags="items_from_strings" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -13 19 -7" footer_bounds="7 208 19 214">
+	<widget name="main_menu/multiplayer_type_select/server_settings/coop_options/coop_allow_allies_spinner" type="spinner" top="2" width="206" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" string_list="main_menu/multiplayer_type_select/server_settings/coop_options/var_coop_allow_allies" font="ui\large_ui" color="#FF2896FF" align="center" text_y="4" list_flags="items_from_strings" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -13 19 -7" footer_bounds="7 208 19 214">
 		<on event="left_mouse" run="mouse spinner 1wide click"/>
 	</widget>
-	<strings name="main_menu/multiplayer_type_select/server_settings/coop_options/var_coop_allies">
-		<string text="NONE"/>
-		<string text="1"/>
-		<string text="2"/>
-		<string text="3"/>
-		<string text="4"/>
+	<strings name="main_menu/multiplayer_type_select/server_settings/coop_options/var_coop_allow_allies">
+		<string text="ON"/>
+		<string text="OFF"/>
 	</strings>
 	<strings name="main_menu/multiplayer_type_select/server_settings/coop_options/coop_options_labels">
 		<string text="FRIENDLY FIRE:"/>
@@ -423,7 +420,7 @@
 		<string text="PLAYER COLLISIONS:"/>
 		<string text="ALLY FRIENDLY FIRE:"/>
 		<string text="TEAM WIPE:"/>
-		<string text="ALLIES:"/>
+		<string text="ALLOW ALLIES:"/>
 	</strings>
 	<strings name="main_menu/multiplayer_type_select/server_settings/coop_options/cap_coop_options">
 		<string text="Players can not be hurt by weapons and explosives\nfired by the other players."/>
@@ -456,11 +453,8 @@
 		<string text="Private games revert the checkpoint; public games\nonly respawn. A changed team or missing save\nalways uses respawn only."/>
 		<string text="Revert the checkpoint after everyone dies. A changed\nteam or missing save uses respawn only."/>
 		<string text="Respawn at checkpoint positions after everyone dies.\nThe world keeps its progress."/>
-		<string text="No AI allies: only the players fight."/>
-		<string text="AI marines who follow the nearest player, fight\nbeside them and come back behind them."/>
-		<string text="AI marines who follow the nearest player, fight\nbeside them and come back behind them."/>
-		<string text="AI marines who follow the nearest player, fight\nbeside them and come back behind them."/>
-		<string text="AI marines who follow the nearest player, fight\nbeside them and come back behind them."/>
+		<string text="The host can bring in AI marines from the pause\nmenu's ALLIES (each level starts with none)."/>
+		<string text="No AI allies this game: the pause menu's ALLIES\nis locked."/>
 	</strings>
 	<widget name="main_menu/multiplayer_type_select/server_settings/voice_options/voice_options_screen" width="640" height="480" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/gradient">
 		<child widget="main_menu/multiplayer_type_select/server_settings/voice_options/header_voice_options"/>

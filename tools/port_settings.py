@@ -1724,11 +1724,12 @@ COOP_SETUP_SCREENS = [
             "Revert the checkpoint after everyone dies. A changed\\nteam or missing save uses respawn only.",
             "Respawn at checkpoint positions after everyone dies.\\nThe world keeps its progress.",
         ]),
-        # (bots.coop: port/linux/game/coop_allies.c; also the campaign pause
-        # menu's ALLIES, menu_tags.c)
-        ("coop_allies", "ALLIES:", ["NONE", "1", "2", "3", "4"],
-         ["No AI allies: only the players fight."] +
-         ["AI marines who follow the nearest player, fight\\nbeside them and come back behind them."] * 4),
+        # (network.coop_allies: whether the campaign pause menu's ALLIES,
+        # menu_tags.c, lets the host bring in coop_allies.c's allies)
+        ("coop_allow_allies", "ALLOW ALLIES:", ["ON", "OFF"], [
+            "The host can bring in AI marines from the pause\\nmenu's ALLIES (each level starts with none).",
+            "No AI allies this game: the pause menu's ALLIES\\nis locked.",
+        ]),
     ]),
     ("voice_options", "VOICE AND VOTING", "Voice chat, text chat and votes to kick a player,\\nfor this game.",
      TEAMPLAY_ROWS),
