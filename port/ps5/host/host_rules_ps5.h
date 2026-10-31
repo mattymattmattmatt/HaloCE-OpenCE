@@ -74,6 +74,11 @@ int ps5_microphone_samples(const short *samples, int count, float *out);
 "tag_name": "build-<number>"), or 0 */
 long ps5_update_release_build(const char *json);
 
+/* the newest build number in GitHub's list of a repository's releases
+among the tags <prefix><number> (the gore build's: "ps5-gore-b"), or 0;
+any other release in the list is not counted */
+long ps5_update_newest_build(const char *json, const char *prefix);
+
 /* a zip's local file header (30 bytes), as the release's stored archive
 has it */
 #define PS5_ZIP_LOCAL_HEADER 30

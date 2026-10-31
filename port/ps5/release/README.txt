@@ -31,9 +31,14 @@ under a minute).
 Voice chat talks while the V key is held: to talk with the pad, put
 push_to_talk = "Gamepad LB" under [controls] in config.toml.
 
-Updates: this build does not update itself (it never downloads the
-universal port's releases, which would replace the gore build). To update,
-copy a newer release's PPSA99501 folder over the old one.
+Updates: the game looks for a newer Halo CE Gore PS5 release (this
+repository's ps5-gore-b<number> releases only, never the universal port's)
+a few seconds after it starts, and installs it while you play; when a
+notification says so, close the game and start it again. To turn it off,
+put this in /data/halo-gore/config.toml:
+    [update]
+    auto = false
+To update by hand, copy a newer release's PPSA99501 folder over the old one.
 
 The source: https://github.com/mattymattmattmatt/HaloCE-OpenCE (branch ps5).
 The licences are in COPYING and licenses/; NOTICE.txt says where the source is.

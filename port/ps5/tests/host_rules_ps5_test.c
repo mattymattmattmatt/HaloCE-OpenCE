@@ -228,6 +228,12 @@ static void test_update_release(void)
 	CHECK(ps5_update_release_build("{\"tag_name\": \"build-12x\"}") == 0);
 	CHECK(ps5_update_release_build("{\"message\": \"Not Found\"}") == 0);
 	CHECK(ps5_update_release_build("") == 0 && ps5_update_release_build(NULL) == 0);
+	/* the gore build's: the newest ps5-gore-b<number> in the list, whatever else is there */
+	CHECK(ps5_update_newest_build("[{\"tag_name\": \"gore-1.1\"}, {\"tag_name\": \"ps5-gore-b3\"}, "
+		"{\"tag_name\":\"ps5-gore-b12\"}, {\"tag_name\": \"build-500\"}, {\"tag_name\": \"ps5-gore-1\"}]",
+		"ps5-gore-b") == 12);
+	CHECK(ps5_update_newest_build("[{\"tag_name\": \"ps5-gore-b2x\"}, {\"tag_name\": \"ps5-gore-b\"}]", "ps5-gore-b") == 0);
+	CHECK(ps5_update_newest_build("[]", "ps5-gore-b") == 0 && ps5_update_newest_build(NULL, "ps5-gore-b") == 0);
 }
 
 static void test_update_zip(void)

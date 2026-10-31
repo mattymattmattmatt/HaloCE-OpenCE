@@ -511,6 +511,12 @@ jobs:
           time env LLVM_CONFIG=/usr/bin/llvm-config-22 bash "$PS5_DEPS/PS5_Vulkan/tools/build-radv.sh" release
           cat "$PS5_DEPS/PS5_Vulkan/.deps/native/radv-release/PROVENANCE.txt"
 
+      # (the gore build's PS5 number, which its updater compares with the
+      # newest ps5-gore-b<number> release: port/ps5/gore_build.txt, raised
+      # with param.json's contentVersion for each PS5 release)
+      - name: Build number
+        run: echo "HALO_BUILD_NUMBER=$(tr -dc 0-9 < port/ps5/gore_build.txt)" >> "$GITHUB_ENV"
+
       - name: Release
         run: python3 tools/ci_build.py ps5 release
 

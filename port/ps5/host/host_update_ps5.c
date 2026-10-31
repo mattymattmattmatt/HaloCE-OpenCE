@@ -73,15 +73,21 @@ it.
 
 /* the gore build's PS5 title (PPSA99501, "Halo CE Gore") is not the
 universal port's (PPSA99500): it never takes that repository's releases,
-which would replace it with a build without the gore mod. Its own updates
-are off unless the build is given HALO_PS5_GORE_UPDATES=1 (no build is
-today), and then only from this repository's halo-gore-ps5 releases. */
+which would replace it with a build without the gore mod. It updates from
+this repository's PS5 releases only (ps5-gore-b<number>, below), with
+update.auto in /data/halo-gore/config.toml to turn it off;
+HALO_PS5_GORE_UPDATES=0 builds it with no updates at all. */
 #ifndef HALO_PS5_GORE_UPDATES
-#define HALO_PS5_GORE_UPDATES 0
+#define HALO_PS5_GORE_UPDATES 1
 #endif
 #define UPDATE_REPOSITORY "mattymattmattmatt/HaloCE-OpenCE"
 #define UPDATE_ASSET "halo-gore-ps5-" HALO_BUILD_FLAVOR ".zip"
-#define UPDATE_LATEST "https://api.github.com/repos/" UPDATE_REPOSITORY "/releases/latest"
+/* the gore build's PS5 releases are tagged ps5-gore-b<number>, the number
+the build is given (HALO_BUILD_NUMBER: port/ps5/gore_build.txt, by the
+workflow's PS5 job); the repository's other releases (PC, Android) are
+never looked at, as the list is read for those tags only */
+#define UPDATE_TAG_PREFIX "ps5-gore-b"
+#define UPDATE_LATEST "https://api.github.com/repos/" UPDATE_REPOSITORY "/releases?per_page=30"
 /* the archive's folder that is the title's */
 #define UPDATE_TITLE_ENTRY "PPSA99501/"
 #define UPDATE_ANSWER PS5_DATA_FOLDER "/update.latest.json"
@@ -290,7 +296,7 @@ static long latest_build(void)
 
 	if (!update_download(UPDATE_LATEST, UPDATE_ANSWER, UPDATE_MAXIMUM_ANSWER, NULL, NULL, error, sizeof(error)))
 	{
-		ps5_log("update: the latest release cannot be asked for: %s", error);
+		ps5_log("update: the releases cannot be asked for: %s", error);
 		return 0;
 	}
 	file = fopen(UPDATE_ANSWER, "rb");
@@ -305,9 +311,9 @@ static long latest_build(void)
 	if (file)
 		fclose(file);
 	unlink(UPDATE_ANSWER);
-	build = ps5_update_release_build(text);
+	build = ps5_update_newest_build(text, UPDATE_TAG_PREFIX);
 	if (!build)
-		ps5_log("update: GitHub's answer for the latest release names no build");
+		ps5_log("update: GitHub's list of releases has no " UPDATE_TAG_PREFIX "<number>");
 	free(text);
 	return build;
 }
@@ -529,7 +535,7 @@ static void *update_thread(void *argument)
 	{
 		char url[256];
 
-		snprintf(url, sizeof(url), "https://github.com/" UPDATE_REPOSITORY "/releases/download/build-%ld/" UPDATE_ASSET,
+		snprintf(url, sizeof(url), "https://github.com/" UPDATE_REPOSITORY "/releases/download/" UPDATE_TAG_PREFIX "%ld/" UPDATE_ASSET,
 			build);
 		start = ps5_now_ns();
 		if (!update_download(url, UPDATE_ARCHIVE, UPDATE_MAXIMUM_ARCHIVE, download_progress, &progress, error,

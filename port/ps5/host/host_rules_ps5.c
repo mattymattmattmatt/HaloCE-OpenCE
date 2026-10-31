@@ -148,6 +148,37 @@ long ps5_update_release_build(const char *json)
 	return *end == '"' && build > 0 ? build : 0;
 }
 
+long ps5_update_newest_build(const char *json, const char *prefix)
+{
+	const char *tag = json;
+	size_t length = prefix ? strlen(prefix) : 0;
+	long newest = 0;
+
+	if (!json || !length)
+		return 0;
+	/* every release in the list: its "tag_name", the newest <prefix><number>
+	(the list's other releases, whatever their tags, are not this title's) */
+	while ((tag = strstr(tag, "\"tag_name\"")) != NULL)
+	{
+		const char *value = tag + strlen("\"tag_name\"");
+		char *end;
+		long build;
+
+		tag = value;
+		while (*value == ' ' || *value == ':' || *value == '\t' || *value == '\n' || *value == '\r')
+			value++;
+		if (*value != '"' || strncmp(value + 1, prefix, length))
+			continue;
+		value += 1 + length;
+		if (*value < '0' || *value > '9')
+			continue;
+		build = strtol(value, &end, 10);
+		if (*end == '"' && build > newest)
+			newest = build;
+	}
+	return newest;
+}
+
 static unsigned long little(const unsigned char *bytes, int count)
 {
 	unsigned long value = 0;
