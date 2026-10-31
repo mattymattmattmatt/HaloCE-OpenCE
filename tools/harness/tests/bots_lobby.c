@@ -68,6 +68,13 @@ static boolean network_game_server_send_game_data_pregame(struct network_game_se
 	return TRUE;
 }
 
+/* (bots.c's: whether this game may have bots, a hosted game that is not
+public; the cases' games may) */
+static boolean bots_game_allowed(void)
+{
+	return TRUE;
+}
+
 /* (the game's own code, as its build compiles it: a char index, a char
 machine index against the session's 128) */
 #pragma clang diagnostic ignored "-Wchar-subscripts"
