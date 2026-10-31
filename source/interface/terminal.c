@@ -418,7 +418,7 @@ void terminal_status_printf(
 	...)
 {
 	struct output_line_datum *line = NULL;
-	char *arglist;
+	va_list arglist;
 	int count;
 
 	if (!terminal_globals.initialized)

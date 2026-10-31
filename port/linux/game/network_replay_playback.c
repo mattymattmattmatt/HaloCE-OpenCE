@@ -152,8 +152,19 @@ boolean hud_hires_prompt_draw(char const *name, real x, real y, real size, pixel
 
 /* the simulation's and the netcode's variables outside the game state, all
 together (port/android/guest/guest.ld's .replay_data and .replay_bss) */
+#ifdef HALO_GUEST
 extern byte __replay_data_start[], __replay_data_end[];
 extern byte __replay_bss_start[], __replay_bss_end[];
+#else
+/* (a native build, Linux's, Windows' or the web's, links with no guest.ld:
+its keyframes hold the game state alone, as they are none of those
+variables, so a seek there starts from the game state only) */
+static byte replay_no_variables[1];
+#define __replay_data_start replay_no_variables
+#define __replay_data_end replay_no_variables
+#define __replay_bss_start replay_no_variables
+#define __replay_bss_end replay_no_variables
+#endif
 
 /* a keyframe: the game's tick it was taken at, where the file's records
 were then, and the game state and those variables, compressed */

@@ -414,6 +414,10 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
             # the headers of the port's own game units (port/linux/game), for
             # the game sources that call them
             f"-iquote {Path(linux_config['game_sources'])}",
+            # the POSIX threads the port's game units use (the bots' helper,
+            # the replays): port/windows/include/posix's, after every other
+            # folder, so its time.h and unistd.h never shadow the C runtime's
+            f"-idirafter {posix_include}",
             game_defines_and_includes(linux_config),
             # the Xbox SDK declarations (port/include/xdk) come before the
             # Windows SDK, which has headers of the same names
