@@ -88,6 +88,14 @@ static int errno_from_windows_error(DWORD error)
 	}
 }
 
+/* ---------- strings */
+
+/* (the port's game code's: benchmark.c's names; the C runtime's is _strnicmp) */
+int strncasecmp(const char *first, const char *second, size_t count)
+{
+	return _strnicmp(first, second, count);
+}
+
 /* ---------- threads */
 
 struct thread_start
