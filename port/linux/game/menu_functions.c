@@ -4100,7 +4100,8 @@ boolean pc_menu_text_color(struct widget_instance *widget, real_argb_color *colo
 	unsigned long rgba;
 
 	/* (the campaign pause menu's ALLIES on a level with no marines: grey) */
-	if (widget->name && strstr(widget->name, "allies_button") && !coop_allies_available())
+	if (widget->name && strstr(widget->name, "allies_button") &&
+		(!coop_allies_available() || !coop_allies_allowed()))
 	{
 		color->red = (real)((ROW_COLOR_GREYED >> 24) & 0xFF) / 255.0f;
 		color->green = (real)((ROW_COLOR_GREYED >> 16) & 0xFF) / 255.0f;
@@ -5777,7 +5778,7 @@ static boolean campaign_allies_change(void)
 	char value[8];
 
 	/* (a level with no marine or crewman: greyed, NONE) */
-	if (!coop_allies_available())
+	if (!coop_allies_available() || !coop_allies_allowed())
 	{
 		ui_play_audio_feedback_sound(SOUND_ERROR);
 		return TRUE;
@@ -5796,7 +5797,7 @@ static void campaign_allies_text(struct widget_instance *button)
 {
 	long count = config_integer("bots.coop");
 
-	button->parameters.text_box.string_list_index = !coop_allies_available() ? 5 :
+	button->parameters.text_box.string_list_index = !coop_allies_allowed() ? 6 : !coop_allies_available() ? 5 :
 		(short)(count < 0 ? 0 : count > 4 ? 4 : count);
 }
 
@@ -7028,7 +7029,7 @@ static struct gametype_option const gametype_options[] =
 	{ "coop_ally_friendly_fire_spinner", _option_setting, 0, 0, 2, { 0 }, "network.coop_ally_friendly_fire",
 		{ "true", "false" } },
 	/* (the campaign's AI allies and the players' character: coop_allies.c) */
-	{ "coop_allies_spinner", _option_setting, 0, 0, 5, { 0 }, "bots.coop", { "0", "1", "2", "3", "4" } },
+	{ "coop_allow_allies_spinner", _option_setting, 0, 0, 2, { 0 }, "network.coop_allies", { "true", "false" } },
 	/* a multiplayer game's bots (Server Setup's BOTS: tools/port_settings.py's
 	BOTS_SETUP; bots.c) */
 	{ "bots_count_spinner", _option_setting, 0, 0, 16, { 0 }, "bots.count",

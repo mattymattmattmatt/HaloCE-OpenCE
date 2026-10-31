@@ -613,9 +613,10 @@ static const struct config_setting config_settings[] =
 		"Campaign allies: 0 to 4 AI marines (crewmen on a level with no marines;\n"
 		"none on a level with neither, Keyes) who follow the nearest player, fight\n"
 		"from near them, and come back behind them when killed, left behind or\n"
-		"stuck, in solo, split screen and hosted co-op campaigns. Server Setup's\n"
-		"CO-OP OPTIONS and the campaign pause menu's ALLIES set it; a change takes\n"
-		"effect at once. The action button held 1.5 s on foot sends them where\n"
+		"stuck, in solo, split screen and hosted co-op campaigns. The campaign\n"
+		"pause menu's ALLIES sets it (an online co-op game's host only with\n"
+		"network.coop_allies); a change takes effect at once; each level starts\n"
+		"with none. The action button held 1.5 s on foot sends them where\n"
 		"the player aims, and again brings them back; a dead player respawns\n"
 		"beside a living ally (port/linux/game/coop_allies.c)." },
 	{ "display.viewmodel_shield", _config_boolean, "false", "HALO_VIEWMODEL_SHIELD", _environment_value, _platform_all,
@@ -812,6 +813,12 @@ static const struct config_setting config_settings[] =
 		"\"on\", \"shields_only\" or \"explosives_only\" (FRIENDLY FIRE in\n"
 		"co-op's Server Setup > Co-op Options writes its choice here). Their AI\n"
 		"allies they hurt as network.coop_ally_friendly_fire says." },
+	{ "network.coop_allies", _config_boolean, "true", "HALO_NET_COOP_ALLIES", _environment_value, _platform_all,
+		"Whether the host of an online co-op game may bring in campaign allies\n"
+		"(bots.coop) from the campaign pause menu's ALLIES; false, that row is\n"
+		"locked (ALLIES: OFF IN SETUP) and none come. ALLOW ALLIES in co-op's\n"
+		"Server Setup > Co-op Options writes its choice here. A game alone or\n"
+		"in split screen always may." },
 	{ "network.coop_ally_friendly_fire", _config_boolean, "true", "HALO_NET_COOP_ALLY_FRIENDLY_FIRE",
 		_environment_value, _platform_all,
 		"Whether the players of an online co-op game hurt their AI allies (the\n"
