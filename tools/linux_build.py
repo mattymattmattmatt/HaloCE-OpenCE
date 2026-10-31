@@ -149,8 +149,9 @@ def build_repository() -> str:
     """the GitHub repository a build is made from, owner/name, which a client
     tells the servers it joins (network_distributed.c). This build names
     the gore mod's repository, on CI and off it, whichever repository or
-    checkout it is built from."""
-    return "MattyMadeIt/HaloCE-Gore-Mod"
+    checkout it is built from, unless HALO_BUILD_REPOSITORY names another
+    (the PS5 title's build: tools/ps5_build.py)."""
+    return os.environ.get("HALO_BUILD_REPOSITORY") or "MattyMadeIt/HaloCE-Gore-Mod"
 
 
 def updater_defines(release: bool) -> str:

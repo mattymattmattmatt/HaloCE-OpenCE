@@ -472,7 +472,7 @@ static void end_of_game(void)
 			HOLD_SECONDS);
 		sleep(HOLD_SECONDS);
 	}
-	ps5_notify("Halo: Combat Evolved ends");
+	ps5_notify("Halo CE Gore ends");
 	/* (the kernel log then reports exit() and a SIGSYS, as for every title
 	that ends: port/ps5/README.md) */
 	ps5_log("the host ends");
@@ -502,7 +502,7 @@ static void log_identity(void)
 {
 	struct ps5_kernel_sw_version version;
 
-	ps5_log("Halo: Combat Evolved for the PS5, build %s (phase 6: playing on the console)", HALO_PROBE_BUILD);
+	ps5_log("Halo CE Gore for the PS5, build %s (phase 6: playing on the console)", HALO_PROBE_BUILD);
 	memset(&version, 0, sizeof(version));
 	version.size = sizeof(version);
 	if (sceKernelGetSystemSwVersion(&version) == 0)

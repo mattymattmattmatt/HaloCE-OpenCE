@@ -282,7 +282,7 @@ def this_commit() -> str:
 def notice_text(commit: str) -> str:
     """NOTICE.txt: what the title is built from, under which licences, and
     where its source is; made from the pins at every build (ps5_notice)"""
-    return f"""Halo: Combat Evolved for the PS5 ({TITLE_ID})
+    return f"""Halo CE Gore for the PS5 ({TITLE_ID})
 
 This title is a work under the GNU General Public License, version 3 or
 (at your option) any later version, as a whole: it is linked with parts
@@ -551,15 +551,25 @@ def _generate(n: Writer, sln: Any, config_path: Path) -> None:
     guest_updater_cflags = f'-DHALO_BUILD_NUMBER=0 -DHALO_BUILD_FLAVOR=\\"{"release" if release else "debug"}\\"'
     n.variable("ps5_guest_cc", guest_cc)
     ar, ld, objdump = _guest_tools(guest_cc)
-    guest = generate_guest_image(
-        n, sln, config, arch=X32, prefix="ps5", label="PS5", build=BUILD, third_party=THIRD_PARTY,
-        guest_cc=guest_cc, gl_headers=GL_HEADERS, ar=ar, ld=ld, objdump=objdump, builtins_cc="$ps5_guest_cc",
-        environment="gnu", platform_defines=["-DHALO_MOVABLE_WINDOW=1", "-DHALO_PS5=1"],
-        extra_runtime=[LINUX_HOST_DIR / "guest_desktop.c"], extra_imports=[LINUX_HOST_DIR / "host_imports.list", ANDROID_DIR / "host_imports_vk.list",
-                                                         PORT_DIR / "host_imports.list"],
-        updater_cflags=guest_updater_cflags, desktop_gl=True, vulkan=True,
-        # (Direct Link's link page's QR code, as the Switch's: port/linux/src/link_page.c)
-        extra_sources=[Path("port/third_party/qrcodegen/qrcodegen.c")])
+    # (the PS5 title names the repository it is made from, this one, in
+    # main.c's build identity, not the PC and Android gore mod's)
+    previous_repository = os.environ.get("HALO_BUILD_REPOSITORY")
+    os.environ["HALO_BUILD_REPOSITORY"] = REPOSITORY_URL.split("github.com/")[1]
+    try:
+        guest = generate_guest_image(
+            n, sln, config, arch=X32, prefix="ps5", label="PS5", build=BUILD, third_party=THIRD_PARTY,
+            guest_cc=guest_cc, gl_headers=GL_HEADERS, ar=ar, ld=ld, objdump=objdump, builtins_cc="$ps5_guest_cc",
+            environment="gnu", platform_defines=["-DHALO_MOVABLE_WINDOW=1", "-DHALO_PS5=1"],
+            extra_runtime=[LINUX_HOST_DIR / "guest_desktop.c"], extra_imports=[LINUX_HOST_DIR / "host_imports.list", ANDROID_DIR / "host_imports_vk.list",
+                                                             PORT_DIR / "host_imports.list"],
+            updater_cflags=guest_updater_cflags, desktop_gl=True, vulkan=True,
+            # (Direct Link's link page's QR code, as the Switch's: port/linux/src/link_page.c)
+            extra_sources=[Path("port/third_party/qrcodegen/qrcodegen.c")])
+    finally:
+        if previous_repository is None:
+            del os.environ["HALO_BUILD_REPOSITORY"]
+        else:
+            os.environ["HALO_BUILD_REPOSITORY"] = previous_repository
 
     # ---------- the toolchain
 
