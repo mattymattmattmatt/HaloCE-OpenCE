@@ -95,7 +95,7 @@ int ps5_zip_entry_stored(const struct ps5_zip_entry *entry);
 unsigned long ps5_crc32(unsigned long crc, const void *data, unsigned long size);
 
 /* where an archive's entry goes in the title's folder: for a name under
-folder ("PPSA99500/"), the rest of it in out (empty for the folder
+folder ("PPSA99501/"), the rest of it in out (empty for the folder
 itself) and 1, a folder's ending in '/'; 0 for a name outside it (the
 release's README.txt, its licences), which the title does not take; -1
 for a name the title refuses (a part "..", "." or empty, a backslash, or

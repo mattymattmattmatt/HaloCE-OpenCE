@@ -844,6 +844,46 @@ static void *read_image(size_t *size)
 
 /* what the game reads of the environment: its settings (HALO_), passed on
 from the host's (environment.txt) */
+/* The gore build's maps: its own folder's, if it has them (extracted there
+from a disc image, or copied); otherwise the universal port's, in
+/data/halo/maps, which the game reads through game.maps.path
+(HALO_MAPS_PATH) without writing a copy. A game.maps.path set in
+config.toml, or HALO_MAPS_PATH, is left as it is. */
+static void shared_maps(struct host_environment *environment)
+{
+	struct stat status;
+	toml_result_t result;
+	int configured = getenv("HALO_MAPS_PATH") != NULL;
+
+	if (stat(PS5_DATA_FOLDER "/maps/ui.map", &status) == 0)
+	{
+		ps5_log("maps: " PS5_DATA_FOLDER "/maps");
+		return;
+	}
+	result = toml_parse_file_ex(PS5_DATA_FOLDER "/config.toml");
+	if (result.ok)
+	{
+		toml_datum_t setting = toml_seek(result.toptab, "game.maps.path");
+
+		if (setting.type == TOML_STRING && setting.u.s[0])
+			configured = 1;
+		toml_free(result);
+	}
+	if (configured)
+	{
+		ps5_log("maps: game.maps.path's");
+		return;
+	}
+	if (stat(PS5_SHARED_DATA_FOLDER "/maps/ui.map", &status) != 0)
+	{
+		ps5_log("maps: none in " PS5_DATA_FOLDER "/maps or " PS5_SHARED_DATA_FOLDER "/maps; the game offers to "
+			"extract them from a disc image in " PS5_DATA_FOLDER);
+		return;
+	}
+	host_environment_set(environment, "HALO_MAPS_PATH", PS5_SHARED_DATA_FOLDER "/maps");
+	ps5_log("maps: " PS5_SHARED_DATA_FOLDER "/maps (the universal port's, shared)");
+}
+
 static void pass_settings(struct host_environment *environment)
 {
 	char **entry;
@@ -880,6 +920,7 @@ static void *game_main(void *unused)
 	host_time_zone(zone, sizeof(zone));
 	host_environment_set(&environment, "TZ", zone);
 	pass_settings(&environment);
+	shared_maps(&environment);
 
 	start = ps5_now_ns();
 	image = read_image(&size);
@@ -1057,9 +1098,13 @@ int main(void)
 	/data/halo, and saw it when started again: it is given a moment) */
 	for (waited = 0; waited < 20 && !is_folder(PS5_DATA_FOLDER); waited++)
 		usleep(100000);
+	/* (the gore build's own folder is made beside the universal port's
+	when only that is there, so a console set up for it starts as it is) */
+	if (!is_folder(PS5_DATA_FOLDER) && is_folder(PS5_SHARED_DATA_FOLDER) && mkdir(PS5_DATA_FOLDER, 0777) == 0)
+		chmod(PS5_DATA_FOLDER, 0777);
 	log_open();
 	log_start_writer();
-	ps5_notify("Halo: Combat Evolved starts");
+	ps5_notify("Halo CE Gore starts");
 	log_identity();
 	ps5_log("descriptors 0 to 2: %s", taken == 7 ? "free at start, taken with " PS5_TITLE_FOLDER "/eboot.bin" :
 		taken ? "some free at start, taken with " PS5_TITLE_FOLDER "/eboot.bin" : "open at start");
@@ -1072,7 +1117,7 @@ int main(void)
 	if (!is_folder(PS5_DATA_FOLDER))
 	{
 		ps5_log_sync(1);
-		ps5_log("the game needs " PS5_DATA_FOLDER ", with the game's disc image in it (port/ps5/README.md)");
+		ps5_log("the game needs " PS5_DATA_FOLDER " (or " PS5_SHARED_DATA_FOLDER "), with the game's disc image or maps in it (port/ps5/README.md)");
 		ps5_log("the host ends");
 		_exit(1);
 	}

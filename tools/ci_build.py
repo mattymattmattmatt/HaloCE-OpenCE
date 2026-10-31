@@ -28,7 +28,7 @@ GitHub Pages.
 
 The PS5 build (port/ps5/README.md) needs PS5_Vulkan's toolchain, set up as
 its README and tools/ps5_build.py say; dist/halo-ps5-<config>/ is the
-release as a player installs it: the title's folder, PPSA99500/, and beside
+release as a player installs it: the title's folder, PPSA99501/, and beside
 it README.txt, COPYING and licenses/ (tools/ps5_build.py's RELEASE_LICENSES).
 
     python tools/ci_build.py sums release/
@@ -154,9 +154,9 @@ def main() -> int:
         dist = ROOT / "dist" / f"halo-ps5-{args.config}"
         if dist.exists():
             shutil.rmtree(dist)
-        shutil.copytree(ROOT / "build/ps5/title/PPSA99500", dist / "PPSA99500")
+        shutil.copytree(ROOT / "build/ps5/title/PPSA99501", dist / "PPSA99501")
         shutil.copytree(ROOT / "build/ps5/release", dist, dirs_exist_ok=True)
-        print(f"build/ps5/title/PPSA99500, build/ps5/release -> {dist.relative_to(ROOT)}", flush=True)
+        print(f"build/ps5/title/PPSA99501, build/ps5/release -> {dist.relative_to(ROOT)}", flush=True)
         return 0
     if args.platform == "android":
         # the native part, then the app around it (Gradle's variant of the

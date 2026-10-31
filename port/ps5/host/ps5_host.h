@@ -13,7 +13,12 @@ the futexes, and the reports each file writes when the game ends.
 
 /* the game's data, settings, saves and log (a folder the player fills over
 FTP), and the title's own read-only folder */
-#define PS5_DATA_FOLDER "/data/halo"
+#define PS5_DATA_FOLDER "/data/halo-gore"
+/* the gore build's title (PPSA99501) keeps its own settings, saves, log and
+caches in /data/halo-gore, beside the universal port's (PPSA99500) in
+/data/halo, whose maps it reads when its own folder has none (host_main.c,
+shared_maps) */
+#define PS5_SHARED_DATA_FOLDER "/data/halo"
 #define PS5_TITLE_FOLDER "/app0"
 
 /* one line to the log file and the kernel log (host_main.c), with no

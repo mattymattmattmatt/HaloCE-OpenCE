@@ -14,7 +14,7 @@ build/ps5:
   titles that link RADV are (tools/ps5_title.sh), with RADV's release
   archive, glslang (built here with the fork's CMake toolchain) and pacbrew's
   SDL2 in the link;
-- the title, title/PPSA99500: eboot.bin (the host, signed), sce_sys/
+- the title, title/PPSA99501: eboot.bin (the host, signed), sce_sys/
   (param.json and icon0.png, port/ps5/sce_sys), sce_module/libc.prx
   (PS5_Vulkan's), halo_guest.elf, NOTICE.txt (what the build is made of,
   and where to get it) and brokers.txt (internet play's, which the host
@@ -54,7 +54,7 @@ from .android_build import GLSLANG_DIR as ANDROID_GLSLANG_DIR
 from .android_build import GLSLANG_TAG, GLSLANG_URL, MUSL_URL, MUSL_VERSION, fetch_third_party, generate_guest_image
 from .android_build import ZLIB_DEFINES, ZLIB_DIR, ZLIB_SOURCES
 from .guest_arch import X32
-from .linux_build import MBEDTLS_DIR, MINIUPNPC_DEFINES, MINIUPNPC_DIR, miniupnpc_sources, updater_defines
+from .linux_build import MBEDTLS_DIR, MINIUPNPC_DEFINES, MINIUPNPC_DIR, build_repository, miniupnpc_sources, updater_defines
 from .ninja_syntax import Writer, escape
 
 # the pins: what phase 0 B of port/ps5/PS5.md built and ran on the console
@@ -83,9 +83,9 @@ RADV_ZLIB_VERSION = "1.3.1"
 
 # this repository, which the notice names at the build's commit, and which
 # the updater asks for releases (port/ps5/host/host_update_ps5.c)
-REPOSITORY_URL = "https://github.com/thelinkin3000/halo-ce-universal"
+REPOSITORY_URL = "https://github.com/mattymattmattmatt/HaloCE-OpenCE"
 
-TITLE_ID = "PPSA99500"
+TITLE_ID = "PPSA99501"
 PORT_DIR = Path("port/ps5")
 ANDROID_DIR = Path("port/android")
 LINUX_DIR = Path("port/linux")
@@ -732,7 +732,9 @@ def _generate(n: Writer, sln: Any, config_path: Path) -> None:
             # as phase 5 found for gethostbyname: both host_update_ps5.c's)
             cflags += " -Dexecl=ps5_update_execl -Dstrcasestr=ps5_update_strcasestr"
         if source.name == "host_update_ps5.c":
-            cflags += " " + updater_defines(release)
+            # (the gore PS5 build names the repository its PS5 title is made
+            # from, not the PC and Android gore mod's)
+            cflags += " " + updater_defines(release).replace(build_repository(), REPOSITORY_URL.split("github.com/")[1])
         n.build(outputs=obj, rule="ps5_host_cc", inputs=source, variables={"cflags": cflags},
                 implicit=[build_stamp])
         objects.append(obj)

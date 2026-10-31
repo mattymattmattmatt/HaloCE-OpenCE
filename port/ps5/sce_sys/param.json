@@ -7,9 +7,9 @@
   "attribute": 0,
   "attribute2": 0,
   "attribute3": 524352,
-  "conceptId": "99500",
+  "conceptId": "99501",
   "contentBadgeType": 1,
-  "contentId": "UP9000-PPSA99500_00-HALOCOMBATEVOLVE",
+  "contentId": "UP9000-PPSA99501_00-HALOCEGOREMOD000",
   "contentVersion": "01.000.130",
   "downloadDataSize": 256,
   "gameIntent": {
@@ -22,7 +22,7 @@
   "localizedParameters": {
     "defaultLanguage": "en-US",
     "en-US": {
-      "titleName": "Halo: Combat Evolved"
+      "titleName": "Halo CE Gore"
     }
   },
   "masterVersion": "01.00",
@@ -33,6 +33,6 @@
   },
   "requiredSystemSoftwareVersion": "0x0000000000000000",
   "sdkVersion": "0x0000000000000000",
-  "titleId": "PPSA99500",
+  "titleId": "PPSA99501",
   "versionFileUri": ""
 }

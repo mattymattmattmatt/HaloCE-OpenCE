@@ -186,7 +186,7 @@ def test_content_version_is_the_build_number():
 
 def test_a_numbered_build_wants_its_content_version(tmp_path):
     param = tmp_path / "param.json"
-    param.write_text('{"titleId": "PPSA99500", "contentVersion": "01.000.111"}')
+    param.write_text('{"titleId": "PPSA99501", "contentVersion": "01.000.111"}')
     ps5_build.check_content_version(param, "111")
     ps5_build.check_content_version(param, "0")
     ps5_build.check_content_version(param, "")
@@ -199,6 +199,6 @@ def test_the_committed_param_json_is_well_formed():
     import re
 
     param = json.loads((ps5_build.PORT_DIR / "sce_sys" / "param.json").read_text())
-    assert param["titleId"] == "PPSA99500"
+    assert param["titleId"] == "PPSA99501"
     assert re.fullmatch(r"\d{2}\.\d{3}\.\d{3}", param["contentVersion"])
 

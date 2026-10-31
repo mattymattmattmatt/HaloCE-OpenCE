@@ -71,8 +71,8 @@ from typing import Callable, List, Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_HOST = "192.168.2.157"
-DEFAULT_TITLE = "PPSA99500"
-DATA_FOLDER = "/data/halo"
+DEFAULT_TITLE = "PPSA99501"
+DATA_FOLDER = "/data/halo-gore"
 DEFAULT_PS5VKCTL = Path.home() / "projects" / "ps5-deps" / "PS5_Vulkan" / "build" / "ps5vkctl" / "ps5vkctl.elf"
 # the files that go last, in this order, so the title never shows half uploaded
 LAST = ("eboot.bin", "sce_sys/param.json")

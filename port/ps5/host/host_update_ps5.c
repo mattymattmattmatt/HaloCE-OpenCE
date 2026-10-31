@@ -23,7 +23,7 @@ posix_update.c takes through SSL_CERT_FILE when no system bundle exists.
 
 The archive is stored, not deflated (the release job zips the PS5's with
 zip -0, as the Switch's), so it is read entry by entry with no inflater:
-each entry under PPSA99500/ is written into the title's folder as
+each entry under PPSA99501/ is written into the title's folder as
 <path>.new and checked against its CRC (host_rules_ps5.c reads the headers
 and the names). Only when every one has arrived intact are they renamed
 into place: a stamp (update.txt) first, eboot.bin last, the stamp removed
@@ -71,11 +71,19 @@ it.
 #define HALO_BUILD_FLAVOR "release"
 #endif
 
-#define UPDATE_REPOSITORY "thelinkin3000/halo-ce-universal"
-#define UPDATE_ASSET "halo-ps5-" HALO_BUILD_FLAVOR ".zip"
+/* the gore build's PS5 title (PPSA99501, "Halo CE Gore") is not the
+universal port's (PPSA99500): it never takes that repository's releases,
+which would replace it with a build without the gore mod. Its own updates
+are off unless the build is given HALO_PS5_GORE_UPDATES=1 (no build is
+today), and then only from this repository's halo-gore-ps5 releases. */
+#ifndef HALO_PS5_GORE_UPDATES
+#define HALO_PS5_GORE_UPDATES 0
+#endif
+#define UPDATE_REPOSITORY "mattymattmattmatt/HaloCE-OpenCE"
+#define UPDATE_ASSET "halo-gore-ps5-" HALO_BUILD_FLAVOR ".zip"
 #define UPDATE_LATEST "https://api.github.com/repos/" UPDATE_REPOSITORY "/releases/latest"
 /* the archive's folder that is the title's */
-#define UPDATE_TITLE_ENTRY "PPSA99500/"
+#define UPDATE_TITLE_ENTRY "PPSA99501/"
 #define UPDATE_ANSWER PS5_DATA_FOLDER "/update.latest.json"
 #define UPDATE_ARCHIVE PS5_DATA_FOLDER "/update.partial.zip"
 /* the most of each download taken (update.h), as the game's own updater
@@ -554,6 +562,11 @@ void ps5_update_start(void)
 	pthread_attr_t attributes;
 	pthread_t thread;
 
+	if (!HALO_PS5_GORE_UPDATES)
+	{
+		ps5_log("update: the gore build's updates are off, so it does not look for them");
+		return;
+	}
 	if (HALO_BUILD_NUMBER <= 0)
 	{
 		ps5_log("update: this build has no number, so it does not look for updates");

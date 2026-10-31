@@ -1,10 +1,8 @@
 name: Build
 
-# Debug and release builds of the native ports (Linux, Windows, Android) for
-# every pushed commit, uploaded as artifacts. tools/ci_build.py does each
-# build; see it for the options. This fork builds Android, the Switch and the
-# PS5 only: the Linux and Windows jobs are kept, upstream's, but do not run
-# (if: false), and the release and the notice go without them.
+# Debug and release builds of the native ports (Linux, Windows, Android) and
+# the web port for every pushed commit, uploaded as artifacts.
+# tools/ci_build.py does each build; see it for the options.
 #
 # Kept cheap:
 # - one job per platform builds both configurations, so its set-up (tools,
@@ -17,32 +15,13 @@ name: Build
 # - Windows, whose minutes cost twice Linux's, builds only Windows;
 # - artifacts are kept for three days.
 #
-# A release is made by pushing a tag v<number> (git tag v94 && git push
-# origin v94) to a commit of main: the builds of that commit are published as
-# the GitHub release build-<number>, "Build <number>", its notes the commit's
-# message, marked latest, so that
+# A successful build of main is also published as a GitHub release, the
+# newest marked latest, so that
 # https://github.com/<repository>/releases/latest/download/<file> always
-# gives the latest build; the last five are kept. The release is named
-# build-<number>, not v<number>, because that is what the builds already
-# installed look for (their updaters: port/switch/host/host_update.c,
-# port/ps5/host/host_update_ps5.c, port/linux/src/updater.c, the Android
-# app's Updater.java), and the number
-# has to be higher than the last release's, which they compare it with (and
-# Android's version code is). Pushes to other branches build without a
-# release; a push to main builds nothing, as its commits are built by their
-# tag's run (two runs at once, the branch's and the tag's, otherwise), or
-# by hand (workflow_dispatch).
-# Its web build is then the site on GitHub Pages
-# (https://halocombatevolved.com/, port/web/README.md).
+# gives the latest build; the last five are kept. Its web build is then the
+# site on GitHub Pages (https://halocombatevolved.com/, port/web/README.md).
 on:
   push:
-    branches:
-      - "**"
-      # (built by its tags: see the top)
-      - "!main"
-    tags:
-      - "v*"
-    # (not checked for a tag's push, which always builds)
     paths-ignore:
       - "**.md"
   workflow_dispatch:
@@ -73,8 +52,6 @@ jobs:
     # links against Debian 11's 32-bit glibc (tools/linux_sysroot.py), not
     # Arch's, so that it starts on SteamOS and older distributions; Arch's
     # 32-bit glibc is for the tests.
-    # (not built by this fork: see the top)
-    if: false
     runs-on: ubuntu-24.04
     container: archlinux:latest
     timeout-minutes: 40
@@ -114,12 +91,12 @@ jobs:
 
       - name: Test
         run: |
-          python -m pytest -q tools/test_linux_port.py tools/test_android_asm_convert.py tools/test_android_mirror_uploads.py tools/test_android_static_geometry.py tools/test_android_render_policy.py tools/test_android_ce_texture_cache.py tools/test_host_watch_hash.py tools/test_host_units.py tools/test_check_host_imports.py tools/test_host_syscall.py tools/test_touch_menu.py tools/harness tools/test_profile.py tools/stagekit/tests tools/test_net_compare.py tools/test_server_sim.py tools/test_egg.py tools/test_deploy_gametypes.py
+          python -m pytest -q tools/test_linux_port.py tools/test_android_asm_convert.py tools/test_android_mirror_uploads.py tools/test_android_static_geometry.py tools/test_android_render_policy.py tools/test_android_ce_texture_cache.py tools/test_host_watch_hash.py tools/test_touch_menu.py tools/harness tools/test_profile.py tools/stagekit/tests tools/test_net_compare.py tools/test_server_sim.py tools/test_egg.py tools/test_deploy_gametypes.py
           # the dedicated server: --version, and --server without maps refused (exit code 2); its cases with
           # clients need the retail maps, and are skipped
           python -m pytest -q tools/test_dedicated_server.py
           python tools/test_light_storage.py
-          python -m pytest -q tools/test_controller_buttons.py tools/test_controller_remap.py tools/test_hud_button_style.py tools/test_hud_corrections.py
+          python -m pytest -q tools/test_hud_corrections.py
 
       - name: Compile cache
         run: ccache --show-stats
@@ -134,136 +111,6 @@ jobs:
         with:
           name: halo-linux-release
           path: dist/halo-linux-release
-          retention-days: 3
-
-  linux-arm64:
-    # Ubuntu 22.04 (glibc 2.35, so the build starts on older distributions
-    # too) on GitHub's 64-bit ARM runner, with clang 22 from apt.llvm.org (the
-    # guest's arm64_32 target) and the development files SDL3 builds with.
-    # (not built by this fork: see the top)
-    if: false
-    runs-on: ubuntu-24.04-arm
-    container: ubuntu:22.04
-    timeout-minutes: 40
-    steps:
-      - name: Install the toolchain
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates curl gnupg lsb-release \
-            software-properties-common git python3 ninja-build cmake make pkg-config ccache zip \
-            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev libxfixes-dev \
-            libxtst-dev libxkbcommon-dev libwayland-dev wayland-protocols libegl-dev libgles-dev \
-            libgl-dev libdrm-dev libgbm-dev libpulse-dev libpipewire-0.3-dev libasound2-dev \
-            libudev-dev libdbus-1-dev libdecor-0-dev
-          curl -fsSL https://apt.llvm.org/llvm.sh -o llvm.sh
-          bash llvm.sh 22 && rm llvm.sh
-          apt-get install -y --no-install-recommends lld-22 llvm-22
-          for tool in clang ld.lld llvm-ar llvm-objdump; do ln -sf "/usr/bin/$tool-22" "/usr/local/bin/$tool"; done
-
-      - uses: actions/checkout@v4
-
-      - uses: actions/cache@v4
-        with:
-          path: .ccache
-          key: ccache-linux-arm64-${{ github.sha }}
-          restore-keys: ccache-linux-arm64-
-
-      # musl and SDL, which configure.py fetches
-      - uses: actions/cache@v4
-        with:
-          path: build/linux_arm64/third_party
-          key: linux-arm64-third-party-${{ hashFiles('tools/android_build.py', 'port/android/patches/**') }}
-
-      - name: Debug
-        run: python3 tools/ci_build.py linux_arm64 debug
-
-      - name: Release
-        run: python3 tools/ci_build.py linux_arm64 release
-
-      - name: Compile cache
-        run: ccache --show-stats
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: halo-linux-arm64-debug
-          path: dist/halo-linux-arm64-debug
-          retention-days: 3
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: halo-linux-arm64-release
-          path: dist/halo-linux-arm64-release
-          retention-days: 3
-
-  linux-x86_64:
-    # The 64-bit x86 guest build (ninja linux_x86_64: the game as x32 code in
-    # a 64-bit host), made as the 64-bit ARM one is: Ubuntu 22.04 (glibc 2.35,
-    # so the build starts on older distributions too) with clang 22 from
-    # apt.llvm.org (the guest's x32 target) and the development files SDL3
-    # builds with; and the tests of the guest's call boundary and image
-    # checks, which need this processor.
-    # (not built by this fork: see the top)
-    if: false
-    runs-on: ubuntu-24.04
-    container: ubuntu:22.04
-    timeout-minutes: 40
-    steps:
-      - name: Install the toolchain
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates curl gnupg lsb-release \
-            software-properties-common git python3 python3-pytest ninja-build cmake make pkg-config ccache zip \
-            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev libxfixes-dev \
-            libxtst-dev libxkbcommon-dev libwayland-dev wayland-protocols libegl-dev libgles-dev \
-            libgl-dev libdrm-dev libgbm-dev libpulse-dev libpipewire-0.3-dev libasound2-dev \
-            libudev-dev libdbus-1-dev libdecor-0-dev
-          curl -fsSL https://apt.llvm.org/llvm.sh -o llvm.sh
-          bash llvm.sh 22 && rm llvm.sh
-          apt-get install -y --no-install-recommends lld-22 llvm-22
-          for tool in clang ld.lld llvm-ar llvm-objdump llvm-objcopy llvm-nm; do
-            ln -sf "/usr/bin/$tool-22" "/usr/local/bin/$tool"
-          done
-
-      - uses: actions/checkout@v4
-
-      - uses: actions/cache@v4
-        with:
-          path: .ccache
-          key: ccache-linux-x86_64-${{ github.sha }}
-          restore-keys: ccache-linux-x86_64-
-
-      # musl and SDL, which configure.py fetches
-      - uses: actions/cache@v4
-        with:
-          path: build/linux_x86_64/third_party
-          key: linux-x86_64-third-party-${{ hashFiles('tools/android_build.py', 'port/android/patches/**') }}
-
-      - name: Debug
-        run: python3 tools/ci_build.py linux_x86_64 debug
-
-      - name: Release
-        run: python3 tools/ci_build.py linux_x86_64 release
-
-      - name: Test
-        run: python3 -m pytest -q tools/test_host_units.py tools/test_guest_image_check.py tools/test_check_host_imports.py tools/test_host_syscall.py tools/test_guest_layout.py tools/test_linux_guest_build.py tools/test_shader_keys.py
-
-      - name: Compile cache
-        run: ccache --show-stats
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: halo-linux-x86_64-debug
-          path: dist/halo-linux-x86_64-debug
-          retention-days: 3
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: halo-linux-x86_64-release
-          path: dist/halo-linux-x86_64-release
           retention-days: 3
 
   android:
@@ -354,8 +201,6 @@ jobs:
   windows:
     # The runner image has LLVM, Python and Visual Studio's x86 libraries and
     # Windows SDK.
-    # (not built by this fork: see the top)
-    if: false
     runs-on: windows-2025
     timeout-minutes: 40
     defaults:
@@ -427,126 +272,89 @@ jobs:
           path: dist/halo-windows-release-symbols
           retention-days: 3
 
-  switch:
-    # Two toolchains and neither can be replaced by the other: devkitA64 builds
-    # the host, and the Android NDK builds the guest, which is ILP32 AArch64
-    # (32-bit pointers, because the Xbox data formats embed them) and so
-    # cannot be built by devkitA64 at all.
-    #
-    # It runs in devkitPro's own image. Their package hosts
-    # (apt.devkitpro.org, pkg.devkitpro.org) answer 403 to a GitHub runner and
-    # to a plain curl - everything, the repository's root included - so
-    # installing devkitPro, or its SDL2 and Mesa, from them does not work here.
-    # The image carries the toolchain; the Android NDK comes from Google, which
-    # does answer.
+  web:
+    # Emscripten (emsdk, the version below, cached) builds the web port's
+    # site (port/web/README.md); the tests check its graph, the page's
+    # importer and service worker, its sockets, that it starts in a
+    # headless Chromium (with no game data, as far as the menus' map), and
+    # that two browsers join a room through a local MQTT broker.
     runs-on: ubuntu-24.04
-    container: devkitpro/devkita64:latest
-    timeout-minutes: 60
+    timeout-minutes: 40
     env:
-      DEVKITPRO: /opt/devkitpro
-      DEVKITA64: /opt/devkitpro/devkitA64
+      EMSDK_VERSION: 6.0.10
     steps:
-      # Prove the image has what the host links against, and say which is
-      # missing if it does not. Better a clear message now than a link error
-      # two steps later that reads like a build problem.
-      - name: Check the toolchain
-        run: |
-          echo "--- /opt/devkitpro ---"
-          ls /opt/devkitpro
-          echo "--- portlibs/switch/lib ---"
-          ls /opt/devkitpro/portlibs/switch/lib 2>&1 | head -20 || true
-          for library in libSDL2 libGLESv2 libEGL; do
-            if [ -f "/opt/devkitpro/portlibs/switch/lib/$library.a" ]; then
-              echo "found $library"
-            else
-              echo "::error::$library is not in the image; the host will not link without it"
-            fi
-          done
-          if [ -f /opt/devkitpro/libnx/lib/libdeko3d.a ]; then
-            echo "found libdeko3d"
-          else
-            echo "::error::libdeko3d is not in the image; the host will not link without it"
-          fi
-
-      # The guest needs the NDK, which the image does not carry and the
-      # runner's own SDK is not visible from inside a container. Android
-      # publishes the whole NDK as one archive, so it is fetched and pointed
-      # at with ANDROID_NDK_HOME, which is what configure.py reads.
-      - name: Install the Android NDK
-        run: |
-          curl -fsSL -o ndk.zip https://dl.google.com/android/repository/android-ndk-r26d-linux.zip
-          unzip -q ndk.zip -d /opt
-          rm ndk.zip
-          # ANDROID_NDK_HOME only. Its bin directory is deliberately *not* on
-          # PATH: musl is compiled by clang, and the NDK's clang 17 does not
-          # know -fno-define-target-os-macros, which musl's Apple-target
-          # configuration passes. The runner's own clang (18) does. The build
-          # calls the NDK's llvm-ar and ld.lld by path, so nothing needs it
-          # on PATH.
-          echo "ANDROID_NDK_HOME=/opt/android-ndk-r26d" >> "$GITHUB_ENV"
-
-      - name: Install the build tools
-        run: |
-          # The guest is compiled for arm64_32, which only recent clang knows
-          # well; Debian's clang 14 emits indirect branches the ELF assembler
-          # will not take, so LLVM's own builds are used instead.
-          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key |
-            gpg --dearmor -o /usr/share/keyrings/llvm.gpg
-          echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/bookworm/ llvm-toolchain-bookworm-22 main" \
-            > /etc/apt/sources.list.d/llvm.list
-          apt-get update
-          # (meson, bison, flex, mako and git: UAM, deko3d's shader compiler,
-          # fetched and built into the program for the deko3d renderer -
-          # without them the build leaves it out, and that renderer can
-          # compile no shader on the console)
-          apt-get install -y --no-install-recommends python3 ninja-build ccache clang-22 unzip curl zip gnupg \
-            meson bison flex python3-mako git
-          clang-22 --version | head -1
-          ln -sf /usr/bin/clang-22 /usr/local/bin/clang
-
       - uses: actions/checkout@v4
 
-      # The checkout is the runner's user's and the container runs as root,
-      # so git refuses it after checkout's own step ("dubious ownership"):
-      # the main menu's news (tools/embed_assets.py, the Build N commit's
-      # message) came out empty
-      - name: Let git read the checkout
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: actions/cache@v4
+        with:
+          path: ~/emsdk
+          key: emsdk-${{ env.EMSDK_VERSION }}-${{ hashFiles('port/web/halo_sdl3.py') }}
+
+      - name: Install the toolchain
+        run: |
+          if [ ! -x ~/emsdk/upstream/emscripten/emcc ]; then
+            rm -rf ~/emsdk
+            git clone --depth 1 https://github.com/emscripten-core/emsdk.git ~/emsdk
+            ~/emsdk/emsdk install "$EMSDK_VERSION"
+          fi
+          ~/emsdk/emsdk activate "$EMSDK_VERSION"
+          sudo apt-get update -q
+          sudo apt-get install -y -q ninja-build ccache python3-pytest mosquitto
 
       - uses: actions/cache@v4
         with:
           path: .ccache
-          key: ccache-switch-${{ github.sha }}
-          restore-keys: ccache-switch-
-
-      # musl for the guest, which configure.py fetches
-      - uses: actions/cache@v4
-        with:
-          path: build/android/third_party
-          key: android-third-party-${{ hashFiles('tools/android_build.py') }}
+          key: ccache-web-${{ github.sha }}
+          restore-keys: ccache-web-
 
       - name: Debug
-        run: python3 tools/ci_build.py switch debug
+        run: |
+          source ~/emsdk/emsdk_env.sh
+          python3 tools/ci_build.py web debug
 
       - name: Release
-        run: python3 tools/ci_build.py switch release
+        run: |
+          source ~/emsdk/emsdk_env.sh
+          python3 tools/ci_build.py web release
+
+      - name: Test
+        run: |
+          source ~/emsdk/emsdk_env.sh
+          node --test "port/web/tests/*.test.js"
+          # (the dedicated server's admin page, port/assets/server_ui, against tools/server_sim.py)
+          node --test tools/server_ui_tests/
+          python3 -m pytest -q tools/test_web_build.py
+
+      - name: Test in Chromium and Firefox
+        run: |
+          npm install --no-save --prefix "$RUNNER_TEMP/playwright" playwright@1.58
+          "$RUNNER_TEMP/playwright/node_modules/.bin/playwright" install --with-deps chromium firefox
+          NODE_PATH="$RUNNER_TEMP/playwright/node_modules" node port/web/tests/smoke.mjs dist/halo-web-release
+          NODE_PATH="$RUNNER_TEMP/playwright/node_modules" node port/web/tests/rooms.mjs dist/halo-web-release
+          # (the native builds' WebRTC, port/linux/src/p2p_webrtc.c, with both)
+          NODE_PATH="$RUNNER_TEMP/playwright/node_modules" node port/web/tests/webrtc_native.mjs chromium firefox
 
       - name: Compile cache
         run: ccache --show-stats
 
       - uses: actions/upload-artifact@v4
         with:
-          name: halo-switch-debug
-          path: dist/halo-switch-debug
+          name: halo-web-debug
+          path: dist/halo-web-debug
+          include-hidden-files: true
           retention-days: 3
 
       - uses: actions/upload-artifact@v4
         with:
-          name: halo-switch-release
-          path: dist/halo-switch-release
+          name: halo-web-release
+          path: dist/halo-web-release
+          include-hidden-files: true
           retention-days: 3
 
   ps5:
+    # (the gore build's PS5 title, PPSA99501: only on the ps5 branch, release
+    # configuration only, to keep the run cheap)
+    if: ${{ github.ref == 'refs/heads/ps5' || github.event_name == 'workflow_dispatch' }}
     # The PS5 title (ninja ps5, port/ps5/README.md): the x32 guest and a host
     # built with PS5_Vulkan's toolchain, which is not this repository's and is
     # not copied into it. PS5_Vulkan, its payload SDK fork and PS5_Mesa are
@@ -703,9 +511,6 @@ jobs:
           time env LLVM_CONFIG=/usr/bin/llvm-config-22 bash "$PS5_DEPS/PS5_Vulkan/tools/build-radv.sh" release
           cat "$PS5_DEPS/PS5_Vulkan/.deps/native/radv-release/PROVENANCE.txt"
 
-      - name: Debug
-        run: python3 tools/ci_build.py ps5 debug
-
       - name: Release
         run: python3 tools/ci_build.py ps5 release
 
@@ -717,25 +522,22 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: halo-ps5-debug
-          path: dist/halo-ps5-debug
-          retention-days: 3
-
-      - uses: actions/upload-artifact@v4
-        with:
           name: halo-ps5-release
           path: dist/halo-ps5-release
           retention-days: 3
 
+
   release:
-    # The six builds (Android's, the Switch's and the PS5's) as a release, tagged
-    # build-<number> for a pushed tag v<number>, and marked latest
+    # The eight builds (and the Windows builds' PDBs) as a release, tagged
+    # build-<run number> and marked latest
     # (every file keeps its name from release to release, for the README's
-    # latest/download links); then all but the newest five build-* releases
-    # go, tags and all. Only for a v<number> tag on a commit of main, newer
-    # than the last release, and only when every platform built.
-    needs: [android, switch, ps5]
-    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    # latest/download links), with their SHA256SUMS and, when the
+    # RELEASE_SIGNING_KEY secret is set, its Ed25519 signature by the release
+    # key (SHA256SUMS.sig; the public key is deploy/release-key.pub); then all
+    # but the newest five build-* releases go, tags and all. Only for main,
+    # and only when every platform built.
+    needs: [linux, android, windows, web]
+    if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -746,37 +548,16 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
+      # (tools/ci_build.py and tools/release_sign.sh, the public key, and
+      # halo_port_limits.h, whose network version the release's notes give)
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-
-      - name: Check the tag
-        id: tag
-        run: |
-          version="$GITHUB_REF_NAME"
-          case "$version" in
-            v[0-9]*) number="${version#v}" ;;
-            *) number= ;;
-          esac
-          if ! printf '%s' "$number" | grep -Eq '^[1-9][0-9]*$'; then
-            echo "::error::the tag $version is not v<number> (v94, say): no release"
-            exit 1
-          fi
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "::error::the tag $version is not on a commit of main: no release"
-            exit 1
-          fi
-          if gh release view "build-$number" > /dev/null 2>&1; then
-            echo "::error::build-$number is released already: tag a higher number"
-            exit 1
-          fi
-          last="$(gh release list --limit 100 --json tagName \
-            --jq '[.[] | .tagName | select(startswith("build-")) | ltrimstr("build-") | tonumber] | max // 0')"
-          if [ "$number" -le "$last" ]; then
-            echo "::error::the tag $version is not higher than the last release, build-$last: the installed builds would not update to it"
-            exit 1
-          fi
-          echo "number=$number" >> "$GITHUB_OUTPUT"
+          sparse-checkout: |
+            tools/ci_build.py
+            tools/release_sign.sh
+            deploy/release-key.pub
+            port/linux/include/halo_port_limits.h
+          sparse-checkout-cone-mode: false
 
       - uses: actions/download-artifact@v4
         with:
@@ -788,15 +569,7 @@ jobs:
           mkdir release
           for build in artifacts/*/; do
             name="$(basename "$build")"
-            # the Switch's and the PS5's stored, not deflated: their updaters
-            # (port/switch/host/host_update.c, in every build installed so
-            # far, and port/ps5/host/host_update_ps5.c) unpack stored entries
-            # only
-            case "$name" in
-              halo-switch*|halo-ps5*) level=-0 ;;
-              *) level= ;;
-            esac
-            (cd "$build" && zip $level -qr "$GITHUB_WORKSPACE/release/$name.zip" .)
+            (cd "$build" && zip -qr "$GITHUB_WORKSPACE/release/$name.zip" .)
           done
           python3 tools/ci_build.py sums release
           ls -l release
@@ -819,17 +592,19 @@ jobs:
       - name: Publish
         id: publish
         env:
-          NUMBER: ${{ steps.tag.outputs.number }}
+          MESSAGE: ${{ github.event.head_commit.message }}
           COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          tag="build-$NUMBER"
-          # the notes: the tagged commit's whole message, then where it came from
-          git log -1 --format=%B "$GITHUB_SHA" > notes.md
-          printf '\nCommit: %s\nBuild: %s\n\nThe release builds are for playing; the debug builds stop at the first failed assertion and log it.\n' \
-            "$COMMIT_URL" "$RUN_URL" >> notes.md
-          gh release create "$tag" release/*.zip --target "$GITHUB_SHA" --latest \
-            --title "Build $NUMBER (${GITHUB_SHA:0:7})" --notes-file notes.md
+          tag="build-$GITHUB_RUN_NUMBER"
+          subject="$(printf '%s' "${MESSAGE:-manual run}" | head -n 1)"
+          # (the network version, which a dedicated server's server.auto_update
+          # reads: a new one is started once the game being played is over)
+          network_version="$(sed -n 's/^#define HALO_PORT_NETWORK_VERSION \([0-9]*\).*/\1/p' port/linux/include/halo_port_limits.h)"
+          printf '%s\n\nCommit: %s\nBuild: %s\nNetwork version: %s\n\nThe release builds are for playing; the debug builds stop at the first failed assertion and log it.\n' \
+            "$subject" "$COMMIT_URL" "$RUN_URL" "$network_version" > notes.md
+          gh release create "$tag" release/* --target "$GITHUB_SHA" --latest \
+            --title "Build $GITHUB_RUN_NUMBER (${GITHUB_SHA:0:7})" --notes-file notes.md
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       # The Windows builds' executables and PDBs to Sentry, which turns the
@@ -842,8 +617,6 @@ jobs:
       # for a personal token instead. A failed upload does not stop the
       # release.
       - name: Upload Windows symbols to Sentry
-        # (no Windows builds in this fork: see the top)
-        if: false
         continue-on-error: true
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -878,9 +651,8 @@ jobs:
     # main, only once every platform built and the release is out (the site
     # and the release are one build), and a deployment is never cancelled
     # halfway. The repository's Pages source must be GitHub Actions.
-    # (not in this fork, which builds no web port: if: false)
     needs: [release]
-    if: false
+    if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -951,8 +723,8 @@ jobs:
     # A Discord embed for the run, to the DISCORD_WEBHOOK secret (nothing
     # without it): green when every platform built, red when one did not,
     # with each platform's result, this run's release (main only), and links
-    # to the latest release's builds.
-    needs: [android, switch, ps5, release]
+    # to the latest release's builds and the site.
+    needs: [linux, android, windows, web, release, pages]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -960,9 +732,12 @@ jobs:
       - name: Post to Discord
         env:
           WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          LINUX: ${{ needs.linux.result }}
           ANDROID: ${{ needs.android.result }}
-          SWITCH: ${{ needs.switch.result }}
-          PS5: ${{ needs.ps5.result }}
+          WINDOWS: ${{ needs.windows.result }}
+          WEB: ${{ needs.web.result }}
+          PAGES: ${{ needs.pages.result }}
+          SITE_URL: https://halocombatevolved.com/
           RELEASE_TAG: ${{ needs.release.outputs.tag }}
           SERVER: ${{ github.server_url }}
           REPOSITORY: ${{ github.repository }}
@@ -985,36 +760,36 @@ jobs:
               *) echo "➖ Skipped" ;;
             esac
           }
-          if [ "$ANDROID" = success ] && [ "$SWITCH" = success ] && [ "$PS5" = success ]; then
+          if [ "$LINUX" = success ] && [ "$ANDROID" = success ] && [ "$WINDOWS" = success ] && [ "$WEB" = success ]; then
             title="Build succeeded"; color=5763719
           else
             title="Build failed"; color=15548997
           fi
           latest="$SERVER/$REPOSITORY/releases/latest"
-          downloads="[Android]($latest/download/halo-android-release.zip) · [Switch]($latest/download/halo-switch-release.zip) · [PS5]($latest/download/halo-ps5-release.zip) ([all builds]($latest))"
+          downloads="[Linux]($latest/download/halo-linux-release.zip) · [Windows]($latest/download/halo-windows-release.zip) · [Android]($latest/download/halo-android-release.zip) · [Web]($SITE_URL) ([all builds]($latest))"
           if [ -n "$RELEASE_TAG" ]; then
             release="[$RELEASE_TAG]($SERVER/$REPOSITORY/releases/tag/$RELEASE_TAG)"
             if [ "$PAGES" = success ]; then
               release="$release, on [the site]($SITE_URL)"
             fi
           else
-            release="None (only a pushed v<number> tag makes one)"
+            release="None (only a successful build of main makes one)"
           fi
           subject="$(printf '%s' "${MESSAGE:-manual run}" | head -n 1 | cut -c1-200)"
           jq -n \
             --arg title "$title" --argjson color "$color" --arg url "$RUN_URL" \
             --arg description "[\`${SHA:0:7}\`]($COMMIT_URL) $subject — $ACTOR ($BRANCH)" \
             --arg release "$release" --arg downloads "$downloads" \
-            --arg android "$(status "$ANDROID")" \
-            --arg switch "$(status "$SWITCH")" \
-            --arg ps5 "$(status "$PS5")" \
+            --arg linux "$(status "$LINUX")" --arg windows "$(status "$WINDOWS")" --arg android "$(status "$ANDROID")" \
+            --arg web "$(status "$WEB")" \
             --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             '{embeds: [{
               title: $title, url: $url, color: $color, description: $description, timestamp: $timestamp,
               fields: [
+                {name: "Linux", value: $linux, inline: true},
+                {name: "Windows", value: $windows, inline: true},
                 {name: "Android", value: $android, inline: true},
-                {name: "Switch", value: $switch, inline: true},
-                {name: "PS5", value: $ps5, inline: true},
+                {name: "Web", value: $web, inline: true},
                 {name: "Release", value: $release},
                 {name: "Latest release builds", value: $downloads}
               ]
