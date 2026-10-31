@@ -1868,6 +1868,19 @@ HRESULT WINAPI D3DDevice_GetVisibilityTestResult(DWORD index, UINT *result, ULON
 	return S_OK;
 }
 
+/* ---------- blood (the gore mod's, on vehicles and the Extreme chunks:
+gore.c). The OpenGL renderer shades it (d3d8_gl.c, nv2a_psh.c); this one
+does not yet, so the coverage is taken and not drawn: the gore's decals,
+pieces and bodies are drawn as everywhere */
+
+void xgpu_set_blood(float red, float green, float blue, float amount)
+{
+	(void)red;
+	(void)green;
+	(void)blue;
+	(void)amount;
+}
+
 /* ---------- render and texture stage state */
 
 void D3DFASTCALL D3DDevice_SetRenderState_Simple(DWORD method, DWORD value)
