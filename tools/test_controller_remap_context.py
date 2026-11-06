@@ -132,6 +132,10 @@ static int players_coop_waiting_to_start(long player){return 0;}
 static int coop_spectating(void){return 0;}
 static long coop_spectate_unit(short local){return NONE;}
 static void coop_spectate_camera(struct dead_camera *p){}
+/* gore mod: campaign-ally death camera (coop_allies.c), unused while the test player is alive */
+static long director_port_dead_cameras;
+static long coop_allies_spectate_unit(short local){return NONE;}
+static int coop_allies_spectate_changed(short local){return 0;}
 ''' + function(director, 'director_choose_camera_game') + r'''
 int main(void) {
  int cycle;

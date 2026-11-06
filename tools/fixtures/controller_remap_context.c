@@ -66,3 +66,7 @@ static int passenger_camera_enabled(short p){return 0;}
 #define director_process_variables(p,f,w) ((void)0)
 #define director_inhibit_input(p) ((void)0)
 #define director_inhibit_facing(p) ((void)0)
+/* gore mod: director_update_controls calls these (death camera, camera
+switch). The tests cycle a living player's camera, as upstream does. */
+static int director_port_dead_view(short local){(void)local;return 0;}
+static int director_port_switch_allowed(short local, int held){(void)local;(void)held;return 1;}
