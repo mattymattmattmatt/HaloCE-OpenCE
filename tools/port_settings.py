@@ -306,6 +306,29 @@ SCREENS = {
     },
 }
 
+# the controller's sticks' dead zones (port/linux/src/xinput_sdl.c's
+# halo_stick_dead_range): config.toml's, for every profile, a screen of their
+# own (a category, as Video Setup's), after the controller's screen's others
+# (the game's own, about 27%, first, then 0% to 50% in steps of 5)
+DEAD_ZONES = [("DEFAULT", "-1")] + [(f"{percent}%", str(percent)) for percent in range(0, 51, 5)]
+SCREENS["gamepad_setup"]["categories"] = SCREENS["gamepad_setup"].get("categories", []) + [
+    ("STICK DEAD ZONES", "gamepad_setup/dead_zones",
+     "How far each stick moves before it does\nanything."),
+]
+# (twelve places with GYRO AIMING: a 23px step puts the last at 326, its
+# bottom at 354, above the help at 358 and clear of the buttons at 414.
+# Upstream's 25 fits the eleven places without that row.)
+SCREENS["gamepad_setup"].update({"spacing": 23, "help_top": 358, "help_height": 54})
+SCREENS["gamepad_setup/dead_zones"] = {
+    "screen": "dead_zone_settings_screen", "header": SCREENS["gamepad_setup"]["header"], "spacing": 30,
+    "rows": [
+        ("LEFT STICK:", "input.left_stick_dead_zone", DEAD_ZONES,
+         "How far the left stick moves before you move.\nDefault: the game's own, 27%.", None),
+        ("RIGHT STICK:", "input.right_stick_dead_zone", DEAD_ZONES,
+         "How far the right stick moves before the view\nturns. Default: the game's own, 27%.", None),
+    ],
+}
+
 # Video Setup's categories open ordinary settings screens. Each has the same
 # pending edits, Defaults, OK and Cancel as the other settings screens.
 _video = SCREENS["video_settings"]
@@ -1435,6 +1458,8 @@ BROWSER_WORDS = [
     "The host refused: your Discord account is in the game",
     "The host blocks VPNs: link Discord with its master (Settings > Network Setup)",
     "The host refused: too many players from your address",
+    # (the line while Refresh's pings come in)
+    "Refreshing...",
 ]
 
 
