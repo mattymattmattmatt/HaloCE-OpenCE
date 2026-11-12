@@ -28,7 +28,8 @@ def test_case(case):
 
 @pytest.mark.parametrize('fault,case', [
     (('row->vertical_offset = y;', 'row->vertical_offset = y; row->child->vertical_offset = y;'), 'layout'),
-    (('if (row->visible && !strncmp(row->name, "op_coop_", 8))', 'if (!strncmp(row->name, "op_coop_", 8))'), 'layout'),
+    (('if (row->visible && !strncmp(row->name, "op_coop_", 8))\n\t\t\t\t{',
+      'if (!strncmp(row->name, "op_coop_", 8))\n\t\t\t\t{'), 'layout'),
     (('index += spinner->parameters.list.number_of_items;',
       'if (row->visible) index += spinner->parameters.list.number_of_items;'), 'help'),
     (('struct widget_instance *pickups = named(list, "coop_extra_pickups_spinner", 0);',
@@ -38,6 +39,14 @@ def test_case(case):
 ])
 def test_negative_control(fault, case):
     status, output = run(build('coop_scaling_menu', generated(fault)), case)
+    assert status == CHECK_FAILED, output
+
+
+@pytest.mark.parametrize('control,fault', [
+    ('fixed-thirty', ('spacing = MIN(30, (341 - 1 - 73 - 28) / (visible - 1));', 'spacing = 30;')),
+])
+def test_riding_negative_control(control, fault):
+    status, output = run(build('coop_scaling_menu', generated(fault)), 'layout')
     assert status == CHECK_FAILED, output
 
 
