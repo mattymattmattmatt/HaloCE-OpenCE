@@ -17,6 +17,13 @@ def buildNumber = buildNumberText.isInteger() ? buildNumberText.toInteger() : 0
 // debug key of the computer that builds
 def signingKey = System.getenv("HALO_ANDROID_KEYSTORE")
 
+// the version code, which must grow for an update to install over the APK
+// before (signed with the same key): the workflow's run number
+// (.github/workflows/build.yml, HALO_ANDROID_VERSION_CODE) when it gives one,
+// else the build number; a build of neither is 1
+def versionCodeText = System.getenv("HALO_ANDROID_VERSION_CODE") ?: ""
+def versionCodeGiven = versionCodeText.isInteger() ? versionCodeText.toInteger() : 0
+
 android {
     namespace "com.halo.decomp"
     compileSdk 35
@@ -25,7 +32,7 @@ android {
         applicationId "com.halo.decomp"
         minSdk 28
         targetSdk 35
-        versionCode Math.max(1, buildNumber)
+        versionCode Math.max(1, versionCodeGiven > 0 ? versionCodeGiven : buildNumber)
         versionName buildNumber > 0 ? "build " + buildNumber : "1.0"
         buildConfigField "int", "HALO_BUILD_NUMBER", "${buildNumber}"
         ndk {
