@@ -1205,8 +1205,9 @@ boolean cache_files_give_time_to_precache(
 	if (!map_name || !map_name[0])
 		return FALSE;
 	/* port: a map being downloaded (port/linux/game/map_share.c) is not
-	there yet: precached once it is */
-	if (map_share_downloading(map_name))
+	there yet: precached once it is. A failed or incomplete share must not
+	be taken for a damaged disc. */
+	if (map_share_downloading(map_name) || map_share_blocks_load(map_name))
 		return FALSE;
 	if (cache_files_precache_map_loaded(map_name))
 	{
@@ -1226,7 +1227,12 @@ boolean cache_files_give_time_to_precache(
 			short status = cache_files_precache_map_status(&progress);
 
 			if (status == 2)
-				display_error_damaged_media();
+			{
+				if (map_share_blocks_load(map_name))
+					error(_error_silent, "map sharing: not treating a missing shared map as damaged media");
+				else
+					display_error_damaged_media();
+			}
 			else if (status == 1)
 				cache_files_precache_map_end();
 		}
@@ -1234,7 +1240,12 @@ boolean cache_files_give_time_to_precache(
 		{
 			cache_files_precache_set_priority(0);
 			if (!cache_files_precache_map_begin(map_name, FALSE))
-				display_error_damaged_media();
+			{
+				if (map_share_blocks_load(map_name))
+					error(_error_silent, "map sharing: not treating a missing shared map as damaged media");
+				else
+					display_error_damaged_media();
+			}
 		}
 	}
 

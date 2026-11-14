@@ -8646,51 +8646,86 @@ static boolean ui_check_for_pause_game(
 				}
 				break;
 			case 2:
-				if (widget_globals.active_widgets[controller_index])
-				{
-					if (game_time_get_paused() == TRUE)
-						ui_widgets_close_all();
-				}
-				else if (!game_time_get_paused())
-				{
-					if (!ui_widget_load_by_name_or_tag(
-						"ui\\shell\\solo_game\\pause_game\\pause_game_split_screen",
-						NONE,
-						NULL,
-						controller_index,
-						NONE,
-						NONE,
-						NONE))
-					{
-						error(
-							_error_silent,
-							"failed to load split screen pause game window");
-					}
-				}
-				break;
 			default:
-				error(
-					_error_silent,
-					"the ui seems to be confused... assuming you are playing full-screen single player?");
-				if (!ui_widgets_active())
+				/* port: a multiplayer map in local split-screen (New Game's
+				MULTIPLAYER maps) has no campaign split-screen pause tag. Use
+				the multiplayer 2p/4p widgets (LEAVE GAME goes to the main
+				menu: network_game_remove_local_player), and let Start close
+				them even when time is not paused. */
 				{
-					if (!ui_widget_load_by_name_or_tag(
-						"ui\\shell\\solo_game\\pause_game\\pause_game",
-						NONE,
-						NULL,
-						controller_index,
-						NONE,
-						NONE,
-						NONE))
+					char const *campaign_name = local_player_count == 2 ?
+						"ui\\shell\\solo_game\\pause_game\\pause_game_split_screen" :
+						"ui\\shell\\solo_game\\pause_game\\pause_game";
+					char const *mp_name = (local_player_count <= 2 ||
+						(local_player_count == 3 && pressed_by_first_local_player == TRUE)) ?
+						"ui\\shell\\multiplayer_game\\pause_game\\2p_pause_game" :
+						"ui\\shell\\multiplayer_game\\pause_game\\4p_pause_game";
+					boolean campaign_missing =
+						tag_loaded(UI_WIDGET_DEFINITION_TAG, campaign_name) == NONE;
+
+					if (widget_globals.active_widgets[controller_index])
 					{
-						error(
-							_error_silent,
-							"failed to load full screen pause game window");
+						if (game_time_get_paused() == TRUE)
+							ui_widgets_close_all();
+						else if (campaign_missing)
+							ui_widget_delete(widget_globals.active_widgets[controller_index]);
 					}
-				}
-				else
-				{
-					ui_widgets_close_all();
+					else if (campaign_missing &&
+						tag_loaded(UI_WIDGET_DEFINITION_TAG, mp_name) != NONE)
+					{
+						if (!ui_widget_load_by_name_or_tag(
+							mp_name,
+							NONE,
+							NULL,
+							controller_index,
+							NONE,
+							NONE,
+							NONE))
+						{
+							error(
+								_error_silent,
+								"failed to load multiplayer pause game window");
+						}
+					}
+					else if (local_player_count == 2)
+					{
+						if (!game_time_get_paused())
+						{
+							if (!ui_widget_load_by_name_or_tag(
+								"ui\\shell\\solo_game\\pause_game\\pause_game_split_screen",
+								NONE,
+								NULL,
+								controller_index,
+								NONE,
+								NONE,
+								NONE))
+							{
+								error(
+									_error_silent,
+									"failed to load split screen pause game window");
+							}
+						}
+					}
+					else if (!ui_widgets_active())
+					{
+						if (!ui_widget_load_by_name_or_tag(
+							"ui\\shell\\solo_game\\pause_game\\pause_game",
+							NONE,
+							NULL,
+							controller_index,
+							NONE,
+							NONE,
+							NONE))
+						{
+							error(
+								_error_silent,
+								"failed to load full screen pause game window");
+						}
+					}
+					else
+					{
+						ui_widgets_close_all();
+					}
 				}
 				break;
 			}

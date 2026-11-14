@@ -1709,14 +1709,20 @@ starts no machine before its download is done; one of before may. */
 boolean network_game_client_begin_game(
 	struct network_game_client *client)
 {
-	if (client && map_share_downloading(client->game.map.name))
+	if (client && !map_share_map_ready(client->game.map.name))
 	{
-		network_game_client_start_pending = TRUE;
-		csstrncpy(network_game_client_start_pending_map, client->game.map.name,
-			sizeof(network_game_client_start_pending_map) - 1);
-		network_game_client_start_pending_map[sizeof(network_game_client_start_pending_map) - 1] = 0;
-		network_game_client_start_pending_games = client->game.number_of_games_played;
-		network_event("the host started the game while its map is being downloaded: joining it once the map is there");
+		if (map_share_blocks_load(client->game.map.name) ||
+			map_share_downloading(client->game.map.name))
+		{
+			network_game_client_start_pending = TRUE;
+			csstrncpy(network_game_client_start_pending_map, client->game.map.name,
+				sizeof(network_game_client_start_pending_map) - 1);
+			network_game_client_start_pending_map[sizeof(network_game_client_start_pending_map) - 1] = 0;
+			network_game_client_start_pending_games = client->game.number_of_games_played;
+			network_event("the host started the game while its map is being downloaded or is not playable: joining it once the map is there");
+			return TRUE;
+		}
+		network_event("the host started the game but the map is not playable: not loading it");
 		return TRUE;
 	}
 	return network_game_client_game_has_started(client);
@@ -3103,18 +3109,28 @@ static boolean network_game_client_idle_pregame(
 			/* port: a start put off while the map was downloaded (map
 			sharing), once the download is over: the game loaded if the map
 			is there (a failed download leaves the game: map_share.c) */
-			else if (network_game_client_start_pending && client->state == _network_game_client_state_pregame &&
-				!map_share_downloading(client->game.map.name))
+			else if (network_game_client_start_pending && client->state == _network_game_client_state_pregame)
 			{
-				network_game_client_start_pending = FALSE;
 				if (csstrcmp(client->game.map.name, network_game_client_start_pending_map) ||
 					client->game.number_of_games_played != network_game_client_start_pending_games)
 				{
+					network_game_client_start_pending = FALSE;
 					network_event("the game put off is over: waiting for the host's next start");
 				}
-				else if (!custom_edition_level_name(client->game.map.name) ||
-					custom_edition_cache_playable(client->game.map.name))
+				else if (!map_share_map_ready(client->game.map.name))
 				{
+					/* stay pending while a share still blocks the load; a
+					failed share leaves the game itself (map_share.c) */
+					if (!map_share_blocks_load(client->game.map.name) &&
+						!map_share_downloading(client->game.map.name))
+					{
+						network_game_client_start_pending = FALSE;
+						network_event("the map is not playable: not joining the game the host started");
+					}
+				}
+				else
+				{
+					network_game_client_start_pending = FALSE;
 					network_event("the map is downloaded: joining the game the host started");
 					if (!network_game_client_game_has_started(client))
 						network_event("network_game_client_game_has_started() failed");

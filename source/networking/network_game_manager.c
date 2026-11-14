@@ -95,6 +95,7 @@ symbols in this file:
 #include "text/unicode.h"
 #include "mcc_main.h" /* port: port/linux/game/mcc_main.c */
 #include "custom_edition_cache.h" /* port: port/linux/game/custom_edition_cache.c */
+#include "map_share.h" /* port: port/linux/game/map_share.c */
 
 #include <xtl.h>
 
@@ -790,6 +791,16 @@ boolean network_game_create_game_objects(
 				0x17F,
 				!"bad game connection");
 			break;
+	}
+
+	/* port: a share download in progress or a failed/incomplete share must
+	not enter a blocking precache or the damaged-disc death loop */
+	if (map_share_blocks_load(options.map_name))
+	{
+		error(_error_silent,
+			"map sharing: not creating the game; %s is still being downloaded or is not playable",
+			options.map_name);
+		return FALSE;
 	}
 
 	game_precache_new_map(options.map_name, TRUE);
