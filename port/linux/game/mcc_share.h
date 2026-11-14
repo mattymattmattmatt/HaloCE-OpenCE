@@ -39,4 +39,6 @@ int mcc_share_game_has_workshop(void);
 void mcc_share_game_prompt_text(wchar_t text[512]);
 void mcc_share_game_prompt_closed(void);
 void mcc_share_game_prompt_action(int action);
+/* cancel an MCC package download in progress and leave with a main-menu error */
+void mcc_share_game_cancel_download(void);
 #endif
