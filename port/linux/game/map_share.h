@@ -130,6 +130,16 @@ boolean map_share_game_map_version(
 map no time to precache until they are) */
 boolean map_share_downloading(
 	char const *level_name);
+/* TRUE if this machine must not precache or load `level_name` (or any map,
+when it is NULL): a share download is in progress, or one failed or did not
+leave a playable map. Callers must not display_error_damaged_media or enter
+a blocking precache. */
+boolean map_share_blocks_load(
+	char const *level_name);
+/* TRUE when the map can be precached and loaded: not blocked, and a Custom
+Edition or MCC map is actually playable on this machine. */
+boolean map_share_map_ready(
+	char const *level_name);
 /* whether this machine's players wait to join the host's game: until its
 settings name the map (a game in progress would start them at once), and
 for a game in progress until the map is downloaded (network_client_manager.c) */
