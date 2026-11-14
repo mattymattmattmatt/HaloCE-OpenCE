@@ -193,6 +193,7 @@ symbols in this file:
 #include "custom_edition_cache.h" /* port: port/linux/game/custom_edition_cache.c */
 #include "mcc_cache.h" /* port: port/linux/game/mcc_cache.c */
 #include "mcc_share.h" /* port: port/linux/game/mcc_share.c */
+#include "map_share.h" /* port: port/linux/game/map_share.c */
 
 #include <xtl.h>
 
@@ -603,6 +604,15 @@ boolean cache_files_precache_map_begin(
 	boolean copy_map)
 {
 	const char *cache_map_name = tag_name_strip_path(map_name);
+
+	/* port: never the damaged-disc death loop for a share download or a
+	failed/incomplete share, even when the caller asked to copy the map */
+	if (map_share_blocks_load(map_name))
+	{
+		error(_error_silent, "map sharing: not beginning a precache of %s (download in progress or incomplete)",
+			map_name ? map_name : "");
+		return FALSE;
+	}
 
 	if (mcc_level_name(map_name))
 	{

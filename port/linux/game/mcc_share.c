@@ -393,6 +393,19 @@ static void mcc_share_release_validation(void)
     mcc_share_validation_token=0;
 }
 
+static void mcc_share_leave_with_error(
+	char const *message)
+{
+	wchar_t text[512];
+	unsigned i;
+
+	for (i = 0; message && message[i] && i < 511; i++)
+		text[i] = (wchar_t)(unsigned char)message[i];
+	text[i] = 0;
+	display_error_text_when_main_menu_loaded(text);
+	network_game_abort();
+}
+
 static void mcc_share_finished(
 	void *user,
 	int ok,
@@ -404,10 +417,11 @@ static void mcc_share_finished(
 	if (!ok)
 	{
 		error(_error_silent, "mcc share: the download of %s failed: %s", mcc_share_globals.level, message);
-        mcc_share_prompt_download=FALSE;
-        snprintf(mcc_share_prompt_message,sizeof(mcc_share_prompt_message),"%s",message);
-        mcc_share_prompt_pending=TRUE;
-        return;
+		mcc_share_prompt_download=FALSE;
+		snprintf(mcc_share_prompt_message,sizeof(mcc_share_prompt_message),"%s",message);
+		mcc_share_prompt_pending=TRUE;
+		mcc_share_leave_with_error(message && message[0] ? message : "The map download failed.");
+		return;
 	}
 	error(_error_silent, "mcc share: installed %s from the host (credit: %s)", mcc_share_globals.level,
 		message[0] ? message : "none given");
@@ -664,6 +678,17 @@ static void mcc_share_host_lifecycle(void)
 
 /* ---------- every frame */
 
+void mcc_share_game_cancel_download(
+	void)
+{
+	if (!mcc_share_ready || mcc_share_prompt_pending || mcc_share_prompt_visible ||
+		!mcc_share_client_busy(&mcc_share_globals))
+		return;
+	error(_error_silent, "mcc share: the download of %s stopped: cancelled", mcc_share_globals.level);
+	mcc_share_client_cancel(&mcc_share_globals);
+	mcc_share_leave_with_error("The map download was cancelled.");
+}
+
 void mcc_share_game_update(
 	void)
 {
@@ -775,11 +800,11 @@ void mcc_share_game_render(
 	name = name ? name + 1 : mcc_share_globals.level;
 	percent = mcc_share_client_percent(&mcc_share_globals);
 	if (mcc_share_globals.state==MCC_SHARE_CLIENT_VERIFYING)
-        snprintf(mcc_share_text,sizeof(mcc_share_text),"Verifying the downloaded map %s...",name);
+        snprintf(mcc_share_text,sizeof(mcc_share_text),"Verifying the downloaded map %s... (Esc to cancel)",name);
 	else if (percent <= 0)
-		snprintf(mcc_share_text, sizeof(mcc_share_text), "Asking the host for the map %s...", name);
+		snprintf(mcc_share_text, sizeof(mcc_share_text), "Asking the host for the map %s... (Esc to cancel)", name);
 	else
-		snprintf(mcc_share_text, sizeof(mcc_share_text), "Getting the map %s from the host: %d%%", name, percent);
+		snprintf(mcc_share_text, sizeof(mcc_share_text), "Getting the map %s from the host: %d%% (Esc to cancel)", name, percent);
 	bounds = render.camera.window_bounds;
 	offset_rectangle2d(&bounds, -render.camera.viewport_bounds.x0, -render.camera.viewport_bounds.y0);
 	bounds.y0 = 24;
