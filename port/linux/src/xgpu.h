@@ -62,6 +62,11 @@ changes GL state behind it (binding a texture to upload it, deleting one)
 must call this afterwards. */
 
 void xgpu_gl_state_invalidate(void);
+/* Disable GL_SCISSOR_TEST and set the scissor to the whole destination
+(width x height), so a blit, resolve, post-process pass or window present
+cannot be clipped to a leftover split-screen pane. A driver that ignores
+the disable still has a full rectangle. Width or height <= 0 only disables. */
+void xgpu_scissor_reset(GLint width, GLint height);
 /* whether there is an OpenGL context (not with debug.null_renderer, a
 dedicated server's): textures are made only then */
 int xgpu_gl_ready(void);

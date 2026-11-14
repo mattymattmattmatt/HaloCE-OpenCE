@@ -662,6 +662,7 @@ pass is found: SMAA's passes write only where there is an edge */
 static void intermediate_clear(GLuint framebuffer)
 {
 	glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+	xgpu_scissor_reset((GLint)post.width, (GLint)post.height);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 	glClear(GL_COLOR_BUFFER_BIT);
@@ -704,7 +705,9 @@ static BOOL programs_prepare(int set, int first, int last)
 /* the state a pass draws in, whatever the game's was */
 static void pass_state(void)
 {
-	glDisable(GL_SCISSOR_TEST);
+	/* full-target scissor as well as disable: a leftover pane scissor would
+	clip the blit that copies the window, or the pass's triangle */
+	xgpu_scissor_reset(post.width ? (GLint)post.width : 0, post.height ? (GLint)post.height : 0);
 	glDisable(GL_DEPTH_TEST);
 	glDisable(GL_STENCIL_TEST);
 	glDisable(GL_BLEND);
@@ -722,6 +725,7 @@ static void color_copy(GLuint framebuffer, const GLint corners[4])
 {
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, post.color_framebuffer);
+	xgpu_scissor_reset((GLint)post.width, (GLint)post.height);
 	glBlitFramebuffer(corners[0], corners[1], corners[2], corners[3], corners[0], corners[1], corners[2], corners[3],
 		GL_COLOR_BUFFER_BIT, GL_NEAREST);
 }
@@ -841,6 +845,9 @@ BOOL xgpu_post_present(GLuint texture, int x, int y, int width, int height, floa
 	rectangle[2] = 1.0f / (float)width;
 	rectangle[3] = 1.0f / (float)height;
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	/* the destination is the window (letterbox is centred, so this is
+	the drawable); do not leave a pane scissor on it */
+	xgpu_scissor_reset(x + width + x, y + height + y);
 	glViewport(x, y, width, height);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	texture_bind(0, texture);
@@ -861,6 +868,7 @@ BOOL xgpu_post_fill(const GLint corners[4], const float color[3], const float ri
 		return TRUE;
 	pass_state();
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	xgpu_scissor_reset(corners[2] + corners[0], corners[3] + corners[1]);
 	glViewport(corners[0], corners[1], corners[2] - corners[0], corners[3] - corners[1]);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glUseProgram(post.programs[_post_program_fill]);

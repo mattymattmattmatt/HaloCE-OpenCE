@@ -60,6 +60,12 @@ static void xgpu_gl_state_invalidate(void) { }
 #include "cache.inc"
 
 static void glDisable(GLenum state) { }
+static void xgpu_scissor_reset(GLint width, GLint height)
+{
+    (void)width;
+    (void)height;
+    glDisable(GL_SCISSOR_TEST);
+}
 static void glColorMask(int r, int g, int b, int a) { }
 static void glClearColor(float r, float g, float b, float a) { }
 static void glClear(GLenum mask)
@@ -93,7 +99,7 @@ static void present(GLuint texture, int floating)
     struct test_buffer { struct { GLuint texture; GLenum format; int gl_width, gl_height; } target; } buffer;
     struct test_buffer *back_buffer = &buffer;
     struct { int float_window; float sdr_white; } hdr = { 0, 1.0f };
-    int x = 0, y = 0, width = 640, height = 480;
+    int x = 0, y = 0, width = 640, height = 480, window_width = 640, window_height = 480;
 
     buffer.target.texture = expected_texture = texture;
     buffer.target.format = floating ? GL_RGBA16F : 0;

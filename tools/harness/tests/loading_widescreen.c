@@ -85,6 +85,7 @@ static void glBlitFramebuffer(int x0,int y0,int x1,int y1,int dx0,int dy0,int dx
 }
 static void gl_check_errors(char const *label) {(void)label;}
 static void xgpu_gl_state_invalidate(void) { }
+static void xgpu_scissor_reset(GLint width, GLint height) {(void)width;(void)height;}
 /* CAPTURE */
 static struct trace render(float progress) {
     memset(&trace,0,sizeof(trace));wobble_phase=0;last_t=progress;
