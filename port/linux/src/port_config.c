@@ -326,14 +326,15 @@ static const struct config_setting config_settings[] =
 		"game starts." },
 	{ "display.intel_clear_fix", _config_string, "\"auto\"", "HALO_INTEL_CLEAR_FIX", _environment_value,
 		_platform_desktop,
-		"How split-screen pane clears treat a driver whose glClear scissor\n"
-		"origin disagrees with draws (Intel's Windows driver with\n"
-		"glClipControl upper-left). \"auto\" (the default) runs a start-up\n"
-		"self-test on an offscreen target and flips only if the clear lands\n"
-		"on the wrong row; if the test cannot run, it follows the renderer\n"
-		"name (Intel and not Mesa). \"off\" or \"0\" never flips; \"on\" or \"1\"\n"
-		"always flips. The path chosen is written to the log. Taken up when\n"
-		"the game starts." },
+		"How split-screen pane clears are drawn when a driver may not honour\n"
+		"glClear's scissor origin (Intel's Windows driver with\n"
+		"glClipControl upper-left). \"auto\" (the default) uses a viewport-\n"
+		"filling triangle for those clears, and clips draws by the viewport\n"
+		"alone, on Intel Windows (not Mesa), or when a start-up self-test of\n"
+		"the window's back buffer shows glClear painting the wrong row.\n"
+		"\"on\" or \"1\" always uses that path; \"off\" or \"0\" uses glClear\n"
+		"and a scissor, with no Y flip. The path chosen is written to the\n"
+		"log (GPU: split-pane clears:). Taken up when the game starts." },
 	{ "display.hdr", _config_boolean, "false", "HALO_HDR", _environment_value, _platform_all,
 		"Draw the 3D view into a floating-point back buffer, which keeps what\n"
 		"the game's additive effects (explosions, plasma, lights, the sun's\n"
