@@ -997,6 +997,11 @@ struct framebuffer_entry
 static struct render_target_entry *render_targets;
 static struct framebuffer_entry *framebuffers;
 
+/* 1 when this driver's glClear reads the scissor from the lower left,
+while draws use the upper-left origin glClipControl set. Chosen at
+start (probe_clear_scissor_origin). */
+static int clear_scissor_lower_left;
+
 static void render_targets_evict(void);
 
 /* ---------- the device */
@@ -2450,6 +2455,182 @@ static void visibility_results_initialize(void);
 static BOOL visibility_readback_gl_ok(const char *phase);
 #endif
 
+/* A 2-row offscreen clear with the scissor at upper-left y 0: whether
+this driver's glClear paints the same row draws would (0), the other
+row (1), or the probe could not tell (-1). glReadPixels y 0 is the
+bottom of the framebuffer, independent of glClipControl (OpenGL 4.5).
+OpenGL ES has no clip control; both clears and draws are lower-left,
+so the probe is not run. */
+#ifndef HALO_GLES
+#define CLEAR_SCISSOR_PROBE_WIDTH 8
+#define CLEAR_SCISSOR_PROBE_HEIGHT 2
+
+static int probe_clear_scissor_origin(void)
+{
+	GLuint texture = 0, framebuffer = 0;
+	unsigned char pixels[CLEAR_SCISSOR_PROBE_WIDTH * CLEAR_SCISSOR_PROBE_HEIGHT * 4];
+	GLint prev_draw = 0, prev_read = 0, prev_texture = 0, prev_pack = 4;
+	GLint prev_viewport[4], prev_scissor[4], prev_mask[4];
+	GLfloat prev_clear[4];
+	GLint prev_scissor_test;
+	GLsizei width = CLEAR_SCISSOR_PROBE_WIDTH, height = CLEAR_SCISSOR_PROBE_HEIGHT;
+	int top_red, bottom_red, result = -1;
+	unsigned row;
+
+	while (glGetError() != GL_NO_ERROR)
+		;
+	glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prev_draw);
+	glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prev_read);
+	glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev_texture);
+	glGetIntegerv(GL_PACK_ALIGNMENT, &prev_pack);
+	glGetIntegerv(GL_VIEWPORT, prev_viewport);
+	glGetIntegerv(GL_SCISSOR_BOX, prev_scissor);
+	prev_scissor_test = glIsEnabled(GL_SCISSOR_TEST) ? 1 : 0;
+	glGetIntegerv(GL_COLOR_WRITEMASK, prev_mask);
+	glGetFloatv(GL_COLOR_CLEAR_VALUE, prev_clear);
+
+	glGenTextures(1, &texture);
+	glBindTexture(GL_TEXTURE_2D, texture);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+	glGenFramebuffers(1, &framebuffer);
+	glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+	{
+		platform_log("GPU: split-pane clears: self-test framebuffer was incomplete");
+		goto restore;
+	}
+
+	glViewport(0, 0, width, height);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glDisable(GL_SCISSOR_TEST);
+	glClearColor(0.f, 0.f, 0.f, 1.f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	/* enable first: the same order draws will use, and the order Intel
+	needs so a scissor that starts at y 0 is not dropped */
+	glEnable(GL_SCISSOR_TEST);
+	glScissor(0, 0, width, 1);
+	glClearColor(1.f, 0.f, 0.f, 1.f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glDisable(GL_SCISSOR_TEST);
+	glPixelStorei(GL_PACK_ALIGNMENT, 1);
+	memset(pixels, 0, sizeof(pixels));
+	glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+	if (glGetError() != GL_NO_ERROR)
+	{
+		platform_log("GPU: split-pane clears: self-test could not read the probe");
+		goto restore;
+	}
+
+	/* row 0 in this buffer is the bottom image row; row 1 is the top */
+	bottom_red = 0;
+	top_red = 0;
+	for (row = 0; row < (unsigned)width; row++)
+	{
+		unsigned char *bottom = pixels + row * 4;
+		unsigned char *top = pixels + (unsigned)width * 4 + row * 4;
+
+		if (bottom[0] > 128 && bottom[1] < 64 && bottom[2] < 64)
+			bottom_red++;
+		if (top[0] > 128 && top[1] < 64 && top[2] < 64)
+			top_red++;
+	}
+	if (top_red == width && bottom_red == 0)
+		result = 0;
+	else if (bottom_red == width && top_red == 0)
+		result = 1;
+	else
+		platform_log("GPU: split-pane clears: self-test was inconclusive (top %d/%d red, bottom %d/%d red)",
+			top_red, width, bottom_red, width);
+
+restore:
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)prev_draw);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)prev_read);
+	glBindTexture(GL_TEXTURE_2D, (GLuint)prev_texture);
+	if (framebuffer)
+		glDeleteFramebuffers(1, &framebuffer);
+	if (texture)
+		glDeleteTextures(1, &texture);
+	glViewport(prev_viewport[0], prev_viewport[1], prev_viewport[2], prev_viewport[3]);
+	glScissor(prev_scissor[0], prev_scissor[1], prev_scissor[2], prev_scissor[3]);
+	if (prev_scissor_test)
+		glEnable(GL_SCISSOR_TEST);
+	else
+		glDisable(GL_SCISSOR_TEST);
+	glColorMask((GLboolean)prev_mask[0], (GLboolean)prev_mask[1], (GLboolean)prev_mask[2],
+		(GLboolean)prev_mask[3]);
+	glClearColor(prev_clear[0], prev_clear[1], prev_clear[2], prev_clear[3]);
+	glPixelStorei(GL_PACK_ALIGNMENT, prev_pack);
+	while (glGetError() != GL_NO_ERROR)
+		;
+	return result;
+}
+#endif
+
+#ifndef HALO_GLES
+/* display.intel_clear_fix / HALO_INTEL_CLEAR_FIX: "auto" (default), "off"/"0",
+or "on"/"1". auto uses the self-test, and only if that cannot run, the
+Intel Windows (not Mesa) renderer name. */
+static int intel_clear_fix_preference(void)
+{
+	const char *value = config_string("display.intel_clear_fix");
+
+	if (!value || !*value || SDL_strcasecmp(value, "auto") == 0)
+		return -1;
+	if (SDL_strcasecmp(value, "off") == 0 || SDL_strcasecmp(value, "0") == 0 ||
+		SDL_strcasecmp(value, "false") == 0 || SDL_strcasecmp(value, "no") == 0)
+		return 0;
+	if (SDL_strcasecmp(value, "on") == 0 || SDL_strcasecmp(value, "1") == 0 ||
+		SDL_strcasecmp(value, "true") == 0 || SDL_strcasecmp(value, "yes") == 0)
+		return 1;
+	platform_log("GPU: display.intel_clear_fix \"%s\" is not auto, off or on: auto", value);
+	return -1;
+}
+
+#endif
+
+static void choose_clear_scissor_origin(const char *renderer)
+{
+#ifdef HALO_GLES
+	clear_scissor_lower_left = 0;
+	platform_log("GPU: split-pane clears: no Y flip; OpenGL ES has no clip-control self-test");
+	if (renderer && *renderer)
+		platform_log("GPU: split-pane clears: renderer \"%s\"", renderer);
+#else
+	int preference = intel_clear_fix_preference();
+	int probed = probe_clear_scissor_origin();
+	const char *probe_text;
+	int intel_windows = renderer && strstr(renderer, "Intel") && !strstr(renderer, "Mesa");
+
+	if (probed == 0)
+		probe_text = "self-test: glClear scissor matches upper-left draws";
+	else if (probed == 1)
+		probe_text = "self-test: glClear scissor uses lower-left origin";
+	else
+		probe_text = "self-test could not run";
+	if (preference == 0)
+		clear_scissor_lower_left = 0;
+	else if (preference == 1)
+		clear_scissor_lower_left = 1;
+	else if (probed >= 0)
+		clear_scissor_lower_left = probed;
+	else
+		clear_scissor_lower_left = intel_windows ? 1 : 0;
+	platform_log("GPU: split-pane clears: %s; %s%s",
+		clear_scissor_lower_left ? "flipping clear Y to match draws" : "no Y flip",
+		probe_text,
+		preference == 0 ? "; display.intel_clear_fix=off (forced)" :
+			preference == 1 ? "; display.intel_clear_fix=on (forced)" :
+			probed < 0 && clear_scissor_lower_left ? "; auto fell back to the Intel Windows heuristic" :
+			probed < 0 ? "; auto left clears unflipped" : "");
+	if (renderer && *renderer)
+		platform_log("GPU: split-pane clears: renderer \"%s\"", renderer);
+#endif
+}
+
+
 static void gl_initialize(void)
 {
 	GLint major = 0, minor = 0;
@@ -2606,6 +2787,7 @@ static void gl_initialize(void)
 		glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
 	}
 #endif
+	choose_clear_scissor_origin((const char *)glGetString(GL_RENDERER));
 	for (index = 0; index < XGPU_VERTEX_ATTRIBUTE_COUNT; index++)
 	{
 		device.attributes[index][3] = 1.0f;
@@ -4706,12 +4888,19 @@ static void apply_raster_state(BOOL has_depth)
 	what keeps a split-screen window's geometry from bleeding across the divider */
 	/* (glScissor takes the corner and the size, as glViewport does) */
 	memcpy(scissor, viewport, sizeof(scissor));
-	if (memcmp(gl_state.scissor, scissor, sizeof(scissor)))
+	/* Intel's Windows driver drops glScissor while the test is disabled when
+	the rectangle starts at y 0. That is the top pane of a split: the clear
+	set its scissor with the test on, so the fog color shows, and every draw
+	after the clear is clipped away. The lower pane's rectangle does not
+	start at 0, so its draws land. Enable first, then always re-issue the
+	rectangle so a clear that disabled the test cannot leave a stale or
+	dropped scissor behind. */
+	state_enable(&gl_state.scissor_test, GL_SCISSOR_TEST, scissor[2] > 0 && scissor[3] > 0);
+	if (scissor[2] > 0 && scissor[3] > 0)
 	{
 		memcpy(gl_state.scissor, scissor, sizeof(scissor));
 		glScissor(scissor[0], scissor[1], scissor[2], scissor[3]);
 	}
-	state_enable(&gl_state.scissor_test, GL_SCISSOR_TEST, scissor[2] > 0 && scissor[3] > 0);
 	/* (display.reversed_depth: Direct3D's MinZ to MaxZ as 1 - MinZ to
 	1 - MaxZ, which glDepthRange takes nearest first) */
 	depth_range[0] = xgpu_reversed_depth ? 1.0f - device.viewport.MaxZ : device.viewport.MinZ;
@@ -7237,9 +7426,12 @@ void WINAPI D3DDevice_SetVertexDataColor(INT reg, D3DCOLOR color)
 /* ---------- clearing */
 
 /* the state a clear changed, no longer what the shadows say: the masks it
-cleared through, the scissor (left disabled) and its rectangle. The rest
-of the state is as it was, so the next draw sets only these again (all of
-it again, at every clear, was hundreds of calls a frame) */
+cleared through, the scissor (left disabled) and its rectangle. The
+rectangle is forgotten so the next apply_raster_state re-issues glScissor
+after it enables the test; the driver is not trusted to keep a scissor
+set while the test is disabled. The rest of the state is as it was, so
+the next draw sets only these again (all of it again, at every clear,
+was hundreds of calls a frame) */
 static void clear_state_forget(void)
 {
 	gl_state.color_mask = 0xff;
@@ -7247,6 +7439,27 @@ static void clear_state_forget(void)
 	gl_state.stencil_write_mask = (GLuint)-1;
 	gl_state.scissor_test = 0;
 	memset(gl_state.scissor, 0xff, sizeof(gl_state.scissor));
+}
+
+/* glClear on some Intel Windows drivers takes a lower-left scissor. Draws
+take the upper-left one (glClipControl), so a pane's clear can land on
+the other pane. clear_scissor_lower_left is set by the start-up self-test. */
+static GLint clear_scissor_y(GLint y, GLint height)
+{
+	struct render_target_entry *target;
+	GLint framebuffer_height;
+
+	if (!clear_scissor_lower_left || height <= 0)
+		return y;
+	target = device.render_target ? render_target_get(device.render_target) : NULL;
+	if (!target && device.depth_stencil)
+		target = render_target_get(device.depth_stencil);
+	if (!target)
+		return y;
+	framebuffer_height = (GLint)target->target.gl_height;
+	if (y < 0 || y > framebuffer_height - height)
+		return y;
+	return framebuffer_height - (y + height);
 }
 
 void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags, D3DCOLOR color, float z, DWORD stencil)
@@ -7294,10 +7507,11 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
 		keeps a split-screen window's clear from wiping the other window */
 		GLint x0 = target_pixel((float)device.viewport.X, 0);
 		GLint y0 = target_pixel((float)device.viewport.Y, 1);
+		GLint width = target_pixel((float)(device.viewport.X + device.viewport.Width), 0) - x0;
+		GLint height = target_pixel((float)(device.viewport.Y + device.viewport.Height), 1) - y0;
 
 		glEnable(GL_SCISSOR_TEST);
-		glScissor(x0, y0, target_pixel((float)(device.viewport.X + device.viewport.Width), 0) - x0,
-			target_pixel((float)(device.viewport.Y + device.viewport.Height), 1) - y0);
+		glScissor(x0, clear_scissor_y(y0, height), width, height);
 		glClear(mask);
 		glDisable(GL_SCISSOR_TEST);
 		clear_state_forget();
@@ -7312,14 +7526,15 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
 			rectangles[index].x2 : device.viewport.X + device.viewport.Width;
 		INT bottom = rectangles[index].y2 < device.viewport.Y + device.viewport.Height ?
 			rectangles[index].y2 : device.viewport.Y + device.viewport.Height;
-		GLint x0, y0;
+		GLint x0, y0, width, height;
 
 		if (left >= right || top >= bottom)
 			continue;
 		x0 = target_pixel((float)(left + UI_OFFSET), 0);
 		y0 = target_pixel((float)top, 1);
-		glScissor(x0, y0, target_pixel((float)(right + UI_OFFSET), 0) - x0,
-			target_pixel((float)bottom, 1) - y0);
+		width = target_pixel((float)(right + UI_OFFSET), 0) - x0;
+		height = target_pixel((float)bottom, 1) - y0;
+		glScissor(x0, clear_scissor_y(y0, height), width, height);
 		glClear(mask);
 	}
 	glDisable(GL_SCISSOR_TEST);
