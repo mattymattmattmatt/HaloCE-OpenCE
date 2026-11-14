@@ -59,8 +59,13 @@ static void xgpu_gl_state_invalidate(void) { }
 #define platform_log(...) ((void)0)
 #include "cache.inc"
 
-static void xgpu_scissor_reset(GLint width, GLint height) { (void)width; (void)height; }
 static void glDisable(GLenum state) { }
+static void xgpu_scissor_reset(GLint width, GLint height)
+{
+    (void)width;
+    (void)height;
+    glDisable(GL_SCISSOR_TEST);
+}
 static void glColorMask(int r, int g, int b, int a) { }
 static void glClearColor(float r, float g, float b, float a) { }
 static void glClear(GLenum mask)
