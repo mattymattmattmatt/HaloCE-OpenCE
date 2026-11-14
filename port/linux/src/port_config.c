@@ -316,6 +316,16 @@ static const struct config_setting config_settings[] =
 		"Gulch's base) stay apart at any distance in place of flickering\n"
 		"through each other. false: 24 bits, as the Xbox's. Taken up when the\n"
 		"game starts." },
+	{ "display.intel_clear_fix", _config_string, "\"auto\"", "HALO_INTEL_CLEAR_FIX", _environment_value,
+		_platform_desktop,
+		"How split-screen pane clears treat a driver whose glClear scissor\n"
+		"origin disagrees with draws (Intel's Windows driver with\n"
+		"glClipControl upper-left). \"auto\" (the default) runs a start-up\n"
+		"self-test on an offscreen target and flips only if the clear lands\n"
+		"on the wrong row; if the test cannot run, it follows the renderer\n"
+		"name (Intel and not Mesa). \"off\" or \"0\" never flips; \"on\" or \"1\"\n"
+		"always flips. The path chosen is written to the log. Taken up when\n"
+		"the game starts." },
 	{ "display.hdr", _config_boolean, "false", "HALO_HDR", _environment_value, _platform_all,
 		"Draw the 3D view into a floating-point back buffer, which keeps what\n"
 		"the game's additive effects (explosions, plasma, lights, the sun's\n"
@@ -2341,6 +2351,7 @@ static const struct
 	{ "display.hud_button_style_ps", { "ps_classic", "ps_gems", "ps_dark_gems", "ps_modern", NULL }, NULL },
 	{ "display.hud_button_style_switch", { "switch_classic", "switch_gems", "switch_modern", NULL }, NULL },
 	{ "display.menus", { "pc", "xbox", NULL }, NULL },
+	{ "display.intel_clear_fix", { "auto", "off", "on", "0", "1", NULL }, NULL },
 	{ "display.player_names", { "all", "allies", "enemies", "none", NULL }, NULL },
 	{ "display.scoreboard_team_layout", { "teams", "score", NULL }, NULL },
 	{ "display.chat_style", { "colors", "white", NULL }, NULL },
