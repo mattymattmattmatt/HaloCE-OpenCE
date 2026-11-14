@@ -1469,6 +1469,22 @@ static void state_enable(unsigned char *shadow, GLenum capability, BOOL enabled)
 		glDisable(capability);
 }
 
+void xgpu_scissor_reset(GLint width, GLint height)
+{
+	glDisable(GL_SCISSOR_TEST);
+	if (width > 0 && height > 0)
+	{
+		glScissor(0, 0, width, height);
+		gl_state.scissor[0] = 0;
+		gl_state.scissor[1] = 0;
+		gl_state.scissor[2] = width;
+		gl_state.scissor[3] = height;
+	}
+	else
+		memset(gl_state.scissor, 0xff, sizeof(gl_state.scissor));
+	gl_state.scissor_test = 0;
+}
+
 static void state_program(GLuint program)
 {
 	if (gl_state.program != program)
@@ -2118,7 +2134,7 @@ static void render_target_resolve(struct xgpu_render_target *target)
 	draw = target->depth ? framebuffer_get(0, target->texture) : framebuffer_get(target->texture, 0);
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
-	glDisable(GL_SCISSOR_TEST);
+	xgpu_scissor_reset((GLint)target->gl_width, (GLint)target->gl_height);
 	glBlitFramebuffer(0, 0, (GLint)target->gl_width, (GLint)target->gl_height,
 		0, 0, (GLint)target->gl_width, (GLint)target->gl_height,
 		target->depth ? GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT : GL_COLOR_BUFFER_BIT, GL_NEAREST);
@@ -2152,7 +2168,7 @@ static void render_target_multisample(struct xgpu_render_target *target, int sam
 	change of the setting is taken up between frames, and the frame clears
 	the screen's targets before it draws) */
 	glBindFramebuffer(GL_FRAMEBUFFER, draw);
-	glDisable(GL_SCISSOR_TEST);
+	xgpu_scissor_reset((GLint)target->gl_width, (GLint)target->gl_height);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glDepthMask(GL_TRUE);
 	glStencilMask(0xff);
@@ -2166,7 +2182,7 @@ static void render_target_multisample(struct xgpu_render_target *target, int sam
 
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
-		glDisable(GL_SCISSOR_TEST);
+		xgpu_scissor_reset((GLint)target->gl_width, (GLint)target->gl_height);
 		glBlitFramebuffer(0, 0, (GLint)target->gl_width, (GLint)target->gl_height,
 			0, 0, (GLint)target->gl_width, (GLint)target->gl_height,
 			target->depth ? GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT : GL_COLOR_BUFFER_BIT, GL_NEAREST);
@@ -4841,7 +4857,7 @@ static void copy_level_by_blit(GLuint source, GLuint destination, GLint level, G
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_get(source, 0));
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw_framebuffer);
 	glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, destination, level);
-	glDisable(GL_SCISSOR_TEST);
+	xgpu_scissor_reset(width, height);
 	glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	/* the blit bypasses the cached state, so the next draw must re-apply it */
@@ -5128,6 +5144,33 @@ static void apply_raster_state(BOOL has_depth)
 	{
 		memcpy(gl_state.viewport, viewport, sizeof(viewport));
 		glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+	}
+	/* the first few distinct viewports (the full window, then each
+	split-screen pane) — useful when the top pane stays the fog clear */
+	{
+		static int logged;
+		static GLint seen[4][4];
+		int i;
+
+		if (logged < 4 && viewport[2] > 0 && viewport[3] > 0)
+		{
+			for (i = 0; i < logged; i++)
+			{
+				if (seen[i][0] == viewport[0] && seen[i][1] == viewport[1] &&
+					seen[i][2] == viewport[2] && seen[i][3] == viewport[3])
+					break;
+			}
+			if (i == logged)
+			{
+				seen[logged][0] = viewport[0];
+				seen[logged][1] = viewport[1];
+				seen[logged][2] = viewport[2];
+				seen[logged][3] = viewport[3];
+				platform_log("GPU: draw viewport (%d): %d,%d %dx%d",
+					logged, viewport[0], viewport[1], viewport[2], viewport[3]);
+				logged++;
+			}
+		}
 	}
 	/* the game never issues a scissor rectangle, and the NV2A scissor register
 	defaults to the viewport, so fragment clipping follows the viewport: this is
@@ -7860,6 +7903,31 @@ void halo_screen_anti_alias(short x0, short y0, short x1, short y1)
 	corners[1] = scaled_pixel(y0, target->target.scale[1]);
 	corners[2] = scaled_pixel(x1, target->target.scale[0]);
 	corners[3] = scaled_pixel(y1, target->target.scale[1]);
+	{
+		static int logged;
+		static short seen[2][4];
+		int i;
+
+		if (logged < 2)
+		{
+			for (i = 0; i < logged; i++)
+			{
+				if (seen[i][0] == x0 && seen[i][1] == y0 && seen[i][2] == x1 && seen[i][3] == y1)
+					break;
+			}
+			if (i == logged)
+			{
+				seen[logged][0] = x0;
+				seen[logged][1] = y0;
+				seen[logged][2] = x1;
+				seen[logged][3] = y1;
+				logged++;
+				platform_log("GPU: anti-alias pass: window %d,%d - %d,%d -> %d,%d - %d,%d (%s)",
+					x0, y0, x1, y1, corners[0], corners[1], corners[2], corners[3],
+					mode == _anti_aliasing_smaa ? "smaa" : "fxaa");
+			}
+		}
+	}
 	xgpu_post_anti_alias(mode == _anti_aliasing_smaa, framebuffer_get(target->target.texture, 0),
 		target->target.format, target->target.gl_width, target->target.gl_height, corners);
 	glBindVertexArray(device.vertex_array);
@@ -7885,6 +7953,30 @@ void halo_screen_tone_map(short x0, short y0, short x1, short y1)
 	corners[1] = scaled_pixel(y0, target->target.scale[1]);
 	corners[2] = scaled_pixel(x1, target->target.scale[0]);
 	corners[3] = scaled_pixel(y1, target->target.scale[1]);
+	{
+		static int logged;
+		static short seen[2][4];
+		int i;
+
+		if (logged < 2)
+		{
+			for (i = 0; i < logged; i++)
+			{
+				if (seen[i][0] == x0 && seen[i][1] == y0 && seen[i][2] == x1 && seen[i][3] == y1)
+					break;
+			}
+			if (i == logged)
+			{
+				seen[logged][0] = x0;
+				seen[logged][1] = y0;
+				seen[logged][2] = x1;
+				seen[logged][3] = y1;
+				logged++;
+				platform_log("GPU: tone-map pass: window %d,%d - %d,%d -> %d,%d - %d,%d",
+					x0, y0, x1, y1, corners[0], corners[1], corners[2], corners[3]);
+			}
+		}
+	}
 	render_target_resolve(&target->target);
 	/* (both found first: making a framebuffer binds it) */
 	source = framebuffer_get(target->target.texture, 0);
@@ -8352,7 +8444,7 @@ static BOOL front_buffer_ready(void)
 		draw_flush();
 		framebuffer = framebuffer_get(front->target.texture, 0);
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
-		glDisable(GL_SCISSOR_TEST);
+		xgpu_scissor_reset((GLint)front->target.gl_width, (GLint)front->target.gl_height);
 		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
@@ -8400,7 +8492,7 @@ static void front_buffer_take(void)
 	}
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
-	glDisable(GL_SCISSOR_TEST);
+	xgpu_scissor_reset((GLint)front->target.gl_width, (GLint)front->target.gl_height);
 	glBlitFramebuffer(left, 0, left + width, (GLint)back_buffer->target.gl_height, 0, 0,
 		(GLint)front->target.gl_width, (GLint)front->target.gl_height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 	gl_check_errors("front buffer copy");
@@ -8474,8 +8566,38 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		}
 		x = (window_width - width) / 2;
 		y = (window_height - height) / 2;
+		{
+			static int logged, logged_leftover;
+
+			if (!logged)
+			{
+				logged = 1;
+				platform_log("GPU: present: back buffer %lux%lu to window %dx%d (letterbox %d,%d %dx%d); "
+					"scissor cache test=%u box=%d,%d %dx%d",
+					(unsigned long)back_buffer->target.gl_width, (unsigned long)back_buffer->target.gl_height,
+					window_width, window_height, x, y, width, height,
+					(unsigned)gl_state.scissor_test,
+					gl_state.scissor[0], gl_state.scissor[1], gl_state.scissor[2], gl_state.scissor[3]);
+			}
+			/* menus present first with the scissor off; split-screen may
+			leave a pane rectangle on later frames */
+			if (!logged_leftover && gl_state.scissor_test == 1 &&
+				(gl_state.scissor[0] > 0 || gl_state.scissor[1] > 0 ||
+					gl_state.scissor[2] < window_width || gl_state.scissor[3] < window_height))
+			{
+				logged_leftover = 1;
+				platform_log("GPU: present: a leftover pane scissor would have clipped this blit "
+					"(test=%u box=%d,%d %dx%d, window %dx%d); resetting it",
+					(unsigned)gl_state.scissor_test,
+					gl_state.scissor[0], gl_state.scissor[1], gl_state.scissor[2], gl_state.scissor[3],
+					window_width, window_height);
+			}
+		}
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-		glDisable(GL_SCISSOR_TEST);
+		/* disable and set a full-window scissor: glBlitFramebuffer and this
+		clear honour the test, and a leftover split-pane rectangle would leave
+		the other half as the previous or clear colour */
+		xgpu_scissor_reset(window_width, window_height);
 		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
@@ -8490,6 +8612,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 			/* Creating the source framebuffer binds both targets. A cached
 			map can reach this first blit without a loading-screen draw. */
 			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+			xgpu_scissor_reset(window_width, window_height);
 			/* row 0 of the render target is the top of the picture */
 			glBlitFramebuffer(0, 0, (GLint)back_buffer->target.gl_width, (GLint)back_buffer->target.gl_height,
 				x, y + height, x + width, y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
