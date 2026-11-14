@@ -2471,8 +2471,6 @@ static int probe_clear_scissor_origin(void)
 	unsigned char pixels[CLEAR_SCISSOR_PROBE_WIDTH * CLEAR_SCISSOR_PROBE_HEIGHT * 4];
 	GLint prev_draw = 0, prev_read = 0, prev_texture = 0, prev_pack = 4;
 	GLint prev_viewport[4], prev_scissor[4], prev_mask[4];
-	GLfloat prev_clear[4];
-	GLint prev_scissor_test;
 	GLsizei width = CLEAR_SCISSOR_PROBE_WIDTH, height = CLEAR_SCISSOR_PROBE_HEIGHT;
 	int top_red, bottom_red, result = -1;
 	unsigned row;
@@ -2485,9 +2483,7 @@ static int probe_clear_scissor_origin(void)
 	glGetIntegerv(GL_PACK_ALIGNMENT, &prev_pack);
 	glGetIntegerv(GL_VIEWPORT, prev_viewport);
 	glGetIntegerv(GL_SCISSOR_BOX, prev_scissor);
-	prev_scissor_test = glIsEnabled(GL_SCISSOR_TEST) ? 1 : 0;
 	glGetIntegerv(GL_COLOR_WRITEMASK, prev_mask);
-	glGetFloatv(GL_COLOR_CLEAR_VALUE, prev_clear);
 
 	glGenTextures(1, &texture);
 	glBindTexture(GL_TEXTURE_2D, texture);
@@ -2555,13 +2551,13 @@ restore:
 		glDeleteTextures(1, &texture);
 	glViewport(prev_viewport[0], prev_viewport[1], prev_viewport[2], prev_viewport[3]);
 	glScissor(prev_scissor[0], prev_scissor[1], prev_scissor[2], prev_scissor[3]);
-	if (prev_scissor_test)
-		glEnable(GL_SCISSOR_TEST);
-	else
-		glDisable(GL_SCISSOR_TEST);
+	/* the loader has no glIsEnabled or glGetFloatv; this probe runs at
+	start, before any game draw, so the defaults (test off, clear colour
+	zero) are what later code expects */
+	glDisable(GL_SCISSOR_TEST);
 	glColorMask((GLboolean)prev_mask[0], (GLboolean)prev_mask[1], (GLboolean)prev_mask[2],
 		(GLboolean)prev_mask[3]);
-	glClearColor(prev_clear[0], prev_clear[1], prev_clear[2], prev_clear[3]);
+	glClearColor(0.f, 0.f, 0.f, 0.f);
 	glPixelStorei(GL_PACK_ALIGNMENT, prev_pack);
 	while (glGetError() != GL_NO_ERROR)
 		;
