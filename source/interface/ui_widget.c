@@ -8614,9 +8614,9 @@ static boolean ui_check_for_pause_game(
 				/* port: a multiplayer map played alone (New Game's MULTIPLAYER
 				maps) has no campaign pause screen, but its own (LEAVE GAME
 				goes to the main menu: network_game_remove_local_player) */
-				else if (tag_loaded(UI_WIDGET_DEFINITION_TAG, "ui\\shell\\solo_game\\pause_game\\pause_game") == NONE &&
-					tag_loaded(UI_WIDGET_DEFINITION_TAG, "ui\\shell\\multiplayer_game\\pause_game\\1p_pause_game") != NONE)
+				else if (tag_loaded(UI_WIDGET_DEFINITION_TAG, "ui\\shell\\solo_game\\pause_game\\pause_game") == NONE)
 				{
+					/* port: 1p_pause_game lives in ui.map; tag_loaded is NONE until it is loaded */
 					if (!ui_widget_load_by_name_or_tag(
 						"ui\\shell\\multiplayer_game\\pause_game\\1p_pause_game",
 						NONE,
@@ -8630,6 +8630,8 @@ static boolean ui_check_for_pause_game(
 							_error_silent,
 							"failed to load multiplayer pause game window");
 					}
+					else
+						error(_error_silent, "opened multiplayer pause game window (1 local player)");
 				}
 				else if (!ui_widget_load_by_name_or_tag(
 					"ui\\shell\\solo_game\\pause_game\\pause_game",
@@ -8670,9 +8672,11 @@ static boolean ui_check_for_pause_game(
 						else if (campaign_missing)
 							ui_widget_delete(widget_globals.active_widgets[controller_index]);
 					}
-					else if (campaign_missing &&
-						tag_loaded(UI_WIDGET_DEFINITION_TAG, mp_name) != NONE)
+					else if (campaign_missing)
 					{
+						/* port: 2p/4p_pause_game lives in ui.map. tag_loaded(mp_name)
+						is NONE until it is loaded, so that gate never ran and Start
+						kept failing to load pause_game_split_screen (beavercreek). */
 						if (!ui_widget_load_by_name_or_tag(
 							mp_name,
 							NONE,
@@ -8686,6 +8690,9 @@ static boolean ui_check_for_pause_game(
 								_error_silent,
 								"failed to load multiplayer pause game window");
 						}
+						else
+							error(_error_silent, "opened multiplayer pause game window (%d local players)",
+								local_player_count);
 					}
 					else if (local_player_count == 2)
 					{
