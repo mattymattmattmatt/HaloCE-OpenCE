@@ -296,21 +296,25 @@ int main(int argc, char **argv)
 		CHECK(bots_in(&team0, &team1) == 6, "%ld bots in a hosted network game, not 6", bots_in(&team0, &team1));
 		return 0;
 	}
-	/* Slayer alone (the other gametypes' goals are not the bots' yet): none
-	in CTF, and those of a Slayer lobby leave when it becomes CTF */
-	CASE("slayer-only")
+	/* Slayer, CTF and King of the Hill (Oddball and Race only when bots.kind
+	is Proving Grounds): those of a lobby leave when it becomes a gametype
+	they do not play */
+	CASE("played-gametypes")
 	{
 		lobby(game_engine_ctf, 16);
 		player(0, 0);
 		wanted = 6;
 		network_game_server_port_bots(&server);
-		CHECK(bots_in(&team0, &team1) == 0, "%ld bots in CTF", bots_in(&team0, &team1));
+		CHECK(bots_in(&team0, &team1) == 6, "%ld bots in CTF, not 6", bots_in(&team0, &team1));
 		server.game.variant.game_engine_index = game_engine_slayer;
 		network_game_server_port_bots(&server);
 		CHECK(bots_in(&team0, &team1) == 6, "%ld bots in Slayer, not 6", bots_in(&team0, &team1));
 		server.game.variant.game_engine_index = game_engine_king;
 		network_game_server_port_bots(&server);
-		CHECK(bots_in(&team0, &team1) == 0, "%ld bots stayed for King of the Hill", bots_in(&team0, &team1));
+		CHECK(bots_in(&team0, &team1) == 6, "%ld bots in King of the Hill, not 6", bots_in(&team0, &team1));
+		server.game.variant.game_engine_index = game_engine_oddball;
+		network_game_server_port_bots(&server);
+		CHECK(bots_in(&team0, &team1) == 0, "%ld bots stayed for Oddball", bots_in(&team0, &team1));
 		return 0;
 	}
 	/* nothing changes once the game is started, nor in the game */

@@ -1,6 +1,7 @@
-"""The real lobby of network_server_manager.c's bots (bots.count): as many as the setting asks for join a local Slayer
-game's lobby, or a hosted one's (system link, internet), as far as it has room, on the teams bots.teams asks for, follow
-the players' team changes and leave when fewer are asked for; none in another gametype, or once the game has started."""
+"""The real lobby of network_server_manager.c's bots (bots.count): as many as the setting asks for join a local Slayer,
+CTF or King of the Hill lobby, or a hosted one (system link, internet), as far as it has room, on the teams bots.teams
+asks for, follow the players' team changes and leave when fewer are asked for; none in Oddball or Race unless bots.kind
+is Proving Grounds, and none once the game has started."""
 
 import re
 import sys
@@ -11,7 +12,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, constant, enum_with, function, mutated, read, run, structure  # noqa: E402
 
-CASES = ["fills", "room", "fewer", "even", "against", "follows-players", "hosted-network", "slayer-only",
+CASES = ["fills", "room", "fewer", "even", "against", "follows-players", "hosted-network", "played-gametypes",
          "not-once-started", "no-player-no-bots", "names-and-machines"]
 GAME_MANAGER_FUNCTIONS = ("network_game_invalidate_player", "network_player_is_valid", "network_game_player_is_valid",
                           "network_game_add_player", "network_game_remove_player")
@@ -19,7 +20,7 @@ GAME_MANAGER_FUNCTIONS = ("network_game_invalidate_player", "network_player_is_v
 # a fault in network_game_server_port_bots, and the case that must catch it
 NEGATIVE_CONTROLS = {
     "bots-in-any-gametype": (("server->game.variant.game_engine_index == game_engine_slayer ||", "TRUE ||"),
-                             "slayer-only"),
+                             "played-gametypes"),
     "bots-once-started": (("server->state != _network_game_server_state_pregame || server->sent_start_game_message",
                            "server->state != _network_game_server_state_pregame"), "not-once-started"),
     "teams-not-evened": (("team_index = team_counts[1] < team_counts[0] ? 1 : 0", "team_index = 1"), "even"),
