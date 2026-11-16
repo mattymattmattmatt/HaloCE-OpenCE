@@ -517,6 +517,21 @@ jobs:
           path: build/ps5/third_party
           key: ps5-third-party-${{ hashFiles('tools/android_build.py', 'tools/ps5_build.py', 'port/android/patches/**') }}
 
+      # zlib.net's fossils URL currently returns an HTML page, so the pinned
+      # checksum in PS5_Vulkan's setup-native-dependencies.sh fails. Prefetch
+      # the same official archive from GitHub (the hash the script already
+      # pins) into the cache path it uses, so it does not download again.
+      - name: Prefetch zlib
+        run: |
+          script="$PS5_DEPS/PS5_Vulkan/tools/setup-native-dependencies.sh"
+          version=$(sed -n 's/^zlib_version="\(.*\)"/\1/p' "$script")
+          hash=$(sed -n 's/^zlib_hash="\(.*\)"/\1/p' "$script")
+          dest="$PS5_DEPS/PS5_Vulkan/.deps/native/zlib"
+          archive="$dest/zlib-$version.tar.gz"
+          mkdir -p "$dest"
+          curl -fsSL "https://github.com/madler/zlib/releases/download/v${version}/zlib-${version}.tar.gz" -o "$archive"
+          printf '%s  %s\n' "$hash" "$archive" | sha256sum --check --strict
+
       # The tools on the path the way the build machine's hostdeps script puts
       # them (configure.py --ps5-hostdeps, PS5_HOSTDEPS): LLVM 18's first,
       # whose clang and libclc the native half of the Mesa build (mesa_clc and
