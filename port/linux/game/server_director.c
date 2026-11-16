@@ -2624,4 +2624,19 @@ void server_director_host_stop(void)
 {
 }
 
+/* Host Server listing (menu_functions.c, network_coop.c); no dedicated host here */
+int server_director_online(void)
+{
+	return 0;
+}
+
+int server_director_public(void)
+{
+	return 0;
+}
+
+void server_director_apply_settings(void)
+{
+}
+
 #endif
