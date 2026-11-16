@@ -4633,6 +4633,25 @@ void host_storage_commit(void)
 }
 #endif
 
+#ifdef HALO_GUEST
+void platform_share_file(FILE *file)
+{
+	(void)file;
+}
+
+void platform_share_path(const char *path)
+{
+	(void)path;
+}
+
+void platform_translate_path(const char *xbox_path, char *host_path, unsigned long host_path_size)
+{
+	(void)xbox_path;
+	if (host_path && host_path_size)
+		host_path[0] = 0;
+}
+#endif
+
 static int config_header_count(const char *text, const char *header)
 {
 	int count = 0;

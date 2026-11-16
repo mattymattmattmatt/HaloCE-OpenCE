@@ -506,6 +506,7 @@ def test_config_has_each_section_once(tmp_path):
     (stubs / "SDL3").mkdir(parents=True)
     (stubs / "SDL3" / "SDL.h").write_text("")
     (stubs / "platform.h").write_text(
+        "#include <stdio.h>\n"
         "void platform_log(const char *format, ...);\n"
         "void platform_share_path(const char *path);\n"
         "void platform_share_file(FILE *file);\n"
