@@ -41,8 +41,6 @@ void host_storage_commit(void);
 /* platform.h declares this. Repeated so the section check can be compiled
 without that header */
 void platform_log(const char *format, ...);
-/* the game's <sys/stat.h> is the MSVC layout and does not declare mkdir */
-int mkdir(const char *path, int mode);
 #endif
 
 /* ---------- the settings */

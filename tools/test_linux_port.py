@@ -355,14 +355,28 @@ def test_config_sections_join(tmp_path):
     opened one twice (the gyroscope's [input], and [display] after [game])
     is joined so the saved value is read. A file that is broken for some
     other reason is left alone (port/linux/src/port_config.c)"""
-    if not shutil.which("clang") or not shutil.which("ninja") or not Path("build.ninja").is_file():
-        pytest.skip("needs clang, ninja and a configured build")
-    flags = _platform_compile_flags("build/linux/obj/port/linux/src/port_config.o")
+    compiler = shutil.which("clang") or shutil.which("cc")
+    if not compiler:
+        pytest.skip("needs a C compiler")
+    root = Path(__file__).resolve().parent.parent
+    stubs = tmp_path / "stubs"
+    (stubs / "SDL3").mkdir(parents=True)
+    (stubs / "SDL3" / "SDL.h").write_text("")
+    (stubs / "platform.h").write_text(
+        "#include <stdio.h>\n"
+        "void platform_log(const char *format, ...);\n"
+        "void platform_share_path(const char *path);\n"
+        "void platform_share_file(FILE *file);\n"
+        "void platform_translate_path(const char *xbox_path, char *host_path, unsigned long host_path_size);\n")
+    # compile a copy so "platform.h" is the stub, not the platform layer's
+    for name in ("port_config.c", "port_config.h"):
+        shutil.copy(root / "port/linux/src" / name, stubs / name)
     program = tmp_path / "config_sections_check"
-    built = subprocess.run(["clang", *flags, "-O1", "-no-pie", "-Wl,--unresolved-symbols=ignore-all",
+    built = subprocess.run([compiler, "-O1", "-no-pie",
                             "-DHALO_ANDROID", "-DHALO_SWITCH", "-DHALO_GUEST", "-DHALO_CONFIG_SECTIONS_TEST",
-                            "-o", str(program), "port/linux/src/port_config.c",
-                            "port/third_party/tomlc17/tomlc17.c"],
+                            f"-I{stubs}", f"-I{root}/port/third_party/tomlc17",
+                            "-o", str(program), str(stubs / "port_config.c"),
+                            str(root / "port/third_party/tomlc17/tomlc17.c"), "-lpthread"],
                            capture_output=True, text=True)
     assert built.returncode == 0, built.stderr[-4000:]
     result = subprocess.run([str(program)], capture_output=True, text=True, timeout=60)
