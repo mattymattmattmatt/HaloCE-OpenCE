@@ -87,6 +87,8 @@ a part file to open) it leaves for that thread.
 #include "server_director.h"
 #include "../src/p2p.h"
 #include "../src/posix.h"
+
+void map_import_update(void);
 #if defined(HALO_ANDROID) || defined(HALO_PS5)
 /* the host's file connection (port/android/host/host_file_share.c; its calls
 are host_imports.list's): the host one of the swarm's sources, encrypted, its

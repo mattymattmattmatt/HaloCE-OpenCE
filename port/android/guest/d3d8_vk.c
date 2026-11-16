@@ -963,7 +963,10 @@ void host_vk_shader_compile(uint32_t stage, uint64_t hash, uint32_t glsl, uint32
 uint32_t host_vk_shader_find(uint32_t stage, uint64_t hash, uint32_t status_out);
 uint32_t host_vk_shader_make(uint32_t stage, uint64_t hash);
 
-#define STREAM_SIZE (4 * 1024 * 1024)
+/* 4 MB x 3 was 12 MB of guest BSS. The AArch64 guest image must end by
+0x40000000 (64 MB from HALO_GUEST_IMAGE_BASE): gore plus this merge did not
+fit. 1.5 MB still flushes mid-frame when a stream fills (vk_stream_command). */
+#define STREAM_SIZE (1536 * 1024)
 
 /* the streams, written in turn: the host may still be running the one handed over last (VK_COMMAND_STREAMS) */
 static uint32_t streams[VK_COMMAND_STREAMS][STREAM_SIZE / 4];

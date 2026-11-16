@@ -126,6 +126,7 @@ their handlers open opens.
 #if defined(HALO_ANDROID) && !defined(HALO_SWITCH)
 #include "../src/posix.h"
 #include "custom_campaigns.h"
+void custom_campaign_back_to_halo(void);
 #endif
 
 #include <pthread.h>

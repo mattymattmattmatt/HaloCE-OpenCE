@@ -523,6 +523,7 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
         # (port/include/halo_math.h)
         for source in musl_math_sources():
             add_object(source, musl_math_cflags(abi))
+        add_object(Path("port/android/host/host_replay.c"), platform_cflags)
 
         n.build(
             outputs=output,

@@ -84,6 +84,7 @@ symbols in this file:
 #include "editor_stubs.h"
 #include "render_debug.h"
 #include "objects/object_lights_rendering.h"
+#include "objects/object_lights.h" /* port: lights_submit_queued_lens_flares */
 #include "effects/particle_systems.h"
 #include "effects/weather_particle_systems.h"
 #include "main/main.h"

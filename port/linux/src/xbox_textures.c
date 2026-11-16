@@ -1210,6 +1210,9 @@ struct texture_entry
 	memory watch serial read before it was found: the same while no watched
 	page has been written since (0: never found) */
 	unsigned long watched_serial, watched_generation;
+	/* linear field texels were written straight to the image (halo_field_texture_write);
+	memory is not read again until it is forgotten */
+	BOOL field;
 #if defined(HALO_ANDROID)
 	/* its menu art's texture and levels (0: none), as of menu_art_serial */
 	unsigned long menu_serial;
@@ -1595,7 +1598,7 @@ GLuint xgpu_texture_get(const DWORD *resource, const D3DCOLOR *palette, GLenum *
 		entry->watched_serial = watch_serial;
 		entry->watched_generation = generation;
 	}
-	if (!entry->generation || generation > entry->generation || no_cache)
+	if (!entry->field && (!entry->generation || generation > entry->generation || no_cache))
 	{
 		/* protect first, so a write racing with the upload is noticed */
 #ifdef HALO_ANDROID
@@ -1726,5 +1729,99 @@ void xgpu_texture_cache_begin_frame(void)
 				link = &entry->next;
 			}
 		}
+	}
+}
+
+/* port: a field's linear texels, straight to the OpenGL image (plasma_occlusion.h) */
+int halo_field_texture_write(const void *texture, const unsigned long *pixels, float reach)
+{
+	const DWORD *resource;
+	DWORD data, format_word, size_word;
+	struct texture_entry **bucket, *entry;
+	unsigned long width, height, depth;
+
+	(void)reach;
+	if (!texture || !pixels)
+		return 0;
+	resource = (const DWORD *)texture;
+	data = resource[1];
+	format_word = resource[3];
+	size_word = resource[4];
+	bucket = &texture_buckets[bucket_index(data, format_word, size_word)];
+	for (entry = *bucket; entry; entry = entry->next)
+		if (entry->data == data && entry->format_word == format_word && entry->size_word == size_word)
+			break;
+	if (!entry)
+	{
+		entry = calloc(1, sizeof(*entry));
+		if (!entry)
+			return 0;
+		entry->data = data;
+		entry->format_word = format_word;
+		entry->size_word = size_word;
+		xgpu_texture_describe(format_word, size_word, &entry->description);
+		entry->target = entry->description.depth > 1 ? GL_TEXTURE_3D : GL_TEXTURE_2D;
+		entry->address = (unsigned long)PLATFORM_PHYSICAL_TO_VIRTUAL(data);
+		entry->size = texture_size_supported(&entry->description) ?
+			xgpu_texture_face_size(&entry->description) : 0;
+		entry->override = -1;
+		glGenTextures(1, &entry->texture);
+		entry->next = *bucket;
+		*bucket = entry;
+	}
+	if (!entry->texture)
+		return 0;
+	width = entry->description.width;
+	height = entry->description.height;
+	depth = entry->description.depth ? entry->description.depth : 1;
+	glBindTexture(entry->target, entry->texture);
+	if (entry->target == GL_TEXTURE_3D)
+		glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA8, (GLsizei)width, (GLsizei)height, (GLsizei)depth,
+			0, GL_BGRA, GL_UNSIGNED_BYTE, pixels);
+	else
+		glTexImage2D(entry->target, 0, GL_RGBA8, (GLsizei)width, (GLsizei)height,
+			0, GL_BGRA, GL_UNSIGNED_BYTE, pixels);
+	glTexParameteri(entry->target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(entry->target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(entry->target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(entry->target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	if (entry->target == GL_TEXTURE_3D)
+		glTexParameteri(entry->target, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+	glBindTexture(entry->target, 0);
+	xgpu_gl_state_invalidate();
+	entry->field = TRUE;
+	entry->generation = 1;
+	entry->last_used_frame = texture_frame;
+	texture_drop_serial++;
+	return 1;
+}
+
+void halo_field_texture_forget(const void *texture)
+{
+	const DWORD *resource;
+	struct texture_entry **link;
+
+	if (!texture)
+		return;
+	resource = (const DWORD *)texture;
+	link = &texture_buckets[bucket_index(resource[1], resource[3], resource[4])];
+	while (*link)
+	{
+		struct texture_entry *entry = *link;
+
+		if (entry->data == resource[1] && entry->format_word == resource[3] &&
+			entry->size_word == resource[4] && entry->field)
+		{
+			*link = entry->next;
+			if (entry->texture)
+				glDeleteTextures(1, &entry->texture);
+			if (entry->hud_upscale)
+				glDeleteTextures(1, &entry->hud_upscale);
+			texture_drop_serial++;
+			free(entry);
+			xgpu_gl_state_invalidate();
+			return;
+		}
+		link = &entry->next;
 	}
 }

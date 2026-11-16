@@ -51,6 +51,9 @@ stands for that long in turn, until they are used again.
 #include <stdlib.h>
 #include <string.h>
 
+void cache_files_set_tag_instances(void *instances, long count);
+
+
 /* (the C library's allocator, not the game's tracked one (cseries.h), which
 is not to be called from another thread: the map is read on one, and what it
 allocates is freed on the game's) */

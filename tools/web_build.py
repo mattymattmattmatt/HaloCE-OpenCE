@@ -292,6 +292,7 @@ def generate_web_build(n: Writer, sln: Any) -> None:
         add_object(ZLIB_DIR / name, " ".join([abi, "-std=gnu11", *ZLIB_DEFINES, "-w"]))
     for source in musl_math_sources():
         add_object(source, musl_math_cflags(abi))
+    add_object(Path("port/android/host/host_replay.c"), platform_cflags)
 
     # ---------- the link
 
