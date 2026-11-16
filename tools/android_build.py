@@ -598,7 +598,9 @@ def generate_guest_image(n: Writer, sln: Any, config: Dict[str, Any], *, arch: G
         f"-I{ZLIB_DIR}", "-Isource -Isource/cseries",
         f"-I{sdl_dir}/include", f"-I{gl_include}", *libc_includes, f"-idirafter {XDK_INCLUDE}",
     ])
-    guest_host_only = {"memory_watch.c"}  # replaced by guest_memory_watch.c
+    guest_host_only = {"memory_watch.c",  # replaced by guest_memory_watch.c
+                       "desktop_host_port.c"}  # desktop stand-ins; the guest imports the real host
+
     gl_renderer_object = None
     gl_textures_object = None
     gl_post_object = None

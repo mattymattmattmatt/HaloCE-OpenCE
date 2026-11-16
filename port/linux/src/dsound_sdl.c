@@ -79,6 +79,7 @@ skips opening a device; audio.channels chooses stereo or 5.1
 #include <unistd.h>
 
 #define OUTPUT_RATE 48000
+#include <sched.h> /* after OUTPUT_RATE so mixer tests that extract from here see it */
 #define OUTPUT_CHANNELS 2 /* the stereo mix's, and the reverb's outputs */
 #define MAXIMUM_OUTPUT_CHANNELS 6
 #define MAXIMUM_STREAM_PACKETS 64
