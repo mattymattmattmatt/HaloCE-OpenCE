@@ -16,6 +16,7 @@ typedef unsigned short word;
 #define VALID_INDEX(index, count) ((index) >= 0 && (index) < (count))
 #define PIN(value, low, high) ((value) < (low) ? (low) : (value) > (high) ? (high) : (value))
 #define NUMBEROF(array) (sizeof(array) / sizeof((array)[0]))
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define csmemset memset
 #define csmemcpy memcpy
 #define error(priority, ...) ((void)0)

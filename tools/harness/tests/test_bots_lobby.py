@@ -54,7 +54,7 @@ def generated(fault=None):
     code = ""
     for name in GAME_MANAGER_FUNCTIONS:
         code += function(manager, name) + "\n"
-    for name in ("bots_machine_is_bot", "bots_network_player", "bots_name"):
+    for name in ("bots_machine_is_bot", "bots_name", "bots_network_player"):
         code += function(bots, name) + "\n"
     lobby = function(server, "network_game_server_port_bots")
     if fault:
