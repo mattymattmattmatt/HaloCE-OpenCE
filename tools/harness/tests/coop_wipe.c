@@ -79,6 +79,9 @@ static void coop_pickups_new_game(void){}
 static void coop_vehicles_new_game(void){}
 /* (the gore mod's game.manual_respawn, players.c: off, as upstream) */
 static boolean manual_respawn_hold(void) { return FALSE; }
+static void coop_allies_arm(void){}
+static int server_director_online(void){return dedicated_online;}
+static int server_director_public(void){return dedicated_public;}
 static int sound_syncs;
 static void coop_sound_sync_reset(void){sound_syncs=0;}
 #include "under_test.inc"

@@ -44,7 +44,7 @@ def generated(fault=None):
     enums = chr(10).join((enum_with(engine, '_game_variant_draw_object_in_motion_sensor_bit = 0'), enum_with(engine, 'game_engine_none = 0'),
                        enum_with(read('source/networking/network_game_manager.h'),
                                  '_network_game_cooperative_no_player_collisions_bit = 0'),
-                       enum_with(rotation, 'SERVER_RULES_MAXIMUM = 48'), structure(rotation, 'server_rule'),
+                       enum_with(rotation, 'SERVER_RULES_MAXIMUM = 64'), structure(rotation, 'server_rule'),
                        structure(rotation, 'server_entry')))
     if fault:
         before, after, _ = CONTROLS[fault]

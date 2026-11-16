@@ -63,6 +63,18 @@ static int config_write_file(const char *path, const char *text)
 	return 1;
 }
 
+/* The extracted config_write can write a profile file; these cases keep config.toml. */
+#define CONFIG_PROFILE_PLAYERS 4
+static struct { char folder[1024]; } config_profiles[CONFIG_PROFILE_PLAYERS];
+static int config_profile_slot(long index) { (void)index; return -1; }
+static int config_profile_write_locked(const char *folder, long index, const char *value)
+{
+	(void)folder;
+	(void)index;
+	(void)value;
+	return 0;
+}
+
 #include "under_test.inc"
 
 /* the file's line for the key, NULL if none */

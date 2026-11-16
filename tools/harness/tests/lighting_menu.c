@@ -59,6 +59,7 @@ static struct pc_menu_setting *pc_menu_setting_get(long i) { return i==7?&group_
 static boolean main_menu_is_active(void) { return FALSE; }
 static boolean network_game_is_active(void) { return FALSE; }
 static void main_goto_main_menu(void) { CHECK(0,"lighting must not reload the frontend"); }
+static void coop_allies_arm(void) {}
 #include "under_test.inc"
 int main(int argc, char **argv)
 {

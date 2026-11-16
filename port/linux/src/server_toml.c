@@ -192,7 +192,7 @@ int server_gametype_file_parse(const char *text, int length, struct server_gamet
 			{
 				if (file->rule_count >= SERVER_RULES_MAXIMUM)
 				{
-					ok = gametype_error(file, rule_value.lineno, "more than %s rules%s", "48", "");
+					ok = gametype_error(file, rule_value.lineno, "more than %s rules%s", "64", "");
 					break;
 				}
 				file->rule_count++;

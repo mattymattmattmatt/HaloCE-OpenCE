@@ -12,7 +12,7 @@ from harness import CHECK_FAILED, build, constant, enum_with, function, mutated,
 
 CASES = ["long-string", "all-escaped", "too-long", "answer-only"]
 NAMES = ["config_setting_index", "config_text_is_false", "config_set_from_text", "config_append", "config_copy",
-         "config_line_key", "config_line_section", "config_write"]
+         "config_line_key", "config_line_section", "config_value_line", "config_file_set_line", "config_write"]
 
 # a fault in the code, the function it is in, and the case that must catch it
 NEGATIVE_CONTROLS = {

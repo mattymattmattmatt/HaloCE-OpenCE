@@ -48,11 +48,11 @@ left and right shoulders are the Duke's white and black (xinput_sdl.c) */
 static byte const bumper_jumper[NUMBER_OF_GAME_CONTROLS] =
 {
 	[_game_control_jump] = _gamepad_analog_button_white,
-	[_game_control_switch_grenades] = _gamepad_analog_button_a,
+	[_game_control_switch_grenades] = _gamepad_analog_button_x,
 	[_game_control_action] = _gamepad_analog_button_b,
 	[_game_control_switch_weapons] = _gamepad_analog_button_y,
 	[_game_control_melee] = _gamepad_analog_button_black,
-	[_game_control_flashlight] = _gamepad_analog_button_x,
+	[_game_control_flashlight] = _gamepad_analog_button_a,
 	[_game_control_grenade] = _gamepad_analog_button_left_trigger,
 	[_game_control_primary_trigger] = _gamepad_analog_button_right_trigger,
 	[_game_control_start] = _gamepad_binary_button_start,

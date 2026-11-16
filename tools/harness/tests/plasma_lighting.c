@@ -10,7 +10,7 @@ struct object_datum { long definition_index; struct { short type; } object; };
 static struct object_datum projectile = { 1, { _object_type_projectile } };
 static const char *tag_name = "weapons\\plasma rifle\\bolt";
 static int muzzle_on, emitter_on, shield_on;
-static int enabled = 1, refreshes, present = 1, interpolation_rendering = 1, interpolation_drawing = 1; /* (ours: render_interpolation_frame_end clears both) */
+static int enabled = 1, refreshes, present = 1, interpolation_rendering = 1, interpolation_drawing __attribute__((unused)) = 1; /* (ours: render_interpolation_frame_end clears both) */
 static int rendered_pose;
 static float connected_radius;
 int lighting_config_boolean(const char *name) { return strcmp(name, "display.muzzle_lighting") ? enabled : muzzle_on; }

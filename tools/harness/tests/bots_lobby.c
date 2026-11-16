@@ -75,6 +75,36 @@ static boolean bots_game_allowed(void)
 	return TRUE;
 }
 
+/* The extracted lobby also names a dedicated server's roster path; the cases
+are local and hosted games, so this stays off and the roster helpers no-op. */
+static int halo_server_mode(void) { return 0; }
+static int bots_server_listed(void) { return 0; }
+static boolean bots_game_type_played(long game_engine_index) { (void)game_engine_index; return FALSE; }
+static boolean bots_on_roster(long bot_index) { (void)bot_index; return FALSE; }
+static short bots_bot_joined_kind(long bot_index) { (void)bot_index; return 0; }
+static short bots_bot_own_skill(long bot_index) { (void)bot_index; return 0; }
+static long bots_bot_team_asked(long bot_index) { (void)bot_index; return NONE; }
+static short bots_kind(void) { return 0; }
+static void bots_name(long bot_index, int listed, wchar_t *name, long count)
+{
+	(void)bot_index;
+	(void)listed;
+	if (count > 0)
+		name[0] = 0;
+}
+static boolean network_game_server_port_host_bot_join(struct network_game_server *server, long wanted_index,
+	short kind, short skill, long team_index, char *said, long said_size)
+{
+	(void)server;
+	(void)wanted_index;
+	(void)kind;
+	(void)skill;
+	(void)team_index;
+	(void)said;
+	(void)said_size;
+	return FALSE;
+}
+
 /* (the game's own code, as its build compiles it: a char index, a char
 machine index against the session's 128) */
 #pragma clang diagnostic ignored "-Wchar-subscripts"

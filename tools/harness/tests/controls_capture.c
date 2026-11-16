@@ -31,6 +31,11 @@ static void ui_widget_port_go_back(struct widget_instance *w){(void)w;went_back+
 static void halo_gamepad_capture_begin(void){}
 static int halo_gamepad_capture_poll(int *input){(void)input;return 0;}
 static void halo_gamepad_capture_end(void){}
+static char const *settings_profile_folder(void) { return NULL; }
+static int config_profile_text(const char *folder, const char *n, char *t, unsigned size)
+{ (void)folder; return config_default(n, t, size); }
+static int config_profile_write(const char *folder, const char *n, const char *v)
+{ (void)folder; return config_write(n, v); }
 #include "under_test.inc"
 /* sdl_platform.c's key event while a binding is waited for */
 static void key_down(int scancode,int result)

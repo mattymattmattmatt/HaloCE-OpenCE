@@ -18,11 +18,11 @@ GAME_MANAGER_FUNCTIONS = ("network_game_invalidate_player", "network_player_is_v
 
 # a fault in network_game_server_port_bots, and the case that must catch it
 NEGATIVE_CONTROLS = {
-    "bots-in-any-gametype": (("if (server->game.variant.game_engine_index == game_engine_slayer)", "if (TRUE)"),
+    "bots-in-any-gametype": (("server->game.variant.game_engine_index == game_engine_slayer ||", "TRUE ||"),
                              "slayer-only"),
     "bots-once-started": (("server->state != _network_game_server_state_pregame || server->sent_start_game_message",
                            "server->state != _network_game_server_state_pregame"), "not-once-started"),
-    "teams-not-evened": (("team_counts[1] < team_counts[0] ? 1 : 0", "1"), "even"),
+    "teams-not-evened": (("team_index = team_counts[1] < team_counts[0] ? 1 : 0", "team_index = 1"), "even"),
     "against-the-players": (("human_team == 0 ? 1 : 0", "human_team"), "against"),
     "one-too-many-stays": (("bot_index >= wanted; bot_index--", "bot_index > wanted; bot_index--"), "fewer"),
     "bots-alone": (("if (human_team == NONE)\n\t\twanted = 0;", ""), "no-player-no-bots"),
@@ -47,6 +47,7 @@ def generated(fault=None):
     assert match, "BOTS_FIRST_MACHINE not found in bots.h"
     config += match.group(0) + "\n"
     config += enum_with(bots_header, "_bots_teams_against") + "\n"
+    config += enum_with(read("port/linux/game/bots_common.h"), "_bots_kind_proving_grounds") + "\n"
     config += enum_with(server, "_network_game_server_state_pregame") + "\n"
     config += enum_with(read("source/game/game_engine.h"), "game_engine_slayer") + "\n"
     config += structure(read("source/game/players.h"), "network_player") + "\n"

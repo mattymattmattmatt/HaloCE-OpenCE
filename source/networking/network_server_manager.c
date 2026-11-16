@@ -4230,6 +4230,7 @@ boolean server_ok_to_countdown(
 			server_director_ok_to_countdown(server->game.player_count, server_needs_more_teams(server));
 	}
 	if (server_has_enough_machines(server) &&
+		server->game.player_count > 0 &&
 		(here_only || !server_needs_more_teams(server) || server_players_on_one_machine(server)) &&
 		(here_only || server->game.player_count >= server->game.minimum_players ||
 			server_players_on_one_machine(server)))

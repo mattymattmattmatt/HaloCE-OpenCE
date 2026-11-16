@@ -96,7 +96,7 @@ NEGATIVE_CONTROLS = {
         "server_director_ok_to_countdown", "dedicated-director-refuses",
     ),
     "dedicated-start-now-starts-countdown": (
-        ("if (!halo_server_mode() &&", "if (1 &&"),
+        ("if (halo_server_mode())\n\t\t\t\t\t\treturn;", "if (0)\n\t\t\t\t\t\treturn;"),
         "network_game_server_update_countdown", "dedicated-start-now-five-seconds",
     ),
     "host-takes-five-seconds": (

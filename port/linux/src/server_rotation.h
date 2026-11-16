@@ -26,7 +26,7 @@ enum
 {
 	SERVER_ROTATION_MAXIMUM_ENTRIES = 64,
 	SERVER_ROTATION_MAXIMUM_TEXT = 4096,
-	SERVER_RULES_MAXIMUM = 48,
+	SERVER_RULES_MAXIMUM = 64,
 	SERVER_ENTRY_TEXT_SIZE = 256,
 	SERVER_MAP_SIZE = 128,
 	/* (room for saved=<name> of a saved gametype's 11 characters, each
