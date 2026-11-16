@@ -420,9 +420,6 @@ void touch_input_controls(XINPUT_GAMEPAD *pad, int menus)
 			overlay_menu_toggle_request();
 		overlay_button_was = overlay_button;
 	}
-	/* Touch retains native prompts while automatic detection is enabled. */
-	for (index = 0; index < 7; index++)
-		if (state[index]) { keyboard_prompt_touch(); break; }
 	/* the stick moves the player through the game's input state, whatever
 	the profile's sticks do (touch_input_move), not as the left stick */
 	move_x = state[0] / 32767.0f;
