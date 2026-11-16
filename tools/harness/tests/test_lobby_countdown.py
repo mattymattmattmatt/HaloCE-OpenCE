@@ -40,16 +40,17 @@ CONSTANTS = (
 # a fault in network_server_manager.c, the function it is in, and the case that must catch it
 NEGATIVE_CONTROLS = {
     "one-player-only": (
-        ("else if ((short)player->machine_index != first_machine_index)", "else"),
-        "server_players_on_one_machine", "split-screen-start-now",
+        ("if (network_game_is_splitscreen_local() ||\n\t\t\t\t\t\tnetwork_game_server_get_client_machine_count(server) <= 1)",
+         "if (0)"),
+        "network_game_server_update_countdown", "split-screen-start-now",
     ),
     "machines-ignored": (
         ("else if ((short)player->machine_index != first_machine_index)", "else if (0)"),
         "server_players_on_one_machine", "two-machines-team-game-needs-both-teams",
     ),
     "no-player-counts": (
-        ("return first_machine_index != NONE;", "return TRUE;"),
-        "server_players_on_one_machine", "empty-lobby-waits",
+        ("server->game.player_count > 0 &&", "1 &&"),
+        "server_ok_to_countdown", "empty-lobby-waits",
     ),
     "dedicated-rule-ignored": (
         ("if (halo_server_mode())", "if (0)"),

@@ -27,9 +27,15 @@ typedef unsigned short word;
 #define MAXIMUM_NETWORK_PLAYER_COUNT HALO_PORT_MAXIMUM_NETWORK_PLAYERS
 #define NETWORK_GAME_PLAYER_SLOTS HALO_PORT_MAXIMUM_NETWORK_PLAYERS
 
+struct universal_variant
+{
+	boolean teams;
+};
+
 struct game_variant
 {
 	short game_engine_index;
+	struct universal_variant universal_variant;
 };
 
 struct network_game
@@ -85,13 +91,13 @@ static short bots_bot_joined_kind(long bot_index) { (void)bot_index; return 0; }
 static short bots_bot_own_skill(long bot_index) { (void)bot_index; return 0; }
 static long bots_bot_team_asked(long bot_index) { (void)bot_index; return NONE; }
 static short bots_kind(void) { return 0; }
-static void bots_name(long bot_index, int listed, wchar_t *name, long count)
-{
-	(void)bot_index;
-	(void)listed;
-	if (count > 0)
-		name[0] = 0;
-}
+/* (bots.c: bots_network_player records these for the bot that joins) */
+static char bots_kinds[BOTS_MAXIMUM];
+static signed char bots_bot_skills[BOTS_MAXIMUM];
+static short bots_next_kind = NONE;
+static short bots_next_skill = NONE;
+static signed char bots_bot_teams_asked[BOTS_MAXIMUM];
+static long bots_next_team = NONE;
 static boolean network_game_server_port_host_bot_join(struct network_game_server *server, long wanted_index,
 	short kind, short skill, long team_index, char *said, long said_size)
 {

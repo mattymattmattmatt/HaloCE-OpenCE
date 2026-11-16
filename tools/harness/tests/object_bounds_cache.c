@@ -381,7 +381,8 @@ int main(int argc, char **argv)
 				struct collision_result collision;
 
 				if (objects[index].object.parent_object_index != NONE ||
-					!object_bounds_cache_vector_misses(OBJECT_INDEX(index), queries[query].flags,
+					!object_bounds_cache_vector_misses(OBJECT_INDEX(index),
+						queries[query].flags | _collision_test_objects_all_types_flags,
 						_collision_test_objects_first_type_bit, &queries[query].point, &vector))
 					continue;
 				missed++;
