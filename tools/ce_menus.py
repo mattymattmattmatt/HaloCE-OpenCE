@@ -617,6 +617,21 @@ def pause_art(art):
     return lines
 
 
+def regenerate_settings():
+    """Write port-owned settings and register any new screens for embedding."""
+    screens = {**port_settings.settings_files(), **port_settings.multiplayer_files()}
+    for name, lines in screens.items():
+        (CE / name).write_text("\n".join(lines))
+    from mcc_menu_patches import regenerate
+    regenerate(CE)
+    manifest = MENUS / "menus.json"
+    data = json.loads(manifest.read_text())
+    files = set(data["files"]) | {"ce/" + name for name in screens}
+    data["files"] = sorted(name for name in files if name.endswith(".xml")) + sorted(
+        name for name in files if not name.endswith(".xml"))
+    manifest.write_text(json.dumps(data, indent=1) + "\n")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tags", type=Path, required=True)

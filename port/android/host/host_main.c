@@ -37,6 +37,7 @@ Vulkan renderer's GPU times (gpu.txt: host_vk_profile.c) write there.
 */
 
 #include "host.h"
+#include "host_mcc_memory.h"
 #include "tomlc17.h"
 
 #include <SDL3/SDL.h>
@@ -688,6 +689,8 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved)
 	/* (before main: what the reservation finds goes to logcat too) */
 	host_log_set_sink(log_to_logcat);
 	host_memory_reserve_early();
+	/* MCC must reserve before the guest and renderer make allocations. */
+	host_mcc_memory_initialize();
 	return JNI_VERSION_1_6;
 }
 

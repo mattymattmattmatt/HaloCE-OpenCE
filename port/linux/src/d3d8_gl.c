@@ -23,9 +23,11 @@ Conventions carried over from the Xbox:
 
 #include "xgpu.h"
 #include "halo_port_window.h"
+#include "mcc_environment_shader.h"
 #include "sdl_platform.h"
 #include "halo_ui_pointer.h"
 #include "port_config.h"
+#include "loading_widescreen.h"
 #include "posix.h"
 #include "main/console.h"
 #ifdef HALO_ANDROID
@@ -91,6 +93,23 @@ struct xgpu_capabilities xgpu_capabilities;
 OpenGL ES, which has no glClipControl: its depth from -1 would lose the
 precision near 0 that reversing gains */
 BOOL xgpu_reversed_depth;
+
+/* A record of the device's own (a vertex array, a render target, a
+framebuffer, a program): the renderer cannot go on without it. The web
+build's malloc gives NULL when the heap is full, rather than aborting
+(-sABORTING_MALLOC=0, tools/web_build.py), and WebAssembly does not trap a
+write through it (address 0 is memory), so stop here instead. */
+static void *device_record_new(size_t size)
+{
+	void *record = calloc(1, size);
+
+	if (!record)
+	{
+		fprintf(stderr, "d3d8: out of memory for a %lu byte record\n", (unsigned long)size);
+		abort();
+	}
+	return record;
+}
 
 /* ---------- the screen's width
 
@@ -528,6 +547,8 @@ struct draw_uniforms
 	float screen_offset;
 	float texture_lod_bias[4];
 	float height_fade[4];
+	/* display.reversed_depth: a z bias's depth units (nv2a_vsh.c) */
+	float depth_bias;
 };
 
 struct program_entry
@@ -546,6 +567,7 @@ struct program_entry
 	GLint texture_lod_bias;
 	GLint screen_offset;
 	GLint height_fade;
+	GLint depth_bias;
 	/* nv2a_pixel_shader_key's source_blend's color, and what it last had */
 	GLint blend_constant;
 	float blend_constant_value[4];
@@ -937,7 +959,29 @@ struct framebuffer_entry
 static struct render_target_entry *render_targets;
 static struct framebuffer_entry *framebuffers;
 
+/* 1 when this driver's glClear reads the scissor from the lower left,
+while draws use the upper-left origin glClipControl set. Used only when
+pane clears still go through glClear (use_quad_clear is 0). */
+static int clear_scissor_lower_left;
+
+#ifndef HALO_GLES
+/* 1: pane clears are a viewport-filling triangle, so they use the same
+origin as draws and do not depend on the driver's glClear scissor.
+Chosen at start (choose_clear_scissor_origin). */
+static int use_quad_clear;
+/* 1: draws are clipped by the viewport alone, not GL_SCISSOR_TEST. Some
+Intel Windows drivers still drop or mis-origin a scissor that starts at
+y 0 (the top pane) even when the test is enabled first. */
+static int clip_draws_to_viewport;
+
+static GLuint clear_quad_program;
+static GLuint clear_quad_vertex_array;
+static GLint clear_quad_color_location = -1;
+static GLint clear_quad_depth_location = -1;
+#endif
+
 static void render_targets_evict(void);
+static GLint clear_scissor_y(GLint y, GLint height);
 
 /* ---------- the device */
 
@@ -965,13 +1009,14 @@ unsynchronized write the ring allows (host_gl_buffer_write). */
 /* what a test's place in the buffer holds until the GPU copies its count
 there: more than any test covers (8K with 4x MSAA has 133 million samples) */
 #define VISIBILITY_UNCOPIED 0xFFFFFFFFUL
-/* a frame's tests: their queries (kept until every count is read), the slot
-and area of each, and (once the frame is presented) the fence its copies
-wait on */
+/* a frame's tests: their queries (kept until every count is read), the
+slot, number (visibility_ended) and area of each, and (once the frame is
+presented) the fence its copies wait on */
 struct visibility_batch
 {
 	GLuint queries[VISIBILITY_TEST_SLOTS];
 	unsigned short slots[VISIBILITY_TEST_SLOTS];
+	ULONGLONG tests[VISIBILITY_TEST_SLOTS];
 	float areas[VISIBILITY_TEST_SLOTS];
 	unsigned long count, read, frame;
 	ULONGLONG serial;
@@ -1066,6 +1111,8 @@ struct gl_device
 	GLuint queries[VISIBILITY_TEST_SLOTS];
 	GLuint scratch_query;
 	BOOL visibility_unread[VISIBILITY_TEST_SLOTS];
+	/* the number of the test each slot's query is (visibility_ended) */
+	ULONGLONG query_tests[VISIBILITY_TEST_SLOTS];
 #endif
 	BOOL query_pending[VISIBILITY_TEST_SLOTS];
 	/* the pixels each of the game's pixels covered in the test's target
@@ -1077,6 +1124,12 @@ struct gl_device
 	is incomplete, so until a test's count has arrived the slot's earlier
 	count stands. A frame of The Library's lights makes hundreds of tests. */
 	GLuint visibility_known[VISIBILITY_TEST_SLOTS];
+	/* the tests ended at each slot so far, dropped ones too, and the number
+	(from 1) of the one whose count the slot gives, 0 for none: the latest
+	read, which can be frames older than the slot's latest test
+	(xgpu_visibility_tests_ended) */
+	ULONGLONG visibility_ended[VISIBILITY_TEST_SLOTS];
+	ULONGLONG visibility_counted[VISIBILITY_TEST_SLOTS];
 #ifdef HALO_GLES
 	/* with atomic counters: one counter per test, used as a ring */
 	GLuint visibility_counters;
@@ -1093,6 +1146,7 @@ struct gl_device
 	the latest count known, as the desktop query readback gives. */
 	GLuint counter_snapshots[STREAM_BUFFER_RING];
 	unsigned short ring_tests[STREAM_BUFFER_RING][VISIBILITY_TEST_SLOTS][2];
+	ULONGLONG ring_test_numbers[STREAM_BUFFER_RING][VISIBILITY_TEST_SLOTS];
 	unsigned long ring_test_count[STREAM_BUFFER_RING];
 	GLuint counter_values[VISIBILITY_TEST_SLOTS];
 	GLuint visibility_latest[VISIBILITY_TEST_SLOTS];
@@ -1380,6 +1434,22 @@ static void state_enable(unsigned char *shadow, GLenum capability, BOOL enabled)
 		glDisable(capability);
 }
 
+void xgpu_scissor_reset(GLint width, GLint height)
+{
+	glDisable(GL_SCISSOR_TEST);
+	if (width > 0 && height > 0)
+	{
+		glScissor(0, 0, width, height);
+		gl_state.scissor[0] = 0;
+		gl_state.scissor[1] = 0;
+		gl_state.scissor[2] = width;
+		gl_state.scissor[3] = height;
+	}
+	else
+		memset(gl_state.scissor, 0xff, sizeof(gl_state.scissor));
+	gl_state.scissor_test = 0;
+}
+
 static void state_program(GLuint program)
 {
 	if (gl_state.program != program)
@@ -1500,7 +1570,7 @@ static struct vertex_array_entry *vertex_array_get(const struct vertex_layout *l
 		if (entry->hash == hash && words_equal(&entry->layout, layout, sizeof(*layout)))
 			return entry;
 	}
-	entry = calloc(1, sizeof(*entry));
+	entry = device_record_new(sizeof(*entry));
 	entry->hash = hash;
 	entry->layout = *layout;
 	memset(entry->bindings, 0xff, sizeof(entry->bindings));
@@ -1856,6 +1926,7 @@ static struct render_target_entry *render_target_get(const D3DSurface *surface)
 	unsigned long width, height, slot;
 	long screen;
 	BOOL depth;
+	GLint previous_texture;
 
 	if (!surface || !surface->Data)
 		return NULL;
@@ -1902,7 +1973,7 @@ static struct render_target_entry *render_target_get(const D3DSurface *surface)
 			return render_target_remember(surface, screen, entry);
 		}
 	}
-	entry = calloc(1, sizeof(*entry));
+	entry = device_record_new(sizeof(*entry));
 	entry->target.data = surface->Data;
 	entry->target.width = width;
 	entry->target.height = height;
@@ -1915,10 +1986,14 @@ static struct render_target_entry *render_target_get(const D3DSurface *surface)
 	entry->screen_buffer = surface->Data == (depth ? device.depth_buffer.Data : device.back_buffer.Data);
 	entry->target.format = depth ? (xgpu_reversed_depth ? GL_DEPTH32F_STENCIL8 : GL_DEPTH24_STENCIL8) :
 		entry->screen_buffer && hdr.active ? GL_RGBA16F : GL_RGBA8;
+	/* Textures may already be selected for this draw. Allocating its target
+	 * must not replace the active sampler's input with the output image. */
+	glGetIntegerv(GL_TEXTURE_BINDING_2D, &previous_texture);
 	glGenTextures(1, &entry->target.texture);
 	glBindTexture(GL_TEXTURE_2D, entry->target.texture);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
 	render_target_storage(&entry->target);
+	glBindTexture(GL_TEXTURE_2D, (GLuint)previous_texture);
 	xgpu_gl_state_invalidate();
 	entry->next = render_targets;
 	render_targets = entry;
@@ -1958,7 +2033,7 @@ static GLuint framebuffer_find(GLuint color, GLuint depth, BOOL renderbuffers)
 			return entry->framebuffer;
 		}
 	}
-	entry = calloc(1, sizeof(*entry));
+	entry = device_record_new(sizeof(*entry));
 	entry->color = color;
 	entry->depth = depth;
 	entry->renderbuffers = renderbuffers;
@@ -2024,7 +2099,7 @@ static void render_target_resolve(struct xgpu_render_target *target)
 	draw = target->depth ? framebuffer_get(0, target->texture) : framebuffer_get(target->texture, 0);
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
-	glDisable(GL_SCISSOR_TEST);
+	xgpu_scissor_reset((GLint)target->gl_width, (GLint)target->gl_height);
 	glBlitFramebuffer(0, 0, (GLint)target->gl_width, (GLint)target->gl_height,
 		0, 0, (GLint)target->gl_width, (GLint)target->gl_height,
 		target->depth ? GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT : GL_COLOR_BUFFER_BIT, GL_NEAREST);
@@ -2058,7 +2133,7 @@ static void render_target_multisample(struct xgpu_render_target *target, int sam
 	change of the setting is taken up between frames, and the frame clears
 	the screen's targets before it draws) */
 	glBindFramebuffer(GL_FRAMEBUFFER, draw);
-	glDisable(GL_SCISSOR_TEST);
+	xgpu_scissor_reset((GLint)target->gl_width, (GLint)target->gl_height);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glDepthMask(GL_TRUE);
 	glStencilMask(0xff);
@@ -2072,7 +2147,7 @@ static void render_target_multisample(struct xgpu_render_target *target, int sam
 
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
-		glDisable(GL_SCISSOR_TEST);
+		xgpu_scissor_reset((GLint)target->gl_width, (GLint)target->gl_height);
 		glBlitFramebuffer(0, 0, (GLint)target->gl_width, (GLint)target->gl_height,
 			0, 0, (GLint)target->gl_width, (GLint)target->gl_height,
 			target->depth ? GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT : GL_COLOR_BUFFER_BIT, GL_NEAREST);
@@ -2378,6 +2453,420 @@ static void visibility_results_initialize(void);
 static BOOL visibility_readback_gl_ok(const char *phase);
 #endif
 
+#ifndef HALO_GLES
+#define CLEAR_SCISSOR_PROBE_WIDTH 8
+#define CLEAR_SCISSOR_PROBE_HEIGHT 2
+
+/* A 2-row offscreen clear with the scissor at upper-left y 0: whether
+this driver's glClear paints the same row draws would (0), the other
+row (1), or the probe could not tell (-1). glReadPixels y 0 is the
+bottom of the framebuffer, independent of glClipControl (OpenGL 4.5).
+OpenGL ES has no clip control; both clears and draws are lower-left,
+so the probe is not run.
+
+Some Intel Windows drivers only mis-handle glClear's scissor on the
+default framebuffer, not on an FBO, so an offscreen-only test can
+wrongly report that clears already match draws. probe_clear_scissor_origin
+is the FBO test; probe_clear_scissor_origin_default_fb paints one row of
+the window and reads the top and bottom. */
+
+static int probe_pixels_row_red(const unsigned char *pixels, unsigned width)
+{
+	unsigned row, count = 0;
+
+	for (row = 0; row < width; row++)
+	{
+		const unsigned char *pixel = pixels + row * 4;
+
+		if (pixel[0] > 128 && pixel[1] < 64 && pixel[2] < 64)
+			count++;
+	}
+	return (int)count;
+}
+
+static int probe_clear_result(int top_red, int bottom_red, unsigned width, const char *where)
+{
+	if (top_red == (int)width && bottom_red == 0)
+		return 0;
+	if (bottom_red == (int)width && top_red == 0)
+		return 1;
+	platform_log("GPU: split-pane clears: %s self-test was inconclusive (top %d/%u red, bottom %d/%u red)",
+		where, top_red, width, bottom_red, width);
+	return -1;
+}
+
+static int probe_clear_scissor_origin(void)
+{
+	GLuint texture = 0, framebuffer = 0;
+	unsigned char pixels[CLEAR_SCISSOR_PROBE_WIDTH * CLEAR_SCISSOR_PROBE_HEIGHT * 4];
+	GLint prev_draw = 0, prev_read = 0, prev_texture = 0, prev_pack = 4;
+	GLint prev_viewport[4], prev_scissor[4], prev_mask[4];
+	GLsizei width = CLEAR_SCISSOR_PROBE_WIDTH, height = CLEAR_SCISSOR_PROBE_HEIGHT;
+	int result = -1;
+
+	while (glGetError() != GL_NO_ERROR)
+		;
+	glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prev_draw);
+	glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prev_read);
+	glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev_texture);
+	glGetIntegerv(GL_PACK_ALIGNMENT, &prev_pack);
+	glGetIntegerv(GL_VIEWPORT, prev_viewport);
+	glGetIntegerv(GL_SCISSOR_BOX, prev_scissor);
+	glGetIntegerv(GL_COLOR_WRITEMASK, prev_mask);
+
+	glGenTextures(1, &texture);
+	glBindTexture(GL_TEXTURE_2D, texture);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+	glGenFramebuffers(1, &framebuffer);
+	glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+	{
+		platform_log("GPU: split-pane clears: offscreen self-test framebuffer was incomplete");
+		goto restore;
+	}
+
+	glViewport(0, 0, width, height);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glDisable(GL_SCISSOR_TEST);
+	glClearColor(0.f, 0.f, 0.f, 1.f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	/* enable first: the same order draws will use, and the order Intel
+	needs so a scissor that starts at y 0 is not dropped */
+	glEnable(GL_SCISSOR_TEST);
+	glScissor(0, 0, width, 1);
+	glClearColor(1.f, 0.f, 0.f, 1.f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glDisable(GL_SCISSOR_TEST);
+	glPixelStorei(GL_PACK_ALIGNMENT, 1);
+	memset(pixels, 0, sizeof(pixels));
+	glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+	if (glGetError() != GL_NO_ERROR)
+	{
+		platform_log("GPU: split-pane clears: offscreen self-test could not read the probe");
+		goto restore;
+	}
+
+	/* row 0 in this buffer is the bottom image row; row 1 is the top */
+	result = probe_clear_result(
+		probe_pixels_row_red(pixels + (unsigned)width * 4, (unsigned)width),
+		probe_pixels_row_red(pixels, (unsigned)width),
+		(unsigned)width, "offscreen");
+
+restore:
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)prev_draw);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)prev_read);
+	glBindTexture(GL_TEXTURE_2D, (GLuint)prev_texture);
+	if (framebuffer)
+		glDeleteFramebuffers(1, &framebuffer);
+	if (texture)
+		glDeleteTextures(1, &texture);
+	glViewport(prev_viewport[0], prev_viewport[1], prev_viewport[2], prev_viewport[3]);
+	glScissor(prev_scissor[0], prev_scissor[1], prev_scissor[2], prev_scissor[3]);
+	/* the loader has no glIsEnabled or glGetFloatv; this probe runs at
+	start, before any game draw, so the defaults (test off, clear colour
+	zero) are what later code expects */
+	glDisable(GL_SCISSOR_TEST);
+	glColorMask((GLboolean)prev_mask[0], (GLboolean)prev_mask[1], (GLboolean)prev_mask[2],
+		(GLboolean)prev_mask[3]);
+	glClearColor(0.f, 0.f, 0.f, 0.f);
+	glPixelStorei(GL_PACK_ALIGNMENT, prev_pack);
+	while (glGetError() != GL_NO_ERROR)
+		;
+	return result;
+}
+
+/* Same test on the window's default framebuffer. A driver can honour the
+clip-control origin on an FBO and still take a lower-left scissor for
+glClear of the back buffer, which is what split-screen panes clear into. */
+static int probe_clear_scissor_origin_default_fb(void)
+{
+	unsigned char top[CLEAR_SCISSOR_PROBE_WIDTH * 4], bottom[CLEAR_SCISSOR_PROBE_WIDTH * 4];
+	GLint prev_draw = 0, prev_read = 0, prev_pack = 4;
+	GLint prev_viewport[4], prev_scissor[4], prev_mask[4];
+	GLsizei width = CLEAR_SCISSOR_PROBE_WIDTH;
+	int draw_width = 0, draw_height = 0, result = -1;
+
+	platform_video_drawable_size(&draw_width, &draw_height);
+	if (draw_width < CLEAR_SCISSOR_PROBE_WIDTH || draw_height < 2)
+	{
+		platform_log("GPU: split-pane clears: default-framebuffer self-test skipped (drawable %dx%d)",
+			draw_width, draw_height);
+		return -1;
+	}
+
+	while (glGetError() != GL_NO_ERROR)
+		;
+	glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prev_draw);
+	glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prev_read);
+	glGetIntegerv(GL_PACK_ALIGNMENT, &prev_pack);
+	glGetIntegerv(GL_VIEWPORT, prev_viewport);
+	glGetIntegerv(GL_SCISSOR_BOX, prev_scissor);
+	glGetIntegerv(GL_COLOR_WRITEMASK, prev_mask);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glDisable(GL_SCISSOR_TEST);
+	glClearColor(0.f, 0.f, 0.f, 1.f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glEnable(GL_SCISSOR_TEST);
+	glScissor(0, 0, width, 1);
+	glClearColor(1.f, 0.f, 0.f, 1.f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glDisable(GL_SCISSOR_TEST);
+	glPixelStorei(GL_PACK_ALIGNMENT, 1);
+	memset(top, 0, sizeof(top));
+	memset(bottom, 0, sizeof(bottom));
+	/* ReadPixels y 0 is the bottom of the window, regardless of clip control */
+	glReadPixels(0, 0, width, 1, GL_RGBA, GL_UNSIGNED_BYTE, bottom);
+	glReadPixels(0, draw_height - 1, width, 1, GL_RGBA, GL_UNSIGNED_BYTE, top);
+	if (glGetError() != GL_NO_ERROR)
+		platform_log("GPU: split-pane clears: default-framebuffer self-test could not read the probe");
+	else
+		result = probe_clear_result(
+			probe_pixels_row_red(top, (unsigned)width),
+			probe_pixels_row_red(bottom, (unsigned)width),
+			(unsigned)width, "default-framebuffer");
+
+	glDisable(GL_SCISSOR_TEST);
+	glClearColor(0.f, 0.f, 0.f, 0.f);
+	glClear(GL_COLOR_BUFFER_BIT);
+
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)prev_draw);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)prev_read);
+	glViewport(prev_viewport[0], prev_viewport[1], prev_viewport[2], prev_viewport[3]);
+	glScissor(prev_scissor[0], prev_scissor[1], prev_scissor[2], prev_scissor[3]);
+	glColorMask((GLboolean)prev_mask[0], (GLboolean)prev_mask[1], (GLboolean)prev_mask[2],
+		(GLboolean)prev_mask[3]);
+	glPixelStorei(GL_PACK_ALIGNMENT, prev_pack);
+	while (glGetError() != GL_NO_ERROR)
+		;
+	return result;
+}
+
+/* display.intel_clear_fix / HALO_INTEL_CLEAR_FIX: "auto" (default), "off"/"0",
+or "on"/"1". auto uses a viewport-quad clear (and viewport-only draw
+clipping) on Intel Windows (not Mesa), or when a self-test shows glClear's
+scissor origin disagrees with draws. "on" forces that path; "off" uses
+glClear and clips draws with a scissor, with no Y flip. */
+static int intel_clear_fix_preference(void)
+{
+	const char *value = config_string("display.intel_clear_fix");
+
+	if (!value || !*value || SDL_strcasecmp(value, "auto") == 0)
+		return -1;
+	if (SDL_strcasecmp(value, "off") == 0 || SDL_strcasecmp(value, "0") == 0 ||
+		SDL_strcasecmp(value, "false") == 0 || SDL_strcasecmp(value, "no") == 0)
+		return 0;
+	if (SDL_strcasecmp(value, "on") == 0 || SDL_strcasecmp(value, "1") == 0 ||
+		SDL_strcasecmp(value, "true") == 0 || SDL_strcasecmp(value, "yes") == 0)
+		return 1;
+	platform_log("GPU: display.intel_clear_fix \"%s\" is not auto, off or on: auto", value);
+	return -1;
+}
+
+static int ensure_clear_quad_program(void)
+{
+	GLuint vertex, fragment;
+
+	if (clear_quad_program)
+		return 1;
+
+	vertex = xgpu_compile_shader(GL_VERTEX_SHADER,
+		"#version 450 core\n"
+		"uniform float u_depth;\n"
+		"void main()\n"
+		"{\n"
+		"\tgl_Position = vec4(float((gl_VertexID & 1) << 2) - 1.0, "
+			"float((gl_VertexID & 2) << 1) - 1.0, u_depth, 1.0);\n"
+		"}\n",
+		"split-pane clear vertex");
+	fragment = xgpu_compile_shader(GL_FRAGMENT_SHADER,
+		"#version 450 core\n"
+		"uniform vec4 u_color;\n"
+		"out vec4 result;\n"
+		"void main()\n"
+		"{\n"
+		"\tresult = u_color;\n"
+		"}\n",
+		"split-pane clear pixel");
+	if (!vertex || !fragment)
+	{
+		if (vertex)
+			glDeleteShader(vertex);
+		if (fragment)
+			glDeleteShader(fragment);
+		return 0;
+	}
+	clear_quad_program = xgpu_link_program(vertex, fragment, "split-pane clear");
+	glDeleteShader(vertex);
+	glDeleteShader(fragment);
+	if (!clear_quad_program)
+		return 0;
+	clear_quad_color_location = glGetUniformLocation(clear_quad_program, "u_color");
+	clear_quad_depth_location = glGetUniformLocation(clear_quad_program, "u_depth");
+	glGenVertexArrays(1, &clear_quad_vertex_array);
+	return 1;
+}
+
+/* Paint the rectangle with a triangle that fills the viewport, so colour,
+depth and stencil follow the same clip-control origin as draws. Scissor is
+left off: the viewport alone keeps the clear inside the pane. */
+static void clear_with_viewport_quad(GLint x, GLint y, GLint width, GLint height,
+	GLbitfield mask, const float rgba[4], float depth, DWORD stencil)
+{
+	static int logged;
+
+	if (width <= 0 || height <= 0)
+		return;
+	if (!ensure_clear_quad_program())
+	{
+		if (!logged)
+		{
+			logged = 1;
+			platform_log("GPU: split-pane clears: viewport-quad program failed; falling back to glClear");
+		}
+		glEnable(GL_SCISSOR_TEST);
+		glScissor(x, clear_scissor_y(y, height), width, height);
+		glClear(mask);
+		glDisable(GL_SCISSOR_TEST);
+		return;
+	}
+	if (!logged)
+	{
+		logged = 1;
+		platform_log("GPU: split-pane clears: first pane clear used the viewport-quad path");
+	}
+
+	glDisable(GL_SCISSOR_TEST);
+	glDisable(GL_BLEND);
+	glDisable(GL_CULL_FACE);
+	glDisable(GL_POLYGON_OFFSET_FILL);
+#ifndef HALO_GLES
+	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+#endif
+	glViewport(x, y, width, height);
+	glDepthRange(0.0, 1.0);
+	if (!(mask & GL_COLOR_BUFFER_BIT))
+		glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+	if (mask & GL_DEPTH_BUFFER_BIT)
+	{
+		glDepthMask(GL_TRUE);
+		glEnable(GL_DEPTH_TEST);
+		glDepthFunc(GL_ALWAYS);
+	}
+	else
+	{
+		glDepthMask(GL_FALSE);
+		glDisable(GL_DEPTH_TEST);
+	}
+	if (mask & GL_STENCIL_BUFFER_BIT)
+	{
+		glEnable(GL_STENCIL_TEST);
+		glStencilFunc(GL_ALWAYS, (GLint)stencil, 0xff);
+		glStencilOp(GL_REPLACE, GL_REPLACE, GL_REPLACE);
+		glStencilMask(0xff);
+	}
+	else
+	{
+		glDisable(GL_STENCIL_TEST);
+		glStencilMask(0);
+	}
+	state_program(clear_quad_program);
+	if (clear_quad_color_location >= 0)
+		glUniform4fv(clear_quad_color_location, 1, rgba);
+	if (clear_quad_depth_location >= 0)
+		glUniform1f(clear_quad_depth_location, depth);
+	glBindVertexArray(clear_quad_vertex_array);
+	glDrawArrays(GL_TRIANGLES, 0, 3);
+	glBindVertexArray(device.vertex_array);
+	xgpu_gl_state_invalidate();
+}
+
+#endif
+
+static const char *clear_probe_phrase(int probed)
+{
+	if (probed == 0)
+		return "glClear scissor matches upper-left draws";
+	if (probed == 1)
+		return "glClear scissor uses lower-left origin";
+	return "could not run";
+}
+
+static void choose_clear_scissor_origin(const char *renderer)
+{
+#ifdef HALO_GLES
+	clear_scissor_lower_left = 0;
+	platform_log("GPU: split-pane clears: OpenGL ES uses glClear; clip control is emulated, so clears and draws share an origin");
+	if (renderer && *renderer)
+		platform_log("GPU: split-pane clears: renderer \"%s\"", renderer);
+#else
+	int preference = intel_clear_fix_preference();
+	int probed_fbo = probe_clear_scissor_origin();
+	int probed_default = probe_clear_scissor_origin_default_fb();
+	int intel_windows = renderer && strstr(renderer, "Intel") && !strstr(renderer, "Mesa");
+	int origin_wrong = probed_default == 1 || (probed_default < 0 && probed_fbo == 1);
+	const char *why;
+
+	clear_scissor_lower_left = 0;
+	use_quad_clear = 0;
+	clip_draws_to_viewport = 0;
+
+	if (preference == 0)
+	{
+		use_quad_clear = 0;
+		clip_draws_to_viewport = 0;
+		why = "display.intel_clear_fix=off (forced): glClear, draws clipped with a scissor";
+	}
+	else if (preference == 1)
+	{
+		use_quad_clear = 1;
+		clip_draws_to_viewport = 1;
+		why = "display.intel_clear_fix=on (forced): viewport-quad clears, draws clipped by the viewport only";
+	}
+	else if (intel_windows)
+	{
+		use_quad_clear = 1;
+		clip_draws_to_viewport = 1;
+		why = "auto: Intel Windows renderer, so viewport-quad clears and viewport-only draw clipping";
+	}
+	else if (origin_wrong)
+	{
+		use_quad_clear = 1;
+		clip_draws_to_viewport = 1;
+		why = "auto: a self-test showed glClear's scissor origin disagrees with draws, so viewport-quad clears";
+	}
+	else
+	{
+		use_quad_clear = 0;
+		clip_draws_to_viewport = 0;
+		why = "auto: glClear, draws clipped with a scissor";
+	}
+
+	if (use_quad_clear && !ensure_clear_quad_program())
+	{
+		use_quad_clear = 0;
+		/* keep viewport-only draw clipping if that was chosen: a missing
+		program must not bring back a dropped top-pane scissor */
+		clear_scissor_lower_left = (preference != 0) && (intel_windows || origin_wrong);
+		why = clear_scissor_lower_left ?
+			"viewport-quad program failed; falling back to glClear with a flipped clear Y" :
+			"viewport-quad program failed; falling back to glClear with no Y flip";
+	}
+
+	platform_log("GPU: split-pane clears: %s", why);
+	platform_log("GPU: split-pane clears: offscreen self-test: %s; default-framebuffer self-test: %s",
+		clear_probe_phrase(probed_fbo), clear_probe_phrase(probed_default));
+	if (probed_fbo >= 0 && probed_default >= 0 && probed_fbo != probed_default)
+		platform_log("GPU: split-pane clears: the two self-tests disagreed; the default framebuffer is what pane clears use");
+	if (renderer && *renderer)
+		platform_log("GPU: split-pane clears: renderer \"%s\"", renderer);
+#endif
+}
+
 static void gl_initialize(void)
 {
 	GLint major = 0, minor = 0;
@@ -2534,6 +3023,7 @@ static void gl_initialize(void)
 		glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
 	}
 #endif
+	choose_clear_scissor_origin((const char *)glGetString(GL_RENDERER));
 	for (index = 0; index < XGPU_VERTEX_ATTRIBUTE_COUNT; index++)
 	{
 		device.attributes[index][3] = 1.0f;
@@ -3226,6 +3716,7 @@ void WINAPI D3DDevice_BeginVisibilityTest(void)
 
 HRESULT WINAPI D3DDevice_EndVisibilityTest(DWORD index)
 {
+	ULONGLONG test;
 #ifdef HALO_GLES
 	GLuint scratch;
 #endif
@@ -3234,6 +3725,8 @@ HRESULT WINAPI D3DDevice_EndVisibilityTest(DWORD index)
 		return S_OK;
 	device.visibility_test_active = FALSE;
 	index %= VISIBILITY_TEST_SLOTS;
+	/* (numbered whether its count will come or not) */
+	test = ++device.visibility_ended[index];
 #ifdef HALO_GLES
 	if (xgpu_capabilities.atomic_counters)
 	{
@@ -3245,6 +3738,7 @@ HRESULT WINAPI D3DDevice_EndVisibilityTest(DWORD index)
 		{
 			device.ring_tests[device.buffer_ring][*count][0] = (unsigned short)index;
 			device.ring_tests[device.buffer_ring][*count][1] = (unsigned short)device.counter_active;
+			device.ring_test_numbers[device.buffer_ring][*count] = test;
 			(*count)++;
 		}
 		device.query_pending[index] = TRUE;
@@ -3256,6 +3750,7 @@ HRESULT WINAPI D3DDevice_EndVisibilityTest(DWORD index)
 		if (device.visibility_unavailable)
 		{
 			device.visibility_known[index] = VISIBILITY_ALL_SAMPLES;
+			device.visibility_counted[index] = test;
 			device.query_pending[index] = TRUE;
 		}
 		return S_OK;
@@ -3273,6 +3768,7 @@ HRESULT WINAPI D3DDevice_EndVisibilityTest(DWORD index)
 		struct visibility_batch *batch = &device.visibility_batches[device.visibility_batch];
 
 		batch->slots[batch->count] = (unsigned short)index;
+		batch->tests[batch->count] = test;
 		batch->areas[batch->count++] = device.query_area[index];
 		device.query_pending[index] = TRUE;
 		return S_OK;
@@ -3282,6 +3778,7 @@ HRESULT WINAPI D3DDevice_EndVisibilityTest(DWORD index)
 	scratch = device.scratch_query;
 	device.scratch_query = device.queries[index];
 	device.queries[index] = scratch;
+	device.query_tests[index] = test;
 	device.query_pending[index] = TRUE;
 	device.visibility_unread[index] = TRUE;
 	return S_OK;
@@ -3335,6 +3832,7 @@ HRESULT WINAPI D3DDevice_GetVisibilityTestResult(DWORD index, UINT *result, ULON
 			if (samples)
 				samples = VISIBILITY_ALL_SAMPLES;
 			device.visibility_known[index] = samples;
+			device.visibility_counted[index] = device.query_tests[index];
 			device.visibility_unread[index] = FALSE;
 		}
 	}
@@ -3342,6 +3840,17 @@ HRESULT WINAPI D3DDevice_GetVisibilityTestResult(DWORD index, UINT *result, ULON
 	if (result)
 		*result = device.visibility_known[index];
 	return S_OK;
+}
+
+/* (xgpu.h) */
+unsigned long long xgpu_visibility_tests_ended(unsigned long index)
+{
+	return device.visibility_ended[index % VISIBILITY_TEST_SLOTS];
+}
+
+unsigned long long xgpu_visibility_test_counted(unsigned long index)
+{
+	return device.visibility_counted[index % VISIBILITY_TEST_SLOTS];
 }
 
 /* ---------- render and texture stage state */
@@ -3472,6 +3981,15 @@ void android_ce_texture_unbind(const void *resource)
 }
 #endif
 
+/* Unload can happen before a later draw replaces every texture stage. */
+void xgpu_mcc_texture_unbind(DWORD const *resource)
+{
+	unsigned long stage;
+	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
+		if ((DWORD const *)device.textures[stage] == resource)
+			device.textures[stage] = NULL;
+}
+
 void WINAPI D3DDevice_SetPalette(DWORD stage, D3DPalette *palette)
 {
 	if (stage < D3DTSS_MAXSTAGES)
@@ -3592,6 +4110,11 @@ HRESULT WINAPI D3DDevice_CreateVertexShader(CONST DWORD *declaration, CONST DWOR
 		/* header: program type in the low word, instruction count in the high */
 		object->instruction_count = function[0] >> 16;
 		object->instructions = malloc(object->instruction_count * 4 * sizeof(DWORD));
+		if (!object->instructions && object->instruction_count)
+		{
+			free(object);
+			return E_OUTOFMEMORY;
+		}
 		memcpy(object->instructions, function + 1, object->instruction_count * 4 * sizeof(DWORD));
 	}
 	parse_declaration(object, declaration);
@@ -3841,7 +4364,7 @@ static GLuint fragment_shader_get(const struct nv2a_pixel_shader_key *key)
 			return entry->shader;
 		}
 	}
-	entry = calloc(1, sizeof(*entry));
+	entry = device_record_new(sizeof(*entry));
 	entry->hash = hash;
 	entry->key = *key;
 	source = nv2a_pixel_shader_to_glsl(key);
@@ -3886,7 +4409,7 @@ static struct program_entry *program_get(GLuint vertex_shader, GLuint fragment_s
 			return entry;
 		}
 	}
-	entry = calloc(1, sizeof(*entry));
+	entry = device_record_new(sizeof(*entry));
 	entry->vertex_shader = vertex_shader;
 	entry->fragment_shader = fragment_shader;
 	memset(&entry->uniforms, 0xff, sizeof(entry->uniforms));
@@ -3973,6 +4496,7 @@ static struct program_entry *program_get(GLuint vertex_shader, GLuint fragment_s
 	entry->texture_lod_bias = glGetUniformLocation(entry->program, "texture_lod_bias");
 	entry->screen_offset = glGetUniformLocation(entry->program, "screen_offset");
 	entry->height_fade = glGetUniformLocation(entry->program, "height_fade");
+	entry->depth_bias = glGetUniformLocation(entry->program, "depth_bias");
 	entry->blend_constant = glGetUniformLocation(entry->program, "blend_constant");
 	entry->blood_color = glGetUniformLocation(entry->program, "blood_color");
 	entry->blood_color_value[0] = -1.f;
@@ -4318,7 +4842,7 @@ static void copy_level_by_blit(GLuint source, GLuint destination, GLint level, G
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_get(source, 0));
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw_framebuffer);
 	glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, destination, level);
-	glDisable(GL_SCISSOR_TEST);
+	xgpu_scissor_reset(width, height);
 	glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	/* the blit bypasses the cached state, so the next draw must re-apply it */
@@ -4343,7 +4867,7 @@ static GLuint mip_composite_get(const struct xgpu_texture_description *descripti
 	}
 	if (!composite)
 	{
-		composite = calloc(1, sizeof(*composite));
+		composite = device_record_new(sizeof(*composite));
 		composite->data = data;
 		composite->width = description->width;
 		composite->height = description->height;
@@ -4606,17 +5130,62 @@ static void apply_raster_state(BOOL has_depth)
 		memcpy(gl_state.viewport, viewport, sizeof(viewport));
 		glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
 	}
+	/* the first few distinct viewports (the full window, then each
+	split-screen pane) — useful when the top pane stays the fog clear */
+	{
+		static int logged;
+		static GLint seen[4][4];
+		int i;
+
+		if (logged < 4 && viewport[2] > 0 && viewport[3] > 0)
+		{
+			for (i = 0; i < logged; i++)
+			{
+				if (seen[i][0] == viewport[0] && seen[i][1] == viewport[1] &&
+					seen[i][2] == viewport[2] && seen[i][3] == viewport[3])
+					break;
+			}
+			if (i == logged)
+			{
+				seen[logged][0] = viewport[0];
+				seen[logged][1] = viewport[1];
+				seen[logged][2] = viewport[2];
+				seen[logged][3] = viewport[3];
+				platform_log("GPU: draw viewport (%d): %d,%d %dx%d",
+					logged, viewport[0], viewport[1], viewport[2], viewport[3]);
+				logged++;
+			}
+		}
+	}
 	/* the game never issues a scissor rectangle, and the NV2A scissor register
 	defaults to the viewport, so fragment clipping follows the viewport: this is
 	what keeps a split-screen window's geometry from bleeding across the divider */
 	/* (glScissor takes the corner and the size, as glViewport does) */
 	memcpy(scissor, viewport, sizeof(scissor));
-	if (!words_equal(gl_state.scissor, scissor, sizeof(scissor)))
+#ifndef HALO_GLES
+	if (clip_draws_to_viewport)
 	{
-		memcpy(gl_state.scissor, scissor, sizeof(scissor));
-		glScissor(scissor[0], scissor[1], scissor[2], scissor[3]);
+		/* Intel's Windows driver can still drop or mis-origin a scissor that
+		starts at y 0 (the top pane), even when the test is enabled first.
+		The viewport already matches the pane; leave the test off so draws
+		do not depend on that scissor. Guard-band bleeding at the divider,
+		if any, is preferable to a blank top pane. */
+		state_enable(&gl_state.scissor_test, GL_SCISSOR_TEST, FALSE);
 	}
-	state_enable(&gl_state.scissor_test, GL_SCISSOR_TEST, scissor[2] > 0 && scissor[3] > 0);
+	else
+#endif
+	{
+		/* Intel's Windows driver drops glScissor while the test is disabled when
+		the rectangle starts at y 0. Enable first, then always re-issue the
+		rectangle so a clear that disabled the test cannot leave a stale or
+		dropped scissor behind. */
+		state_enable(&gl_state.scissor_test, GL_SCISSOR_TEST, scissor[2] > 0 && scissor[3] > 0);
+		if (scissor[2] > 0 && scissor[3] > 0)
+		{
+			memcpy(gl_state.scissor, scissor, sizeof(scissor));
+			glScissor(scissor[0], scissor[1], scissor[2], scissor[3]);
+		}
+	}
 	/* (display.reversed_depth: Direct3D's MinZ to MaxZ as 1 - MinZ to
 	1 - MaxZ, which glDepthRange takes nearest first) */
 	depth_range[0] = xgpu_reversed_depth ? 1.0f - device.viewport.MaxZ : device.viewport.MinZ;
@@ -4769,11 +5338,20 @@ static void apply_raster_state(BOOL has_depth)
 
 		offset[0] = dword_to_float(rs[D3DRS_POLYGONOFFSETZSLOPESCALE]);
 		offset[1] = dword_to_float(rs[D3DRS_POLYGONOFFSETZOFFSET]);
-		/* (display.reversed_depth: toward the camera is up) */
+		/* The slope is the depth's change across a pixel, and a target drawn
+		at several pixels to the game's one (render_target_get) has that many
+		times less depth across each: the Xbox's slope term, taken across its
+		own pixels, is that many times the scale. On a surface seen at an
+		angle it is most of the bias (the Pelican's lights on its curved hull
+		sank in at 1080 lines with it a 2.25th as large). */
+		offset[0] *= target_scale[0] > target_scale[1] ? target_scale[0] : target_scale[1];
+		/* (display.reversed_depth: toward the camera is up, and the units,
+		which a floating-point depth buffer measures by the depth itself,
+		are the vertex program's, in the Xbox's measure: depth_bias) */
 		if (xgpu_reversed_depth)
 		{
 			offset[0] = -offset[0];
-			offset[1] = -offset[1];
+			offset[1] = 0.0f;
 		}
 		if (!words_equal(gl_state.polygon_offset, offset, sizeof(offset)))
 		{
@@ -4808,7 +5386,7 @@ static void gl_check_errors(const char *where)
 
 /* the uniforms of the latest draws, converted from these inputs; the serial
 counts the conversions */
-#define DRAW_UNIFORM_INPUT_COUNT (4 + 4 + 16 + 1 + 16 + 2 + 4 + 1 + 1 + 7 * D3DTSS_MAXSTAGES + 4)
+#define DRAW_UNIFORM_INPUT_COUNT (4 + 4 + 16 + 1 + 16 + 2 + 4 + 1 + 1 + 7 * D3DTSS_MAXSTAGES + 4 + 2)
 
 /* the height fade of the draws that follow (d3d8_gl_set_height_fade): off
 while its scale is zero */
@@ -4929,6 +5507,7 @@ static struct program_entry *prepare_draw(BOOL immediate)
 	key.combiner_state[D3DRS_PSFINALCOMBINERCONSTANT0] = 0;
 	key.combiner_state[D3DRS_PSFINALCOMBINERCONSTANT1] = 0;
 	key.texture_modes = D3D__RenderState[D3DRS_PSTEXTUREMODES];
+	key.mcc_bump_attenuation = mcc_environment_shader_active();
 	/* the textures before the targets: a render target the draw samples
 	has its multisampled pixels resolved by a blit (render_target_resolve),
 	which binds framebuffers of its own, and the back buffer can be both
@@ -5134,6 +5713,8 @@ static struct program_entry *prepare_draw(BOOL immediate)
 		}
 		memcpy(&inputs[count], height_fade_value, sizeof(height_fade_value));
 		count += 4;
+		inputs[count++] = D3D__RenderState[D3DRS_SOLIDOFFSETENABLE];
+		inputs[count++] = D3D__RenderState[D3DRS_POLYGONOFFSETZOFFSET];
 		if (!draw_uniforms_serial || !words_equal(inputs, draw_uniform_inputs, sizeof(inputs)))
 		{
 			struct draw_uniforms *converted = &draw_uniforms;
@@ -5173,6 +5754,13 @@ static struct program_entry *prepare_draw(BOOL immediate)
 			}
 			converted->screen_offset = (float)UI_OFFSET;
 			memcpy(converted->height_fade, height_fade_value, sizeof(converted->height_fade));
+			/* (display.reversed_depth: the z bias's units, the Xbox's depth
+			units toward the camera, in the depth the vertex program writes:
+			one is 1 / viewport_scale.z, the depth buffer's range over the
+			viewport's) */
+			converted->depth_bias = xgpu_reversed_depth && D3D__RenderState[D3DRS_SOLIDOFFSETENABLE] &&
+				device.viewport_scale[2] != 0.0f ?
+				-dword_to_float(D3D__RenderState[D3DRS_POLYGONOFFSETZOFFSET]) / device.viewport_scale[2] : 0.0f;
 		}
 	}
 	/* and a program that has had them since needs none of them */
@@ -5195,6 +5783,7 @@ static struct program_entry *prepare_draw(BOOL immediate)
 	uniform_float(entry->screen_offset, &entry->uniforms.screen_offset, draw_uniforms.screen_offset);
 	uniform_vec4(entry->texture_lod_bias, entry->uniforms.texture_lod_bias, draw_uniforms.texture_lod_bias, 1);
 	uniform_vec4(entry->height_fade, entry->uniforms.height_fade, draw_uniforms.height_fade, 1);
+	uniform_float(entry->depth_bias, &entry->uniforms.depth_bias, draw_uniforms.depth_bias);
 	return entry;
 }
 
@@ -6041,6 +6630,12 @@ static unsigned long stream_upload_swizzled(const struct vertex_shader_object *d
 		free(scratch);
 		scratch_size = size + 65536;
 		scratch = malloc(scratch_size);
+		/* (out of memory: the colours go up unswapped) */
+		if (!scratch)
+		{
+			scratch_size = 0;
+			return stream_upload(data, size);
+		}
 	}
 	memcpy(scratch, data, size);
 	for (vertex = 0; vertex + stride <= size; vertex += stride)
@@ -6525,6 +7120,10 @@ static WORD *quad_indices(const WORD *indices, unsigned long count, unsigned lon
 	WORD *result = malloc(quads * 6 * sizeof(WORD) + 2);
 	unsigned long quad;
 
+	/* (out of memory: none, and the draw is dropped) */
+	*out_count = 0;
+	if (!result)
+		return NULL;
 	for (quad = 0; quad < quads; quad++)
 	{
 		WORD v0 = indices ? indices[quad * 4] : (WORD)(quad * 4);
@@ -6571,9 +7170,12 @@ void WINAPI D3DDevice_DrawVertices(D3DPRIMITIVETYPE primitive_type, UINT start_v
 		unsigned long count;
 		WORD *indices = quad_indices(NULL, vertex_count, &count);
 
-		glDrawElements(GL_TRIANGLES, (GLsizei)count, GL_UNSIGNED_SHORT,
-			(const void *)index_upload(indices, count * sizeof(WORD)));
-		free(indices);
+		if (indices)
+		{
+			glDrawElements(GL_TRIANGLES, (GLsizei)count, GL_UNSIGNED_SHORT,
+				(const void *)index_upload(indices, count * sizeof(WORD)));
+			free(indices);
+		}
 	}
 	else
 	{
@@ -6814,6 +7416,8 @@ void WINAPI D3DDevice_DrawIndexedVertices(D3DPRIMITIVETYPE primitive_type, UINT 
 	if (primitive_type == D3DPT_QUADLIST)
 	{
 		indices = quad_indices(index_data, vertex_count, &count);
+		if (!indices)
+			return;
 		source = indices;
 	}
 #ifdef HALO_GLES
@@ -6822,6 +7426,11 @@ void WINAPI D3DDevice_DrawIndexedVertices(D3DPRIMITIVETYPE primitive_type, UINT 
 		/* the indices are copied anyway: rebase them */
 		WORD *rebased = malloc(count * sizeof(WORD) + 2);
 
+		if (!rebased)
+		{
+			free(indices);
+			return;
+		}
 		for (index = 0; index < count; index++)
 			rebased[index] = (WORD)(source[index] - minimum);
 		glDrawElements(primitive_mode(primitive_type), (GLsizei)count, GL_UNSIGNED_SHORT,
@@ -7042,7 +7651,7 @@ void WINAPI D3DDevice_End(void)
 				free(placed);
 			}
 		}
-		else
+		else if (indices)
 		{
 			glDrawElements(GL_TRIANGLES, (GLsizei)index_count, GL_UNSIGNED_SHORT,
 				(const void *)index_upload(indices, index_count * sizeof(WORD)));
@@ -7109,9 +7718,12 @@ void WINAPI D3DDevice_SetVertexDataColor(INT reg, D3DCOLOR color)
 /* ---------- clearing */
 
 /* the state a clear changed, no longer what the shadows say: the masks it
-cleared through, the scissor (left disabled) and its rectangle. The rest
-of the state is as it was, so the next draw sets only these again (all of
-it again, at every clear, was hundreds of calls a frame) */
+cleared through, the scissor (left disabled) and its rectangle. The
+rectangle is forgotten so the next apply_raster_state re-issues glScissor
+after it enables the test; the driver is not trusted to keep a scissor
+set while the test is disabled. The rest of the state is as it was, so
+the next draw sets only these again (all of it again, at every clear,
+was hundreds of calls a frame) */
 static void clear_state_forget(void)
 {
 	gl_state.color_mask = 0xff;
@@ -7119,6 +7731,27 @@ static void clear_state_forget(void)
 	gl_state.stencil_write_mask = (GLuint)-1;
 	gl_state.scissor_test = 0;
 	memset(gl_state.scissor, 0xff, sizeof(gl_state.scissor));
+}
+
+/* glClear on some Intel Windows drivers takes a lower-left scissor. Draws
+take the upper-left one (glClipControl), so a pane's clear can land on
+the other pane. clear_scissor_lower_left is set by the start-up self-test. */
+static GLint clear_scissor_y(GLint y, GLint height)
+{
+	struct render_target_entry *target;
+	GLint framebuffer_height;
+
+	if (!clear_scissor_lower_left || height <= 0)
+		return y;
+	target = device.render_target ? render_target_get(device.render_target) : NULL;
+	if (!target && device.depth_stencil)
+		target = render_target_get(device.depth_stencil);
+	if (!target)
+		return y;
+	framebuffer_height = (GLint)target->target.gl_height;
+	if (y < 0 || y > framebuffer_height - height)
+		return y;
+	return framebuffer_height - (y + height);
 }
 
 void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags, D3DCOLOR color, float z, DWORD stencil)
@@ -7166,15 +7799,55 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
 		keeps a split-screen window's clear from wiping the other window */
 		GLint x0 = target_pixel((float)device.viewport.X, 0);
 		GLint y0 = target_pixel((float)device.viewport.Y, 1);
+		GLint width = target_pixel((float)(device.viewport.X + device.viewport.Width), 0) - x0;
+		GLint height = target_pixel((float)(device.viewport.Y + device.viewport.Height), 1) - y0;
 
+#ifndef HALO_GLES
+		if (use_quad_clear)
+		{
+			/* no Y flip: the quad is drawn with the same viewport origin as
+			the pane's geometry, so a later pane cannot wipe an earlier one */
+			clear_with_viewport_quad(x0, y0, width, height, mask, rgba,
+				has_depth && (flags & D3DCLEAR_ZBUFFER) ? (xgpu_reversed_depth ? 1.0f - z : z) : 0.f,
+				stencil);
+			clear_state_forget();
+			return;
+		}
+#endif
 		glEnable(GL_SCISSOR_TEST);
-		glScissor(x0, y0, target_pixel((float)(device.viewport.X + device.viewport.Width), 0) - x0,
-			target_pixel((float)(device.viewport.Y + device.viewport.Height), 1) - y0);
+		glScissor(x0, clear_scissor_y(y0, height), width, height);
 		glClear(mask);
 		glDisable(GL_SCISSOR_TEST);
 		clear_state_forget();
 		return;
 	}
+#ifndef HALO_GLES
+	if (use_quad_clear)
+	{
+		for (index = 0; index < count; index++)
+		{
+			INT left = rectangles[index].x1 > device.viewport.X ? rectangles[index].x1 : device.viewport.X;
+			INT top = rectangles[index].y1 > device.viewport.Y ? rectangles[index].y1 : device.viewport.Y;
+			INT right = rectangles[index].x2 < device.viewport.X + device.viewport.Width ?
+				rectangles[index].x2 : device.viewport.X + device.viewport.Width;
+			INT bottom = rectangles[index].y2 < device.viewport.Y + device.viewport.Height ?
+				rectangles[index].y2 : device.viewport.Y + device.viewport.Height;
+			GLint x0, y0, width, height;
+
+			if (left >= right || top >= bottom)
+				continue;
+			x0 = target_pixel((float)(left + UI_OFFSET), 0);
+			y0 = target_pixel((float)top, 1);
+			width = target_pixel((float)(right + UI_OFFSET), 0) - x0;
+			height = target_pixel((float)bottom, 1) - y0;
+			clear_with_viewport_quad(x0, y0, width, height, mask, rgba,
+				has_depth && (flags & D3DCLEAR_ZBUFFER) ? (xgpu_reversed_depth ? 1.0f - z : z) : 0.f,
+				stencil);
+		}
+		clear_state_forget();
+		return;
+	}
+#endif
 	glEnable(GL_SCISSOR_TEST);
 	for (index = 0; index < count; index++)
 	{
@@ -7184,14 +7857,15 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
 			rectangles[index].x2 : device.viewport.X + device.viewport.Width;
 		INT bottom = rectangles[index].y2 < device.viewport.Y + device.viewport.Height ?
 			rectangles[index].y2 : device.viewport.Y + device.viewport.Height;
-		GLint x0, y0;
+		GLint x0, y0, width, height;
 
 		if (left >= right || top >= bottom)
 			continue;
 		x0 = target_pixel((float)(left + UI_OFFSET), 0);
 		y0 = target_pixel((float)top, 1);
-		glScissor(x0, y0, target_pixel((float)(right + UI_OFFSET), 0) - x0,
-			target_pixel((float)bottom, 1) - y0);
+		width = target_pixel((float)(right + UI_OFFSET), 0) - x0;
+		height = target_pixel((float)bottom, 1) - y0;
+		glScissor(x0, clear_scissor_y(y0, height), width, height);
 		glClear(mask);
 	}
 	glDisable(GL_SCISSOR_TEST);
@@ -7280,6 +7954,31 @@ void halo_screen_anti_alias(short x0, short y0, short x1, short y1)
 	corners[1] = scaled_pixel(y0, target->target.scale[1]);
 	corners[2] = scaled_pixel(x1, target->target.scale[0]);
 	corners[3] = scaled_pixel(y1, target->target.scale[1]);
+	{
+		static int logged;
+		static short seen[2][4];
+		int i;
+
+		if (logged < 2)
+		{
+			for (i = 0; i < logged; i++)
+			{
+				if (seen[i][0] == x0 && seen[i][1] == y0 && seen[i][2] == x1 && seen[i][3] == y1)
+					break;
+			}
+			if (i == logged)
+			{
+				seen[logged][0] = x0;
+				seen[logged][1] = y0;
+				seen[logged][2] = x1;
+				seen[logged][3] = y1;
+				logged++;
+				platform_log("GPU: anti-alias pass: window %d,%d - %d,%d -> %d,%d - %d,%d (%s)",
+					x0, y0, x1, y1, corners[0], corners[1], corners[2], corners[3],
+					mode == _anti_aliasing_smaa ? "smaa" : "fxaa");
+			}
+		}
+	}
 	xgpu_post_anti_alias(mode == _anti_aliasing_smaa, framebuffer_get(target->target.texture, 0),
 		target->target.format, target->target.gl_width, target->target.gl_height, corners);
 	glBindVertexArray(device.vertex_array);
@@ -7305,6 +8004,30 @@ void halo_screen_tone_map(short x0, short y0, short x1, short y1)
 	corners[1] = scaled_pixel(y0, target->target.scale[1]);
 	corners[2] = scaled_pixel(x1, target->target.scale[0]);
 	corners[3] = scaled_pixel(y1, target->target.scale[1]);
+	{
+		static int logged;
+		static short seen[2][4];
+		int i;
+
+		if (logged < 2)
+		{
+			for (i = 0; i < logged; i++)
+			{
+				if (seen[i][0] == x0 && seen[i][1] == y0 && seen[i][2] == x1 && seen[i][3] == y1)
+					break;
+			}
+			if (i == logged)
+			{
+				seen[logged][0] = x0;
+				seen[logged][1] = y0;
+				seen[logged][2] = x1;
+				seen[logged][3] = y1;
+				logged++;
+				platform_log("GPU: tone-map pass: window %d,%d - %d,%d -> %d,%d - %d,%d",
+					x0, y0, x1, y1, corners[0], corners[1], corners[2], corners[3]);
+			}
+		}
+	}
 	render_target_resolve(&target->target);
 	/* (both found first: making a framebuffer binds it) */
 	source = framebuffer_get(target->target.texture, 0);
@@ -7433,6 +8156,8 @@ static void write_screenshot(struct render_target_entry *target)
 	if (!directory)
 		return;
 	pixels = malloc(image_size);
+	if (!pixels)
+		return;
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_get(target->target.texture, 0));
 #ifdef HALO_GLES
 	/* (OpenGL ES reads a half float target only as floats) */
@@ -7440,6 +8165,11 @@ static void write_screenshot(struct render_target_entry *target)
 	{
 		float *texels = malloc(image_size * sizeof(float));
 
+		if (!texels)
+		{
+			free(pixels);
+			return;
+		}
 		glReadPixels(0, 0, (GLsizei)width, (GLsizei)height, GL_RGBA, GL_FLOAT, texels);
 		for (row = 0; row < image_size; row++)
 		{
@@ -7662,6 +8392,7 @@ static void visibility_read_batch(void)
 			}
 			device.visibility_known[batch->slots[test]] = area > 1.0f ?
 				(GLuint)(samples / area + 0.5f) : samples;
+			device.visibility_counted[batch->slots[test]] = batch->tests[test];
 			device.visibility_stats.samples++;
 			device.visibility_stats.nonzero += samples != 0;
 			if (samples > device.visibility_stats.maximum)
@@ -7824,7 +8555,7 @@ static BOOL front_buffer_ready(void)
 		draw_flush();
 		framebuffer = framebuffer_get(front->target.texture, 0);
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
-		glDisable(GL_SCISSOR_TEST);
+		xgpu_scissor_reset((GLint)front->target.gl_width, (GLint)front->target.gl_height);
 		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
@@ -7863,9 +8594,16 @@ static void front_buffer_take(void)
 		left = 0;
 		width = (GLint)back_buffer->target.gl_width;
 	}
+	/* The loading feature expands the original effect across this width.
+	Capture all of it back into the stock feedback texture, not its centre. */
+	if (loading_widescreen_active())
+	{
+		left = 0;
+		width = (GLint)back_buffer->target.gl_width;
+	}
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
-	glDisable(GL_SCISSOR_TEST);
+	xgpu_scissor_reset((GLint)front->target.gl_width, (GLint)front->target.gl_height);
 	glBlitFramebuffer(left, 0, left + width, (GLint)back_buffer->target.gl_height, 0, 0,
 		(GLint)front->target.gl_width, (GLint)front->target.gl_height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 	gl_check_errors("front buffer copy");
@@ -7943,8 +8681,38 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		}
 		x = (window_width - width) / 2;
 		y = (window_height - height) / 2;
+		{
+			static int logged, logged_leftover;
+
+			if (!logged)
+			{
+				logged = 1;
+				platform_log("GPU: present: back buffer %lux%lu to window %dx%d (letterbox %d,%d %dx%d); "
+					"scissor cache test=%u box=%d,%d %dx%d",
+					(unsigned long)back_buffer->target.gl_width, (unsigned long)back_buffer->target.gl_height,
+					window_width, window_height, x, y, width, height,
+					(unsigned)gl_state.scissor_test,
+					gl_state.scissor[0], gl_state.scissor[1], gl_state.scissor[2], gl_state.scissor[3]);
+			}
+			/* menus present first with the scissor off; split-screen may
+			leave a pane rectangle on later frames */
+			if (!logged_leftover && gl_state.scissor_test == 1 &&
+				(gl_state.scissor[0] > 0 || gl_state.scissor[1] > 0 ||
+					gl_state.scissor[2] < window_width || gl_state.scissor[3] < window_height))
+			{
+				logged_leftover = 1;
+				platform_log("GPU: present: a leftover pane scissor would have clipped this blit "
+					"(test=%u box=%d,%d %dx%d, window %dx%d); resetting it",
+					(unsigned)gl_state.scissor_test,
+					gl_state.scissor[0], gl_state.scissor[1], gl_state.scissor[2], gl_state.scissor[3],
+					window_width, window_height);
+			}
+		}
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-		glDisable(GL_SCISSOR_TEST);
+		/* disable and set a full-window scissor: glBlitFramebuffer and this
+		clear honour the test, and a leftover split-pane rectangle would leave
+		the other half as the previous or clear colour */
+		xgpu_scissor_reset(window_width, window_height);
 		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
@@ -7956,6 +8724,10 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 				hdr.float_window ? hdr.sdr_white : 0.0f)))
 		{
 			glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_get(back_buffer->target.texture, 0));
+			/* Creating the source framebuffer binds both targets. A cached
+			map can reach this first blit without a loading-screen draw. */
+			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+			xgpu_scissor_reset(window_width, window_height);
 			/* row 0 of the render target is the top of the picture */
 			glBlitFramebuffer(0, 0, (GLint)back_buffer->target.gl_width, (GLint)back_buffer->target.gl_height,
 				x, y + height, x + width, y, GL_COLOR_BUFFER_BIT, GL_LINEAR);

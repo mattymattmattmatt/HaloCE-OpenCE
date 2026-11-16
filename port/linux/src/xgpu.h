@@ -69,6 +69,11 @@ changes GL state behind it (binding a texture to upload it, deleting one)
 must call this afterwards. */
 
 void xgpu_gl_state_invalidate(void);
+/* Disable GL_SCISSOR_TEST and set the scissor to the whole destination
+(width x height), so a blit, resolve, post-process pass or window present
+cannot be clipped to a leftover split-screen pane. A driver that ignores
+the disable still has a full rectangle. Width or height <= 0 only disables. */
+void xgpu_scissor_reset(GLint width, GLint height);
 /* whether there is an OpenGL context (not with debug.null_renderer, a
 dedicated server's): textures are made only then */
 int xgpu_gl_ready(void);
@@ -188,7 +193,9 @@ struct nv2a_pixel_shader_key
 	/* blood over the surface (the gore mod's on vehicles: xgpu_set_blood),
 	in the padding's first byte */
 	unsigned char blood;
-	unsigned char ce_meter_padding[2];
+	/* MCC environment lightmap pass only; part of the compiled shader key. */
+	unsigned char mcc_bump_attenuation;
+	unsigned char ce_meter_padding;
 };
 
 char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key);
@@ -255,6 +262,15 @@ GLuint xgpu_texture_get(const DWORD *resource, const D3DCOLOR *palette, GLenum *
 void xgpu_texture_cache_begin_frame(void);
 /* (debug.gpu_stats) a texture of this many bytes uploaded to GL (d3d8_gl.c) */
 void xgpu_statistics_texture_upload(unsigned long bytes);
+
+/* MCC-owned immutable resources never enter the guest physical texture cache. */
+BOOL xgpu_mcc_texture_get(DWORD const *resource, D3DCOLOR const *palette,
+	GLuint *texture, GLenum *target, struct xgpu_texture_description *description);
+BOOL xgpu_mcc_texture_describe(DWORD const *resource, struct xgpu_texture_description *description);
+BOOL xgpu_mcc_texture_upload(GLuint texture, GLenum target,
+	struct xgpu_texture_description const *description, void const *pixels,
+	unsigned long bytes, D3DCOLOR const *palette);
+void xgpu_mcc_texture_unbind(DWORD const *resource);
 
 /* ---------- render targets */
 
@@ -366,6 +382,14 @@ void xgpu_static_buffers_remove(const void *buffers, long count, unsigned long s
 /* Android: size bytes of vertices or indices from start, as above */
 void xgpu_static_range_add(const void *start, unsigned long size, int indices);
 void xgpu_static_range_remove(const void *start, int indices);
+/* the visibility tests ended at an index so far, and the number (from 1) of
+the one whose count GetVisibilityTestResult last gave there, 0 for none. A
+test's count is read two or more frames after it, and never for one dropped
+(no batch free), and until then the index gives an earlier test's: a lens
+flare's slot is read only once a count of the flare's own tests has come
+(rasterizer_lights.c; d3d8_gl.c) */
+unsigned long long xgpu_visibility_tests_ended(unsigned long index);
+unsigned long long xgpu_visibility_test_counted(unsigned long index);
 /* fills the corners x0, y0 to x1, y1 of the window (row 0 at the bottom)
 with color, as it is (an HDR display's scRGB framebuffer: linear, 1.0 at 80
 nits), or only the ring ring[0], ring[1] (its centre in the window), from

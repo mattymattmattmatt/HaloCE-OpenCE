@@ -93,6 +93,9 @@ symbols in this file:
 #include "objects/objects.h"
 #include "units/units.h"
 #include "text/unicode.h"
+#include "mcc_main.h" /* port: port/linux/game/mcc_main.c */
+#include "custom_edition_cache.h" /* port: port/linux/game/custom_edition_cache.c */
+#include "map_share.h" /* port: port/linux/game/map_share.c */
 
 #include <xtl.h>
 
@@ -795,6 +798,16 @@ boolean network_game_create_game_objects(
 			break;
 	}
 
+	/* port: a share download in progress or a failed/incomplete share must
+	not enter a blocking precache or the damaged-disc death loop */
+	if (map_share_blocks_load(options.map_name))
+	{
+		error(_error_silent,
+			"map sharing: not creating the game; %s is still being downloaded or is not playable",
+			options.map_name);
+		return FALSE;
+	}
+
 	game_precache_new_map(options.map_name, TRUE);
 	main_menu_unload();
 
@@ -841,6 +854,12 @@ boolean network_game_create_game_objects(
 	}
 	else
 	{
+		/* port: MCC refusals unwind through the network session lifecycle. */
+		if (mcc_main_network_load_failed(options.map_name))
+		{
+			game->local_data.game_objects_loaded = FALSE;
+			return FALSE;
+		}
 		error(0, "game_load() failed.");
 	}
 

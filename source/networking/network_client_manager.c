@@ -383,10 +383,14 @@ symbols in this file:
 #include "main/main.h"
 #include "memory/data.h"
 #include "networking/network_client_manager.h"
+#include "mcc_load_network.h" /* port: bounded MCC conversion wait */
 #include "networking/network_client_message_handler.h"
 #include "networking/network_connection.h"
 #include "networking/network_game_globals.h"
 #include "networking/network_game_manager.h"
+void network_game_client_reset_settings_staging(void); /* port: discard partial settings across connections */
+#include "mcc_cache.h" /* port: MCC-only origin-change admission guard */
+#include "mcc_identity.h" /* port: MCC content admission and local package resolution */
 #include "networking/network_game_protocol.h"
 #include "networking/network_messages.h"
 #include "networking/network_server_manager.h"
@@ -621,6 +625,7 @@ struct message_client_join_game_request
 	zero for none (port/linux/src/player_link.c) */
 	byte link_pass[170];
 	byte link_proof[64];
+	word network_version; /* port: shared agreement before host admission */
 };
 
 struct message_client_map_is_precached_pregame
@@ -749,7 +754,7 @@ typedef char message_client_ping_size_assert[
 	sizeof(struct message_client_ping) == 8 ? 1 : -1];
 /* (port: and a Discord account's pass and proof after the Xbox's 0x70) */
 typedef char message_client_join_game_request_size_assert[
-	sizeof(struct message_client_join_game_request) == 0x70 + 170 + 64 ? 1 : -1];
+	sizeof(struct message_client_join_game_request) == 0x70 + 170 + 64 + 2 ? 1 : -1];
 typedef char network_game_client_seconds_to_game_start_offset_assert[
 	offsetof(struct network_game_client, seconds_to_game_start) == NETWORK_GAME_CLIENT_TAIL_OFFSET + 0x10 ? 1 : -1];
 typedef char network_game_client_error_offset_assert[
@@ -939,6 +944,8 @@ void network_game_client_dispose(
 	network_replay_playback_stop();
 	if (client)
 	{
+		network_game_client_reset_settings_staging(); /* port: discard partial old-host settings */
+		mcc_identity_disconnect(); /* port: discard the MCC session's local binding */
 		if (client->connection)
 			network_connection_delete(client->connection);
 
@@ -1050,6 +1057,7 @@ boolean network_game_client_switch_to_pregame(
 		network_game_reset_for_next_round(&client->game, TRUE);
 		network_connection_keep_alive(client->connection);
 		client->next_update_number = 0;
+		network_game_client_reset_settings_staging(); /* port: discard the previous host's partial record */
 		client->join_in_progress = TRUE;
 		client->connection_silent = FALSE;
 		client->state = _network_game_client_state_pregame;
@@ -1327,9 +1335,19 @@ boolean network_game_client_game_settings_updated(
 			return FALSE;
 		}
 		if (csstrcmp(message_packet->map.name, client->game.map.name) ||
-			message_packet->map.version != client->game.map.version)
+			/* port: MCC validation also belongs to the advertised origin in the name tail. */
+			(mcc_level_name(message_packet->map.name) &&
+			 memcmp(message_packet->map.name, client->game.map.name, sizeof(message_packet->map.name))) ||
+			message_packet->map.version != client->game.map.version ||
+			/* port: the host's MCC content may change without changing its stored checksum */
+			memcmp(message_packet->mcc_content_sha256, client->game.mcc_content_sha256, 32) ||
+			/* port: a changed MCC campaign manifest also requires admission. */
+			memcmp(message_packet->mcc_metadata_sha256, client->game.mcc_metadata_sha256, 32))
 		{
 			char build[0x20];
+
+			/* port: resolve MCC locally before native presence checks, retaining the host's wire name */
+			if (!mcc_identity_accept(message_packet)) return FALSE;
 
 			/* port: a map this machine has not (a Custom Edition map not in
 			its custom_maps folder, or another version of it than the host's,
@@ -1689,6 +1707,11 @@ boolean network_game_client_handle_game_update(
 			message_packet->game_time);
 		game_time_set_distributed(message_packet->game_time);
 	}
+	else
+	{
+		/* port: smaller deficits need simulation ticks too, bounded per frame. */
+		game_time_synchronize_distributed(message_packet->game_time);
+	}
 
 	return TRUE;
 }
@@ -1700,14 +1723,20 @@ starts no machine before its download is done; one of before may. */
 boolean network_game_client_begin_game(
 	struct network_game_client *client)
 {
-	if (client && map_share_downloading(client->game.map.name))
+	if (client && !map_share_map_ready(client->game.map.name))
 	{
-		network_game_client_start_pending = TRUE;
-		csstrncpy(network_game_client_start_pending_map, client->game.map.name,
-			sizeof(network_game_client_start_pending_map) - 1);
-		network_game_client_start_pending_map[sizeof(network_game_client_start_pending_map) - 1] = 0;
-		network_game_client_start_pending_games = client->game.number_of_games_played;
-		network_event("the host started the game while its map is being downloaded: joining it once the map is there");
+		if (map_share_blocks_load(client->game.map.name) ||
+			map_share_downloading(client->game.map.name))
+		{
+			network_game_client_start_pending = TRUE;
+			csstrncpy(network_game_client_start_pending_map, client->game.map.name,
+				sizeof(network_game_client_start_pending_map) - 1);
+			network_game_client_start_pending_map[sizeof(network_game_client_start_pending_map) - 1] = 0;
+			network_game_client_start_pending_games = client->game.number_of_games_played;
+			network_event("the host started the game while its map is being downloaded or is not playable: joining it once the map is there");
+			return TRUE;
+		}
+		network_event("the host started the game but the map is not playable: not loading it");
 		return TRUE;
 	}
 	return network_game_client_game_has_started(client);
@@ -1874,6 +1903,26 @@ boolean network_game_client_remove_player(
 				{
 					break;
 				}
+			}
+
+			/* port: a local player who leaves while another remains no longer has
+			its slot: its entry in the local players is cleared here, as the datum
+			stays until a joiner takes the slot (network_game_spawn_player), which
+			then deletes it and makes another with a new identifier, and the entry
+			would name a player that no longer exists (player_get halts on it). The
+			last to leave ends the game, whose sounds and views still name it until
+			then, so its entry stays */
+			if (network_player_index != MAXIMUM_NUMBER_OF_PLAYERS &&
+				player->machine_index == client->machine_index &&
+				player->controller_index >= 0 && player->controller_index < MAXIMUM_LOCAL_PLAYERS &&
+				local_player_get_player_index(player->controller_index) == player_index)
+			{
+				local_player_set_player_index(player->controller_index, NONE);
+				/* (and its control, which names its unit: the datum no longer has a
+				local player index, so the host deleting the unit does not reset it
+				(network_player_detach_unit), and player_control_update would get a
+				unit that is gone) */
+				player_control_new_unit(player->controller_index, NONE);
 			}
 
 			/* port: a dedicated server's own machine never has a player
@@ -2987,6 +3036,7 @@ static boolean network_game_client_idle_joining(
 				message_header *message;
 
 				csmemset(&join_game_request, 0, sizeof(join_game_request));
+				join_game_request.network_version = HALO_PORT_NETWORK_VERSION; /* port: explicit shared agreement */
 				network_game_generate_local_machine_name(join_game_request.machine_name);
 				csmemcpy(
 					join_game_request.join_token,
@@ -3127,18 +3177,28 @@ static boolean network_game_client_idle_pregame(
 			/* port: a start put off while the map was downloaded (map
 			sharing), once the download is over: the game loaded if the map
 			is there (a failed download leaves the game: map_share.c) */
-			else if (network_game_client_start_pending && client->state == _network_game_client_state_pregame &&
-				!map_share_downloading(client->game.map.name))
+			else if (network_game_client_start_pending && client->state == _network_game_client_state_pregame)
 			{
-				network_game_client_start_pending = FALSE;
 				if (csstrcmp(client->game.map.name, network_game_client_start_pending_map) ||
 					client->game.number_of_games_played != network_game_client_start_pending_games)
 				{
+					network_game_client_start_pending = FALSE;
 					network_event("the game put off is over: waiting for the host's next start");
 				}
-				else if (!custom_edition_level_name(client->game.map.name) ||
-					custom_edition_cache_playable(client->game.map.name))
+				else if (!map_share_map_ready(client->game.map.name))
 				{
+					/* stay pending while a share still blocks the load; a
+					failed share leaves the game itself (map_share.c) */
+					if (!map_share_blocks_load(client->game.map.name) &&
+						!map_share_downloading(client->game.map.name))
+					{
+						network_game_client_start_pending = FALSE;
+						network_event("the map is not playable: not joining the game the host started");
+					}
+				}
+				else
+				{
+					network_game_client_start_pending = FALSE;
 					network_event("the map is downloaded: joining the game the host started");
 					if (!network_game_client_game_has_started(client))
 						network_event("network_game_client_game_has_started() failed");
@@ -3221,6 +3281,14 @@ static boolean network_game_client_idle_ingame(
 		client->connection_silent = connection_stale;
 	}
 
+	/* port: progressing MCC conversion has an absolute limit too, even when
+	 * the host keeps writing while its synchronous map conversion runs. */
+	if (success && mcc_load_network_client_expired())
+	{
+		network_event("MCC loading exceeded its bounded conversion window");
+		display_error_when_main_menu_loaded(_error_network_connection_lost);
+		success = FALSE;
+	}
 	if (success == TRUE)
 	{
 		success = network_connection_idle(client->connection, started ? 15000 : 75000, NULL);

@@ -883,6 +883,8 @@ def generate_android_build(n: Writer, sln: Any) -> None:
     n.build(outputs=build_stamp, rule="android_build_stamp", implicit=["android_always"])
     host_sources = sorted((PORT_DIR / "host").glob("*.c")) + [
         LINUX_DIR / "src" / "posix_files.c", LINUX_DIR / "src" / "posix_net.c",
+        LINUX_DIR / "src" / "posix_mcc_preview.c",
+        LINUX_DIR / "src" / "posix_mcc_share.c",
         # the app reads debug.sample_seconds from config.toml (host_main.c)
         TOML_DIR / "tomlc17.c",
     ]
@@ -986,8 +988,11 @@ def generate_android_build(n: Writer, sln: Any) -> None:
     wanted = "validation\n" if validation else "no validation\n"
     if not stamp.exists() or stamp.read_text() != wanted:
         stamp.write_text(wanted)
+    # Include MCC's decoder notice in the APK as well as the release archive.
+    staged_bcdec_license = assets_dir / "bcdec-LICENSE.txt"
+    n.build(outputs=staged_bcdec_license, rule="android_copy", inputs=Path("port/third_party/bcdec/LICENSE"))
     staged_all = [libmain, staged_sdl, staged_image, staged_relocations, staged_vk_image, staged_vk_relocations,
-                  staged_brokers, *probe_staged]
+                  staged_brokers, staged_bcdec_license, *probe_staged]
     n.build(outputs="android", rule="phony", inputs=staged_all)
 
     apk = PORT_DIR / "app" / "build" / "outputs" / "apk" / "debug" / "app-debug.apk"
