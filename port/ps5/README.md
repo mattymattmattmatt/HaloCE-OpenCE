@@ -1,13 +1,13 @@
 # PS5
 
-Halo: Combat Evolved on a jailbroken PlayStation 5, as a homebrew title
-(`PPSA99500`): the menus, the campaign and multiplayer at 120 frames a
-second on a TV that takes it, up to native 4K, split screen with a second
-pad, aiming with the DualSense's gyroscope, voice chat through the pad's
-microphone, and system link and internet play with the other builds. It
-needs your own copy of the game's Xbox disc image, from which the first
-start extracts the maps. This README is for players first; building and
-developing are at its end.
+Halo CE Gore on a jailbroken PlayStation 5, as a homebrew title
+(`PPSA99501`): the gore mod on top of the universal port's PS5 title. It
+installs beside the universal port (`PPSA99500`) and neither replaces the
+other. The menus, the campaign and multiplayer run at 120 frames a second
+on a TV that takes it, up to native 4K, with split screen, DualSense gyro,
+theater mode, and system link and internet play with the other gore builds.
+It needs your own copy of the game's Xbox disc image. This README is for
+players first; building and developing are at its end.
 
 ## What the console needs
 
@@ -32,14 +32,17 @@ developing are at its end.
 
 ## Installing from the release
 
-1. Download `halo-ps5-release.zip` from the repository's latest release
-   (https://github.com/thelinkin3000/SlipstreamCE/releases/latest)
+1. Download `halo-gore-ps5-release.zip` from this repository's latest
+   `ps5-gore-b` release
+   (https://github.com/mattymattmattmatt/HaloCE-OpenCE/releases)
    and unzip it on your computer.
-2. Over FTP, copy its `PPSA99500` folder into `/data/homebrew` on the
+2. Over FTP, copy its `PPSA99501` folder into `/data/homebrew` on the
    console.
-3. Make the folder `/data/halo` and copy the game's disc image (`.iso` or
-   `.xiso`) into it.
-4. Start SlipstreamCE from the home screen.
+3. If the universal port is already set up (`/data/halo` with its maps),
+   that is all: this title reads its maps from `/data/halo/maps`.
+   Otherwise make `/data/halo` and copy the disc image into it, or make
+   `/data/halo-gore` and copy it there.
+4. Start Halo CE Gore from the home screen.
 
 `README.txt` in the zip says the same in a few lines. The zip also holds
 `COPYING` and `licenses/`, the licences of what the title is built from;
@@ -72,13 +75,14 @@ folder holds:
 A release's build looks for a newer release on GitHub each time it starts,
 about ten seconds in, while you play. When there is one it downloads it
 (about 50 MB) and installs it in the title's folder, with notifications
-("SlipstreamCE: downloading build N", every quarter of the way, then "SlipstreamCE: build N
+("Halo CE Gore: downloading build N", every quarter of the way, then "Halo CE Gore: build N
 is installed: close the game and start it again to use it"). The game goes
 on as it was until you close it; the next start is the new build. If the
 download or the install does not finish, a notification says why and
-nothing is changed. `update.auto = false` in `/data/halo/config.toml` turns
-the look off. To update by hand, copy a newer release's `PPSA99500` folder
-over the old one (with the game closed).
+nothing is changed. `update.auto = false` in `/data/halo-gore/config.toml` turns
+the look off. To update by hand, copy a newer release's `PPSA99501` folder
+over the old one (with the game closed). The updater only looks at this
+repository's `ps5-gore-b<number>` releases.
 
 ## Settings
 
