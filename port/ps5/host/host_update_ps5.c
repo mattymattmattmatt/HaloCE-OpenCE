@@ -534,22 +534,15 @@ static void *update_thread(void *argument)
 	ps5_notify("Halo CE Gore: downloading build %ld", build);
 	progress.build = build;
 	{
-		static const char *const assets[] = { UPDATE_ASSET, UPDATE_OLD_ASSET };
 		char url[256];
-		int asset, answered = 0, downloaded = 0;
+		int answered = 0;
 
+		snprintf(url, sizeof(url), "https://github.com/" UPDATE_REPOSITORY "/releases/download/" UPDATE_TAG_PREFIX "%ld/" UPDATE_ASSET,
+			build);
+		ps5_log("update: downloading %s", url);
 		start = ps5_now_ns();
-		for (asset = 0; asset < 2 && !downloaded; asset++)
-		{
-			snprintf(url, sizeof(url), "https://github.com/" UPDATE_REPOSITORY "/releases/download/" UPDATE_TAG_PREFIX "%ld/%s", build,
-				assets[asset]);
-			ps5_log("update: downloading %s", url);
-			downloaded = update_download_status(url, UPDATE_ARCHIVE, UPDATE_MAXIMUM_ARCHIVE, download_progress, &progress,
-				&answered, error, sizeof(error));
-			if (!downloaded && answered != 404)
-				break;
-		}
-		if (!downloaded)
+		if (!update_download_status(url, UPDATE_ARCHIVE, UPDATE_MAXIMUM_ARCHIVE, download_progress, &progress,
+			&answered, error, sizeof(error)))
 		{
 			unlink(UPDATE_ARCHIVE);
 			ps5_log("update: the download of %s did not finish: %s", url, error);
