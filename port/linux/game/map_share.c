@@ -97,11 +97,6 @@ pieces checked on the host's threads */
 #endif
 
 #include <pthread.h>
-#ifndef PTHREAD_MUTEX_RECURSIVE
-#ifdef PTHREAD_MUTEX_RECURSIVE_NP
-#define PTHREAD_MUTEX_RECURSIVE PTHREAD_MUTEX_RECURSIVE_NP
-#endif
-#endif
 #include <xtl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -674,7 +669,13 @@ void map_share_lock(
 			pthread_mutexattr_t attributes;
 
 			pthread_mutexattr_init(&attributes);
-			pthread_mutexattr_settype(&attributes, PTHREAD_MUTEX_RECURSIVE);
+			pthread_mutexattr_settype(&attributes,
+#ifdef PTHREAD_MUTEX_RECURSIVE
+				PTHREAD_MUTEX_RECURSIVE
+#else
+				PTHREAD_MUTEX_RECURSIVE_NP
+#endif
+			);
 			pthread_mutex_init(&map_share_mutex, &attributes);
 			pthread_mutexattr_destroy(&attributes);
 			__sync_synchronize();
