@@ -49,6 +49,7 @@ static unsigned long memory_watch_serial(void) { return serial; }
 static unsigned long memory_watch_generation(unsigned long a,unsigned long s) { return generation; }
 static void memory_watch_protect(unsigned long a,unsigned long s) {}
 static BOOL config_boolean(const char *s) { return FALSE; }
+static int android_ce_texture_enabled(void) { return 1; }
 static unsigned long log_count;
 static void platform_log(const char *s,...) { log_count++; }
 static void xgpu_texture_describe(DWORD f,DWORD s,struct xgpu_texture_description *d) {

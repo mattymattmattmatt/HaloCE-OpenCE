@@ -248,7 +248,7 @@ def test_prompt_focus_tracks_visible_actions(tmp_path, platform, screen):
 
     source = (GAME / "menu_functions.c").read_text()
     start = source.index(f'else if (!strcmp(name,"port mcc {screen} update")) {{')
-    end = source.index('\n    else if' if screen == 'downloads' else '\n\telse if', start)
+    end = source.index('\n\telse if', start)
     body = source[start:end].replace('else if', 'if', 1)
     driver = r'''
 #include <assert.h>

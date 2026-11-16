@@ -29,6 +29,7 @@ player's edits and comments stay.
 #include <string.h>
 #ifndef _WIN32
 #include <unistd.h>
+#include <sys/stat.h>
 #endif
 #ifdef HALO_SWITCH
 /* the guest's write is not on the card until the host commits it

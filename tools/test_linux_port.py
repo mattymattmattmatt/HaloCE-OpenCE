@@ -314,12 +314,16 @@ def test_menu_settings_exist():
     profile = set(re.findall(r'\{ "(profile\.[a-z_]+)", \d', functions))
     # (and the actions a row does on OK rather than a setting: DISCORD ACCOUNT's LINK, setting_write's)
     actions = set(re.findall(r'!strcmp\(name, "([a-z_]+\.action)"\)', functions))
+    # grouped ON/OFF rows from lighting_menu.c (lighting.weapon_glow, lighting.shield_emitters)
+    lighting = set(re.findall(r'\{"(lighting\.[a-z_]+)"',
+                              (root / "port/linux/game/lighting_menu.c").read_text()))
     for path in (MENUS / "ce").glob("*.xml"):
         for setting in re.findall(r'setting="([^"]+)"', path.read_text()):
-            assert setting in known | profile | actions, f"{path.name}: {setting}"
+            assert setting in known | profile | actions | lighting, f"{path.name}: {setting}"
     controls = set(re.findall(r'"(controls\.[a-z_]+)"', (root / "port/linux/src/xinput_sdl.c").read_text()))
     assert controls == {name for name in known if name.startswith("controls.")}
-    assert controls == set(re.findall(r'\{ "(controls\.[a-z_]+)", L"', functions))
+    # Switch-only boolean in xinput/config, not a keyboard binding in the controls screen
+    assert controls - {"controls.nintendo_menu_buttons"} == set(re.findall(r'\{ "(controls\.[a-z_]+)", L"', functions))
 
 
 def _platform_compile_flags(object_path):
@@ -460,6 +464,18 @@ void platform_log(const char *format, ...)
     fputc('\n', stderr);
 }
 
+void platform_share_path(const char *path)
+{
+    (void)path;
+}
+
+void platform_translate_path(const char *xbox_path, char *host_path, unsigned long host_path_size)
+{
+    (void)xbox_path;
+    if (host_path && host_path_size)
+        host_path[0] = 0;
+}
+
 int main(int argc, char **argv)
 {
     char text[256];
@@ -484,7 +500,10 @@ def test_config_has_each_section_once(tmp_path):
     stubs = tmp_path / "stubs"
     (stubs / "SDL3").mkdir(parents=True)
     (stubs / "SDL3" / "SDL.h").write_text("")
-    (stubs / "platform.h").write_text("void platform_log(const char *format, ...);\n")
+    (stubs / "platform.h").write_text(
+        "void platform_log(const char *format, ...);\n"
+        "void platform_share_path(const char *path);\n"
+        "void platform_translate_path(const char *xbox_path, char *host_path, unsigned long host_path_size);\n")
     # (beside the stubs, which it then includes instead of the platform layer's)
     for name in ("port_config.c", "port_config.h"):
         shutil.copy(root / "port/linux/src" / name, stubs / name)

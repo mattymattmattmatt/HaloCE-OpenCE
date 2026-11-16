@@ -60,6 +60,7 @@ static void glDeleteSync(GLsync fence)
 }
 
 static void glFinish(void) { finishes++; complete_draw(); }
+static int host_renderer_vulkan;
 static void host_logf(int priority, const char *format, ...)
 {
 	CHECK(priority == HOST_LOG_WARN && format);
