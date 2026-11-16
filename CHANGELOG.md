@@ -1,5 +1,325 @@
 # Changelog
 
+## Build 143: Faster map sharing, custom Xbox maps and moving game files!
+
+### Map sharing
+
+- New: between two SlipstreamCE machines, maps go over a fast encrypted connection of their own instead of the game's tunnel, for both MCC packages and Custom Edition maps. A joiner opens up to 16 connections to the host (4 on the Switch), all through one port, which the host forwards with UPnP; a host serves 32 in all. Over the internet a joiner connects straight to the host's address when it can. A Custom Edition map still comes from the other players too, with the host as one more source. OpenCE hosts and joiners work as before. (thelinkin3000)
+- Uploads use the whole line outside a game. During a game they leave room for the game's own traffic and slow down only when the players' pings show the line filling up. (thelinkin3000)
+- The upload limits in Network Setup and Server Setup go up to 250 MB/s. (thelinkin3000)
+- A download's speed is shown correctly past 2 MB/s. (thelinkin3000)
+- Fixed: a download stuck at 0 KB/s when the host offered the map as the player joined. (thelinkin3000)
+- Fixed: the Switch froze for 20 to 30 seconds while downloading a map and was dropped from the game. Downloaded pieces are now written to the SD card on a thread of their own. (thelinkin3000)
+
+### Custom Xbox multiplayer maps
+
+- New: Xbox multiplayer maps (from mods such as Halo CE+ X) can go in custom_maps. They're listed, described as "Custom Xbox multiplayer map", shared, and played like the game's own maps, even when they have the same names as the stock ones. (thelinkin3000)
+- A dedicated server's rotation takes them. An Xbox campaign map is still refused, with a message saying why. (thelinkin3000)
+- A game on one of these maps needs a client that supports them. A player whose client doesn't is told "You need a client with support for custom OG Xbox multiplayer maps." and removed. (thelinkin3000)
+
+### Game files (Android)
+
+- New: Settings > Gameplay > GAME FILES moves your maps, custom maps, mods and MCC maps to another place: APP DATA (the app's storage) or OTHER FOLDER (any folder you choose, such as one on a memory card). The game restarts to move them and shows its progress, then says where they are. A move that stops loses nothing: try again, or move them back. (thelinkin3000)
+
+### Hosted servers
+
+- Watching a player through their eyes from the host's screen now turns smoothly, as a replay does, instead of jumping each time their input arrives. (thelinkin3000)
+
+### Custom campaigns (experimental)
+
+- New: play an Xbox or Custom Edition campaign from its own folder in custom_campaigns, alone or in split screen. Its maps are found by the names inside them, so nothing needs renaming, and a campaign never mixes with the stock maps or with another campaign. A campaign with its own ui.map uses it as the main menu, with a BACK TO HALO button added. Each campaign has its own saved game. For now a campaign is chosen in config.toml (`[debug] custom_campaign = "<folder>"`); a menu for it comes later. (thelinkin3000)
+- The unpacked map cache is now kept in memory on Android and the PS5, as it already was on the Switch, and it's emptied whenever the maps change under the same names. The old cache files on disk (about 730 MB) are deleted once. (thelinkin3000)
+
+### Steam Workshop and MCC
+
+- A joiner's Workshop download shows its progress and speed, says it's from the Workshop, and moves to another content server sooner when one refuses. (thelinkin3000)
+- Fixed: a joiner was asked to download from the host a package Steam had already installed. (thelinkin3000)
+- The Workshop screen's NEXT and PREVIOUS PAGE select the new page's first item, an installed item asks DOWNLOAD AGAIN? before downloading it again, and the rows' names are wider with shorter messages. (thelinkin3000)
+- A hosted server identifies an MCC package's Workshop item from its ModInfo.json when it has no download record. (thelinkin3000)
+- Security fixes from a review of the Steam client: a malformed answer from a content server can no longer cause a huge memory copy, the Steam sign-in token is only ever stored encrypted, file moves no longer follow links outside the maps folder, and download manifests come only over HTTPS and are checked strictly. (thelinkin3000)
+
+### Controls
+
+- Look Sensitivity and Vertical Sensitivity go up to 15. Values 1 to 10 feel the same as before. (thelinkin3000)
+
+### From OpenCE
+
+- Co-op cutscenes play on dedicated servers, and a co-op player on an older server watches the cutscene's actors instead of the middle of the map.
+- A campaign's scripts may name its next level.
+- Map downloads ask the host for 8 pieces at a time, and hosts read the files they share faster.
+
+## Build 142: MCC and Hosted Servers!
+
+Thanks to:
+
+1. **puginatux**, for brainstorming the UX and for testing.
+2. **chester**, for the MCC compatibility base.
+3. **watanoge**, for the Steam Workshop integration base.
+
+### Host Server
+
+- New: host a dedicated server from the menus, with no player of your own, on Android, the Switch and the PS5. Multiplayer > HOST SERVER opens the Host Hub. It lists your playlists (A hosts, X edits, Y deletes, START opens Server Settings) beside the rounds of the playlist you've picked. While hosting, the host's screen shows the match, the players and the next round, and has a player menu for kick, ban (for a day or for good), mute and notices. (thelinkin3000)
+- Playlist Builder: maps and rounds side by side. A on a map picks its gametype and adds the round, Y removes a round, the shoulder buttons move it, SAVE keeps the playlist under its name. It lists custom_maps' subfolders, MCC maps, and the gametypes you made in Edit Gametypes (always the latest version of them). It also has Round Options. (thelinkin3000)
+- Server Settings: name, password, listing, players, lobby countdown, map sharing, vote kicking and message of the day. LISTING is INTERNET: PUBLIC, INTERNET: PRIVATE or LAN, like Create Game's choices. A public server now shows in the server browser like a player's game, and asks the router for its port. (thelinkin3000)
+- Watch your server's game live with the Theater's cameras: R on the host's screen, or WATCH in a player's menu. Behind, eyes, free and cinematic views; Back shows the scores. (thelinkin3000)
+- Bots can fill a hosted server (BOTS in Server Settings). An MCC map in the rotation loads after the first round. The host stopping the server no longer shows a network error. (thelinkin3000)
+
+### MCC maps
+
+- Settings > Network Setup > STEAM WORKSHOP: sign in with Steam (password with Steam Guard, or a QR code) and download Halo: CE Anniversary's shared maps and Halo 1 Workshop items, on Android, the Switch and the PS5. The Steam client comes from Halo Content Evolved. (thelinkin3000)
+- IMPORT on the map lists now takes CE maps, zips of maps, Workshop packages and MCC resource sets on every platform. Android opens the file picker. The Switch and the PS5 show an upload page's address and QR code on your local network. An import of a package you already have asks whether to REPLACE it or KEEP VERSION ON DISK. (thelinkin3000)
+- MCC maps load much faster: sounds and textures are converted on the host's spare cores, not one by one on the game's thread (a Switch campaign map took 87 s). The shared bitmaps.map and sounds.map are no longer read in full for their checksum at every load, and BC7 textures are kept at a quarter of the memory. (thelinkin3000)
+- Switch: MCC maps no longer fail with "the MCC tag address window at 50000000 (64 MiB) is unavailable". (thelinkin3000)
+- MCC map lists and the MCC lobby no longer redo work every frame. (thelinkin3000)
+
+### Map transfers
+
+- Joining a game on an MCC map you don't have: with a Steam sign-in and a Workshop map, the big resource files come from the Workshop while the host sends the rest. With no other source, the whole package installs from Steam. You're asked to download from the host only when the host is the only source. (thelinkin3000)
+- Between two SlipstreamCE machines, an MCC package goes over its own fast connection at the upload's full speed, not in small chunks once a frame. OpenCE hosts and joiners work as before. (thelinkin3000)
+- Map sharing over internet play is much faster on slow connections: the tunnel's window now follows the upload limit and the round trip (it was capped near 1.3 MB/s at 100 ms). Sharing runs on its own thread, not once a frame. (thelinkin3000)
+- A host says why it refuses a download. The Switch can download MCC maps without stalling the game, and a file it can't read is reported. (thelinkin3000)
+
+### Bots
+
+- New second bot type, Proving Grounds (Bots > Kind): a new bot brain we wrote from scratch (no Project Proving Grounds code). It reacts only to what it sees, hears or is told, aims like a human, has team play for Slayer, CTF, King, Oddball and Race, and eight personalities, dealt so both teams match. (thelinkin3000)
+- Birchwood's CTF play redone: a home guard, a forward line, pushes and wingmen, so attacks no longer stall one by one. One flag carrier per team, who hides while its own flag is away. Birchwood bots also use the plasma pistol's overcharge. (thelinkin3000)
+- Bots find their way to upper floors and use ladders and teleporters. Vehicles keep to ground they fit on and drive around walls, and a Warthog's driver calls its crew. Proving Grounds bots got Birchwood's fire ranges, power-ups and retreats. (thelinkin3000)
+
+### Menus and keyboard
+
+- Text fields (server name and password, message of the day, playlist name, Create Game, the server browser's password) are typed on a new on-screen keyboard in the menus' style, with a controller, a tap or a keyboard. The Switch had no keyboard for these fields before. The text chat uses the same keyboard, now larger and see-through. On the Switch, A types, B cancels and R changes the chat channel. (thelinkin3000)
+- Switch: the touchscreen works in the menus in handheld mode. (thelinkin3000)
+- Server browser: a touch drag scrolls the list again, instead of changing its sort order. Network Setup's rows no longer overlap the help text. (thelinkin3000)
+
+### Fixes
+
+- Theater: replays recorded before the MCC update, and before network version 42, play again ("This replay has no game to play"). (thelinkin3000)
+- The loading screen's trails cover the whole width on Vulkan and on the Switch. (thelinkin3000)
+- config.toml, debug.txt, gamestate.txt and halo.log can be read and replaced over FTP or from a file manager. (thelinkin3000)
+
+### From OpenCE
+
+#### MCC
+
+- Halo 1 MCC map support, with its documentation. (chestahh)
+- MCC package discovery is on by default and finds missions with lowercase metadata. (chestahh)
+- MCC mod compatibility; fixes for MCC model limits, damage acceleration, HUD placement and projectile offsets. (chestahh, MrBruh)
+- MCC hotfix 1.0.1: dedicated servers can host MCC maps, map sharing is better, and local mods install. (chestahh)
+- An MCC game starts without waiting for players still downloading its package. (Guven)
+- A dedicated server's lobby no longer restarts an MCC map's check every second. (Guven)
+
+#### Gameplay and servers
+
+- Players can stand on, ride and jump from moving vehicles. (Mootjuh)
+- Dedicated servers: players change teams with !switch. (Guven)
+- A player whose machine left while held for a map download is taken out. (Guven)
+- Co-op cutscene music and dialogue no longer play again and again on dedicated servers. (Guven)
+- Quitting split-screen multiplayer no longer crashes the game. (Brenden Hyde)
+- Map sharing: a download keeps reading while its connection has more. (PeterRichardsonGolf)
+- The host's name is drawn white in chat. (justinfilip)
+
+#### Sound
+
+- Xbox-style 3D audio, HRTF and DSP processing restored. (chestahh)
+- Fixes for Doppler pitch limits, listener resets and nested sound flushes. (chestahh)
+- A looping sound fading out of range no longer crashes. A sound already out of range skips the wall test. (Mootjuh, justinfilip)
+
+#### Graphics and interface
+
+- Widescreen keeps the stock loading effects, and the Xbox chant is back. (chestahh)
+- Optional keyboard glyphs on gameplay prompts and pause menus. (chestahh)
+- Reverse shader animations no longer trip map-loading assertions. (chestahh)
+- Android: fixes for frame-buffer reuse and cached-map display. A SKIP button shows on the touchscreen during cutscenes, and a co-op client's tap counts as a vote. (chestahh, Guven)
+
+## Build 141
+
+### Dynamic lighting
+
+- New LIGHTING setting at the top of Video Setup > Dynamic Lighting: STOCK, 1X, 1.5X, 2X or 3X. STOCK, the default, is the same lighting as the original Xbox: every added light is off and the other options are hidden, keeping their settings for when you pick a level again. 1X to 3X make every dynamic light (projectiles, muzzle flashes, weapon glow, Needler prongs, shield emitters, vehicle lights, world emitters and shield glow) reach that much farther and shine that much brighter, its color kept. Online, each player's own level applies, except Shield Glow, which is still the host's choice. If you already had dynamic lights on, you keep them at 1X. (thelinkin3000)
+- Big fights cost less with dynamic lighting on: a light's occlusion rays are shared between the game thread and helper threads, moving lights are traced while the frame draws, occlusion uses faster math, and the ammo counter's light, Covenant emitters and objects standing still take less work each frame. (thelinkin3000)
+- Switch: every light ray helper thread now runs; only one of them ever did. (thelinkin3000)
+
+### Menus
+
+- The menus no longer stall on the SD card. Select Map and Select Gametype load in the background and say LOADING until they're ready; opened again, they're there at once. (thelinkin3000)
+- The campaign menus no longer read the whole 20 MB savegame each time they open: it's checked once, in the background, while the main menu is up. The saved games' index, gametype files, mods and the main menu's mod textures are kept in memory instead of read again and again. (thelinkin3000)
+- The maps folders are scanned again only when what's in them changes, and mods are found once a run (or when the Mods menu changes them), not at every map load. (thelinkin3000)
+- Startup touches the card less: unchanged default gametypes aren't rewritten, and shader caches are read in larger blocks. (thelinkin3000)
+- Android: Video Setup's last rows no longer overlap the help at the bottom. The Vulkan Driver's help now says it takes effect the next time the game starts. (thelinkin3000)
+
+### Split screen
+
+- Join a multiplayer match in progress: a controller with no player presses START, picks a profile in the box that opens in its quarter of the screen, and gets its own view. A player who leaves loses their view, and the others fill the screen. (thelinkin3000)
+- ADD PLAYER shows each profile's Spartan in its color. Player 1's controller can join when another controller started the game, and choosing a profile no longer sends players 2-4 to the title screen. (thelinkin3000)
+- Switch: a controller's face buttons follow the console's layout only while that player's own menu is up. (thelinkin3000)
+- The join box no longer opens during a replay. (thelinkin3000)
+
+### Android
+
+- On first start, the launcher asks where the game data goes: the app's own storage, as before, or a folder you choose. A folder that already has the stock maps starts at once; otherwise the disc image is extracted into it. A new `game.mods.path` setting says where the mods folder is. (thelinkin3000)
+- Settings > Audio Setup > Sound Processing has a new REALTIME AUDIO switch, on by default. Turn it off for screen recordings: on phones with low latency audio they came out silent. (thelinkin3000)
+
+### Fixes
+
+- Switch: big maps such as SPV2's a50 load again. They failed with an out-of-memory error, with plenty of memory free. (thelinkin3000)
+- A projectile whose owner was deleted mid-flight (a body cleaned up, a respawned vehicle) no longer stops the game when it hits something. (thelinkin3000)
+
+## Build 140: Dynamic lighting, and better Custom Edition maps!
+
+### Dynamic lighting
+
+- New: dynamic lighting, ported from GulchCE, on Vulkan (Android) and the Switch. Plasma bolts, rockets, muzzle flashes, held energy weapons, the Assault Rifle's ammo counter, Needlers, fuel rods, Jackal and Covenant shields, vehicles, powerups and teleporters can light what's around them, and energy shields glow onto their surroundings as they flare. Turn each one on in Video Setup > Dynamic Lighting; they're all off by default. (ported by thelinkin3000, thanks a lot Chester!)
+- Light Occlusion: dynamic lights stop at walls and vehicles instead of shining through them. On Android, Occluded Lights sets how many lights a frame get it (8, 6 or 4, 6 by default); fewer is faster on a slower phone. (thelinkin3000)
+- Dynamic lighting is tuned to keep big fights smooth: held weapons and moving lights trace far fewer rays, weapon lights always leave room for other lights, lights that can't reach your view or are far away stay as the game draws them, and a light on a moving object no longer rebuilds its place in the level every tick. (thelinkin3000)
+
+### Custom Edition maps
+
+- HUDs on Custom Edition maps now draw on Vulkan (Android) and the Switch as they do on OpenGL: ammo counters and health and shield meters drawn from sheets the map shares with other HUD art show correctly, and segmented high-res meters keep their steps sharp. With High-Res HUD on, the original HUD sheets that have no high-res redraw are drawn four times larger and smoother. (thelinkin3000, from chestahh's fix for OpenGL)
+- Android: DELETE on New Game's and the Map screen's map lists deletes the custom map or folder of maps chosen, after a second press to confirm. Only custom maps can be deleted. (thelinkin3000)
+- Android: on phones whose GPU can't use the game's compressed (DXT) textures, like the Nokia 8's Adreno 540 and Mali GPUs, most textures now take a quarter of the memory they did. Big Custom Edition maps such as the_Cage no longer run the phone out of memory while they load. To go back, set `display.dxt1_astc` to `false` in `config.toml`. (thelinkin3000)
+- Switch: very large textures (over 8 MB once unpacked) are drawn again. On the_Cage the pistol's zoom showed garbage instead of its scope, and the large 3D texture the game's own dynamic lights fade with was never drawn. (thelinkin3000)
+- Custom Edition maps: a custom_maps folder with no maps of its own, only folders of maps, no longer stops the game while it looks for maps. (thelinkin3000)
+
+### Theater and replays
+
+- Theater: once the player keeps moving, the cinematic camera now follows them at the left stick's distance, instead of chasing them in surges. It still stays put like a tripod while they stand or make short moves. (thelinkin3000)
+- Theater: the cinematic and free cameras no longer pass through trees, rocks, crashed ships and other scenery and machines, or see the player through them. (thelinkin3000)
+- Replays: rewinding a co-op replay no longer leaves players sliding along in a cutscene's pose, or misses doors, sounds and scenery animations. (thelinkin3000)
+- Replays: the watched player's weapon lights are lit as their own first-person weapon's, and lights in a replay measure their distance from the replay's camera. (thelinkin3000)
+
+### Controls and menus
+
+- Touch controls: a new "Show during cutscenes" switch in Options > General keeps the controls on screen while a cutscene plays. Press A to skip it then. (thelinkin3000)
+- Gamepads: a profile's Gamepads has VERTICAL SENSITIVITY, which sets how fast the right stick turns the view up and down on its own. SAME keeps the game's, half of Look Sensitivity. (thelinkin3000)
+- Server browser: the PING column sorts, lowest first, then highest. (thelinkin3000)
+- Menus: the PC menus are always in English. They showed in Spanish when the `loc.map` in custom_maps came from a Spanish Custom Edition. (thelinkin3000)
+- Android: the first time this build starts, it makes the files in the game's folder readable and writable by everyone, on Android versions that allow it. (thelinkin3000)
+
+### Graphics and performance
+
+- Vulkan and Switch: decals on surfaces seen at an angle, like the Pelican's red side lights, no longer sink into the surface in slivers at higher resolutions. (thelinkin3000, from Erik's fix for OpenGL)
+- Switch: a lens flare no longer reads another test's visibility, which could show or hide it wrongly. (thelinkin3000)
+- Decals are drawn in fewer, larger batches, and a network client stops asking for the host's address every frame. Big matches run lighter, especially on the Switch. (thelinkin3000)
+
+### From OpenCE
+
+#### Graphics
+
+- Lens flares are each tested for visibility on their own, so one no longer takes another's. (Erik)
+- Decals keep the Xbox's depth bias at any depth and screen size. (Erik)
+- A scope's zoom blur reaches the left and top edges of the screen. (Erik)
+- The Xbox scope's 2x and 10x labels are sized to match the stock glyphs. (Erik)
+- Chapter titles stay on the side they're aligned to on a widescreen. (Erik)
+- Between game ticks, shadows stay under their objects, camera shake shows on every frame, flags' cloth moves with its pole, lightning bolts keep their shape, and contrails age at the game's own pace. (Erik)
+- An empty-handed player's flashlight shines from where their body is drawn. (Erik)
+- The first-person weapon's quick animations, like melee, are smoothed between ticks. (Guven)
+
+#### Sound
+
+- Sounds have the Doppler effect: their pitch shifts as they move toward or away from you. (trevorm7)
+- A voice the game cuts off fades out instead of stopping dead, without a click. (trevorm7)
+
+#### Controls
+
+- Each controller stick's dead zone can be set, in percent. (Guven)
+- Remapped controls navigate the main menu correctly, and custom layouts have a Cycle Camera action. (chestahh)
+
+#### Multiplayer
+
+- Server browser: hosts are timed in the order shown, a row shows moving dots while its host is timed, and REFRESH shows the timing again. Probes wait at most a second for the listings. (medic-code, MrBruh)
+- Discord Account's LINK opens the master server's page when a server asked for one. (MrBruh)
+- Dedicated servers: custom maps whose file names have capitals can be played, and the web page's PLAY NOW starts rotation entries with many rules. (Guven)
+
+#### Fixes
+
+- A script that refers to an object that no longer exists gets none instead of crashing the game. (Guven)
+
+## Build 138: Hotfix for input lag
+
+- Switch: much less input lag. In our tests, the time from the stick moving to the view turning went from about 102 ms to about 67 ms. In first person on foot, the view now follows your stick on the frame you move it, and the game reads your input later, just before it's needed. To go back, set `display.direct_camera` to `false` or `debug.frame_pace_ahead` to `true` in `config.toml`. (thelinkin3000)
+- Android: in first person on foot, the view now follows your aim on the frame you move it, instead of up to two game ticks later. To go back, set `display.direct_camera` to `false` in `config.toml`. (thelinkin3000)
+- Android: Build 136 left out the new SlipstreamCE app, so the old Halo app said "The new game could not be found." The app is included now. Open the old Halo app and it downloads the new one. Your saves and settings are still in the old app until the new one copies them, so don't remove the old app before that. (thelinkin3000)
+- If you're updating from before Build 136, its notes still apply: Switch players should rebuild their forwarders, and PS5 players should uninstall the game from the home screen so ShadowMountPlus loads it again with the correct name and icon. (thelinkin3000)
+
+## Build 137: Hotfix for the Android download
+
+- Android: Build 136 left out the new SlipstreamCE app, so the old Halo app said "The new game could not be found." The app is included now. Open the old Halo app and it downloads the new one. Your saves and settings are still in the old app until the new one copies them, so don't remove the old app before that. (thelinkin3000)
+- If you're updating from before Build 136, its notes still apply: Switch players should rebuild their forwarders, and PS5 players should uninstall the game from the home screen so ShadowMountPlus loads it again with the correct name and icon. (thelinkin3000)
+
+## Build 136: Halo is now SlipstreamCE!
+
+- SlipstreamCE: this fork of OpenCE has a new name and a new logo, by puginatux, on Android, Switch and PS5. The project is now at github.com/thelinkin3000/SlipstreamCE, and old links redirect there. Your saves and settings stay yours on every platform. (thelinkin3000)
+- Switch: because the game's name and icon are changing, rebuild your forwarder if you start the game from one on your homescreen. Until you do, it keeps the old name and icon. The game stays at `/switch/halo/halo.nro`. (thelinkin3000)
+- Switch: builds older than v94 can no longer update themselves. If you're on one, install this release by hand. (thelinkin3000)
+- PS5: because the game's name and icon are changing, uninstall the game from the home screen after this update. ShadowMountPlus then loads it again with the correct name and icon. (thelinkin3000)
+- Android: the game is now a new app, SlipstreamCE (`ar.com.slipstreamce`), because Android can't change an installed app's package name. Your update to the old Halo app downloads the new one and offers to install it. The first time it starts, the new app copies your saves, settings, mods, replays, maps and touch layouts. Don't remove the old app until the new one offers to remove it. (thelinkin3000)
+- Multiplayer Color: your Spartan is now the game's real model in your color, holding the assault rifle, the plasma rifle and the skull in turn. The right stick turns him, the north button changes what he holds, and he walks when left alone. Select Profile shows him too. Without `wizard.map`, the screens keep their picture. (thelinkin3000)
+- Theater: the cinematic camera now stays in place like a tripod, turning, framing and zooming to follow the player, and moves only when they get far away. It cuts to a new spot when it loses sight of them, and brings whoever is hurting them into frame. The free camera backs away from corners. (thelinkin3000)
+- Settings: a new CREDITS page lists the licenses the game uses, beside the logo. The full license texts come with each release. (thelinkin3000)
+- Settings: About says what this is, for your platform, and shows the logo. (thelinkin3000)
+- Menus: new icons for Audio, Video, Network, Gameplay, Internet, LAN and Gametypes. (thelinkin3000)
+- Main menu: the corner now shows SlipstreamCE and the build number. (thelinkin3000)
+- Theater: pressing left in the Theater with no replays no longer crashes the game. (thelinkin3000)
+- Custom Edition maps: the flamethrower is now a flamethrower on Custom Edition maps, instead of turning into a rocket launcher. The Classic and Covenant weapon sets treat it to match. (thelinkin3000)
+- Switch: mod models with a lot of detail no longer fill the frame's upload buffer, which left the world flat and overbright and could drop the HUD, in replays with many players and bodies in view. In a Blood Gulch replay, 7 seconds of lost frames went to none. (thelinkin3000)
+- Switch: removed a wrong warning that Custom Edition maps can't run on some consoles. (thelinkin3000)
+- HUD: the timing counter left on by The Library's and The Maw's last cutscenes no longer sits over your ammo count. (thelinkin3000)
+
+## Build 135: Hotfix for the Turnip crash, and mod packs import!
+
+- Vulkan: on some phones with the Turnip driver (an Adreno 750 phone, for one), the game crashed a moment after it started drawing at the screen's size. It was a bug in the driver, which the game no longer runs into. (thelinkin3000)
+- Mods: on Android, IMPORT takes a .zip with a whole pack of mods, each in a folder of its own at the .zip's top, as well as a .zip of one mod. Mods you already have are skipped and named, and a .zip that can't be imported no longer stops the others. (thelinkin3000)
+- Android: how an import or an export went (maps, mods, drivers, replays) is written to the log as well as shown on screen, so a log you send in says what happened. (thelinkin3000)
+- Vulkan: the renderer's counts, two long lines every second, are only written with `debug.gpu_stats`. Without it, a line is written only when draws were skipped. They were most of the log. (thelinkin3000)
+
+## Build 134: Vulkan runs faster, and long replays play on Switch!
+
+- Custom Edition maps: on phones where Android already uses the memory Custom Edition maps are made for (a Galaxy Z Fold, for one), the maps now load somewhere else and play, instead of never showing up in the map lists. Where they can't run at all, IMPORT says so instead of importing maps you would never see. (thelinkin3000)
+- Vulkan: the renderer now records and presents its frames on its own thread, so the game's thread no longer waits on the graphics driver. A frame's work goes to the GPU before the game waits for a screen image, so the GPU starts sooner. (thelinkin3000)
+- Vulkan: a map's walls and floors are copied to the GPU once when the map loads, instead of being sent again every frame. Small effects (HUD, text, particles) send only what changed. This takes a large share of the CPU's per-frame work off. (thelinkin3000)
+- Vulkan: the GPU waits less between drawing a picture and reading it back, and the finished picture is shown with a draw instead of a copy, which is cheaper on phone GPUs. (thelinkin3000)
+- Android: the on-screen touch controls are redrawn only when something on them changes. Before, they were redrawn every frame, so the game ran faster with them hidden. (thelinkin3000)
+- Maps: on Android, IMPORT on the level lists copies .map files, and the maps inside .zip files, into custom_maps. (thelinkin3000)
+- Theater: long replays play on every platform. A 22-minute match's replay (46 MB, 152 MB unpacked) used to fail with "The replay cannot be read." It's now kept in the app's own memory instead of the game's. (thelinkin3000)
+- Switch: a map's mod textures are read from the SD card ahead of time, so the game no longer pauses to read each one the first time it shows up. In a 48-bot match the slowest 1% of frames went from 19 to 32 fps. (thelinkin3000)
+- Switch: a frame's work goes to the GPU before the game waits for a screen image, as on Vulkan. Looking up cached data now takes the game's thread less time. (thelinkin3000)
+- Benchmark: `debug.benchmark` accepts `replay:<file>:<seconds>` to measure a replay as it plays, and `debug.benchmark_manual` lets you play the benchmark match yourself. (thelinkin3000)
+
+## Build 133: Vulkan runs faster, and long replays play on Switch!
+
+- Vulkan: the renderer now records and presents its frames on its own thread, so the game's thread no longer waits on the graphics driver. A frame's work goes to the GPU before the game waits for a screen image, so the GPU starts sooner. (thelinkin3000)
+- Vulkan: a map's walls and floors are copied to the GPU once when the map loads, instead of being sent again every frame. Small effects (HUD, text, particles) send only what changed. This takes a large share of the CPU's per-frame work off. (thelinkin3000)
+- Vulkan: the GPU waits less between drawing a picture and reading it back, and the finished picture is shown with a draw instead of a copy, which is cheaper on phone GPUs. (thelinkin3000)
+- Android: the on-screen touch controls are redrawn only when something on them changes. Before, they were redrawn every frame, so the game ran faster with them hidden. (thelinkin3000)
+- Maps: on Android, IMPORT on the level lists copies .map files, and the maps inside .zip files, into custom_maps. (thelinkin3000)
+- Theater: long replays play on every platform. A 22-minute match's replay (46 MB, 152 MB unpacked) used to fail with "The replay cannot be read." It's now kept in the app's own memory instead of the game's. (thelinkin3000)
+- Switch: a map's mod textures are read from the SD card ahead of time, so the game no longer pauses to read each one the first time it shows up. In a 48-bot match the slowest 1% of frames went from 19 to 32 fps. (thelinkin3000)
+- Switch: a frame's work goes to the GPU before the game waits for a screen image, as on Vulkan. Looking up cached data now takes the game's thread less time. (thelinkin3000)
+- Benchmark: `debug.benchmark` accepts `replay:<file>:<seconds>` to measure a replay as it plays, and `debug.benchmark_manual` lets you play the benchmark match yourself. (thelinkin3000)
+
+## Build 132: Faster Vulkan and compatibility with older phones!
+
+- Vulkan: phones whose own Vulkan driver lacks dynamic rendering (Samsung's Mali phones, older Adreno phones such as the Nokia 8) now run the Vulkan renderer on that driver instead of falling back to OpenGL ES. A 48-bot match on a Galaxy S21 FE (Exynos 2100) runs at about 71 fps, where the open-source PanVK driver managed 33 to 39. (thelinkin3000)
+- Vulkan: the renderer no longer makes the GPU finish all its work at every change of render target, which phone GPUs pay for most; on a Galaxy S21 FE with its own driver that took about a tenth off the GPU's time in a busy frame. (thelinkin3000)
+- Vulkan: Video Setup's VULKAN DRIVER lists STOCK and then every driver archive in the freedreno_drivers folder by its name, including the Turnip build the app downloads for Adreno phones. TURNIP is gone from the list, and a vk_driver = "auto" left in config.toml becomes STOCK. (thelinkin3000)
+- Vulkan: IMPORT DRIVER in Video Setup (Android, with VULKAN chosen) adds Vulkan driver archives (.zip) from your phone's files, checking each one is a driver first; it's listed the next time you open Video Setup. (thelinkin3000)
+- Vulkan: if Vulkan can't start on your phone, the game sets GRAPHICS BACKEND to OPENGL, so Video Setup shows what's actually running. (thelinkin3000)
+- Android: on phones whose CPU timer reports the wrong speed (the Galaxy S21 FE's Exynos 2100), the game no longer freezes: the main menu's background moves, a campaign loads after Choose Difficulty, and the menus keep responding after you create a profile. (thelinkin3000)
+- Theater: on Android, IMPORT adds replays from your phone's files. (thelinkin3000)
+- Mods: on Android, IMPORT adds a mod from a .zip of its folder, and DELETE deletes the selected mod after asking. (thelinkin3000)
+- Saved games: checkpoints are kept in memory instead of written to storage, so a checkpoint no longer holds up the game's other reads and writes for seconds (most noticeable on Switch in co-op). (thelinkin3000)
+- Replays and logs: the replay recording and debug.txt are written in the background, so writing them no longer drops frames (on Switch, a dropped frame every five seconds while recording). The overlay menu's System folder can turn off Write debug.txt and Write halo.log, on every platform. (thelinkin3000)
+- Switch: a large write to the SD card no longer keeps the game's other reads and writes waiting until it finishes. (thelinkin3000)
+
+## Build 131
+
+- Saved games: a checkpoint or Save and Quit made on Android, Switch or PS5 is no longer lost between runs. The game's memory can land somewhere else each time it starts, and a save made with it elsewhere was refused; such saves now load, and so do saves made before this build. (thelinkin3000)
+- Profiles: each player profile keeps its own Controls Setup, Mouse Settings and Gyro Aim, saved in its folder beside its saved games. Profiles start with the settings you had before, until you change them. In split screen on Switch and PS5, each player uses their own profile's gyro settings. (thelinkin3000)
+- Profiles: on Switch and PS5, the profile settings no longer list Controls Setup and Mouse Settings, which are for keyboard and mouse; gamepads' BUTTON LAYOUT is in their place. (thelinkin3000)
+- Replays: a new view, CINEMATIC, after the free camera (Y). It is the free camera with no controls: it starts behind the player and follows them, zooming in as they get farther away, and moves back behind them whenever a wall or scenery hides them for a moment, or at once as they respawn out of sight. (thelinkin3000)
+- Replays: the free camera zooms in on the player you're watching about twice as far as before. (thelinkin3000)
+- Replays: when a replay ends you're back in the Theater half a second later, instead of at the main menu four seconds later, and without the notice that the game's server couldn't be reached. Leaving a replay from its pause menu goes back to the Theater too. (thelinkin3000)
+
 ## Build 130
 
 - Replays: the D-pad scrubs. A tap of left or right skips 10 seconds and taps add up; held, it slides a marker along the seek bar, and the playback catches up to it. (thelinkin3000)

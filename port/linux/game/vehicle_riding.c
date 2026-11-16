@@ -27,6 +27,7 @@ the original game.
 #include "saved games/game_state.h"
 
 #include <math.h>
+#include <stdlib.h>
 
 /* ---------- constants */
 
@@ -109,7 +110,19 @@ static struct vehicle_riding_cabin riding_cabins[HALO_PORT_MAXIMUM_NETWORK_PLAYE
 /* each player's snapshot of the vehicle's writes, never saved */
 static struct vehicle_riding_mark riding_marks[HALO_PORT_MAXIMUM_NETWORK_PLAYERS];
 static struct vehicle_riding_claim riding_claims[HALO_PORT_MAXIMUM_NETWORK_PLAYERS];
-static struct vehicle_riding_correction riding_corrections[HALO_PORT_MAXIMUM_OBJECTS_PER_MAP];
+/* (each object's, on the heap at the first use, zeroed as static data is: at
+256 KB it does not fit in the guest images, whose code and data have to fit
+in their 64 MB) */
+static struct vehicle_riding_correction (*riding_corrections_storage)[HALO_PORT_MAXIMUM_OBJECTS_PER_MAP];
+
+static struct vehicle_riding_correction (*riding_corrections_get(void))[HALO_PORT_MAXIMUM_OBJECTS_PER_MAP]
+{
+	if (!riding_corrections_storage &&
+		!(riding_corrections_storage = calloc(1, sizeof(*riding_corrections_storage))))
+		abort();
+	return riding_corrections_storage;
+}
+#define riding_corrections (*riding_corrections_get())
 
 /* ---------- private code */
 

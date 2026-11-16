@@ -34,6 +34,12 @@ it grows, from where it ended when the run began: the file keeps every
 run's), and the CPU profiler
 (profile.bin: host_debug.c, at debug.profile_hz, 500 if that is 0) and the
 Vulkan renderer's GPU times (gpu.txt: host_vk_profile.c) write there.
+
+debug.halo_log (true by default) writes the log to halo.log in the data
+folder too, begun again each start, as the Switch's is beside its program
+and the PS5's in /data/halo: from when
+config.toml is read, so the lines before it (the memory's reservation, the
+start) are logcat's only.
 */
 
 #include "host.h"
@@ -66,32 +72,60 @@ static void log_to_logcat(int priority, const char *line)
 	__android_log_write(priority, "halo", line);
 }
 
-/* ---------- a profiled run's folder (debug.profile_run) */
+/* ---------- the log's files: a profiled run's (debug.profile_run) and the data folder's (debug.halo_log) */
 
 static char profile_folder[512];
-/* its halo.log, written as logcat is (write: the sink may be called from a signal handler, host_debug.c) */
+/* their halo.log, written as logcat is (write: the sink may be called from a signal handler, host_debug.c) */
 static int profile_log = -1;
-static struct timespec profile_started;
+static int data_log = -1;
+static struct timespec log_started;
 
-static void log_to_logcat_and_profile(int priority, const char *line)
+static void log_to_file(int descriptor, const char *prefix, const char *line)
 {
-	static const char levels[] = "??VDIWEF";
-	struct timespec now;
-	char prefix[32];
-	double seconds;
 	struct iovec parts[3];
 
-	__android_log_write(priority, "halo", line);
-	clock_gettime(CLOCK_MONOTONIC, &now);
-	seconds = (double)(now.tv_sec - profile_started.tv_sec) + (double)(now.tv_nsec - profile_started.tv_nsec) / 1e9;
-	snprintf(prefix, sizeof(prefix), "%8.2f %c ", seconds, priority >= 0 && priority < 8 ? levels[priority] : '?');
-	parts[0].iov_base = prefix;
+	parts[0].iov_base = (void *)prefix;
 	parts[0].iov_len = strlen(prefix);
 	parts[1].iov_base = (void *)line;
 	parts[1].iov_len = strlen(line);
 	parts[2].iov_base = (void *)"\n";
 	parts[2].iov_len = 1;
-	writev(profile_log, parts, 3);
+	writev(descriptor, parts, 3);
+}
+
+static void log_to_logcat_and_files(int priority, const char *line)
+{
+	static const char levels[] = "??VDIWEF";
+	struct timespec now;
+	char prefix[32];
+	double seconds;
+
+	__android_log_write(priority, "halo", line);
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	seconds = (double)(now.tv_sec - log_started.tv_sec) + (double)(now.tv_nsec - log_started.tv_nsec) / 1e9;
+	snprintf(prefix, sizeof(prefix), "%8.2f %c ", seconds, priority >= 0 && priority < 8 ? levels[priority] : '?');
+	if (profile_log >= 0)
+		log_to_file(profile_log, prefix, line);
+	if (data_log >= 0)
+		log_to_file(data_log, prefix, line);
+}
+
+/* the data folder's halo.log, begun again (debug.halo_log) */
+static void data_log_begin(const char *data_root_path)
+{
+	char path[600];
+
+	snprintf(path, sizeof(path), "%s/halo.log", data_root_path);
+	data_log = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
+	if (data_log < 0)
+	{
+		host_logf(HOST_LOG_WARN, "cannot write %s (%s); the log is logcat's only", path, strerror(errno));
+		return;
+	}
+	/* (0666 whatever the umask, as config.toml and debug.txt are: msvc_crt.c's platform_share_file) */
+	fchmod(data_log, 0666);
+	host_log_set_sink(log_to_logcat_and_files);
+	host_logf(HOST_LOG_INFO, "the log goes to %s too (debug.halo_log)", path);
 }
 
 /* every folder along path made */
@@ -191,7 +225,6 @@ static void profile_run_begin(const char *data_root_path, int *profile_hz)
 	char path[600];
 	FILE *named;
 
-	clock_gettime(CLOCK_MONOTONIC, &profile_started);
 	snprintf(path, sizeof(path), "%s/profile_folder.txt", data_root_path);
 	named = fopen(path, "r");
 	if (named)
@@ -223,7 +256,7 @@ static void profile_run_begin(const char *data_root_path, int *profile_hz)
 	snprintf(path, sizeof(path), "%s/halo.log", profile_folder);
 	profile_log = open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0664);
 	if (profile_log >= 0)
-		host_log_set_sink(log_to_logcat_and_profile);
+		host_log_set_sink(log_to_logcat_and_files);
 	snprintf(host_vk_profile_folder, sizeof(host_vk_profile_folder), "%s", profile_folder);
 	debug_copy_begin(data_root_path);
 	if (*profile_hz <= 0)
@@ -265,33 +298,94 @@ void host_android_path(int which, char *buffer, uint32_t size)
 	snprintf(buffer, size, "%s", which ? save_root : data_root);
 }
 
-static int directory_has_maps(const char *root)
+/* whether a maps folder holds the game's maps (its ui.map, the launcher's
+sign too: LauncherActivity.haveData) */
+static int folder_has_maps(const char *folder)
 {
-	char path[600];
+	char path[1100];
 	struct stat information;
 
-	snprintf(path, sizeof(path), "%s/maps/ui.map", root);
+	snprintf(path, sizeof(path), "%s/ui.map", folder);
 	return stat(path, &information) == 0;
 }
 
 /* Directories the app creates in its external storage are private to it
 (mode 0770 under the app's own group), so the shell user (adb) cannot list
-them. Open the save tree for reading, with set-group-ID directories as
-posix_make_directory creates them (port/linux/src/posix_files.c). */
+them. Open the save tree to everyone, with set-group-ID directories as
+posix_make_directory creates them (port/linux/src/posix_files.c): as
+open_data_tree leaves the whole folder, which this, at every start, would
+otherwise narrow again for the saves. */
 static int share_entry(const char *path, const struct stat *information, int type, struct FTW *walk)
 {
 	(void)information;
 	(void)walk;
 	if (type == FTW_D || type == FTW_DP)
-		chmod(path, 02775);
+		chmod(path, 02777);
 	else if (type == FTW_F)
-		chmod(path, 0664);
+		chmod(path, 0666);
 	return 0;
 }
 
 static void share_save_tree(const char *root)
 {
 	nftw(root, share_entry, 16, FTW_PHYS);
+}
+
+/* Once, the first start of a build that has this: every file under the app's
+folder (data_root: config.toml, the logs, the maps, the custom maps, mods,
+replays, saves) made readable and writable by everyone (0666, folders 0777),
+where the app had left them its own (0640 and 0770: adb's shell user could
+not read them, nor a file manager change them). The marker file says it has
+run; deleting it runs it again at the next start. */
+#define OPEN_DATA_MARKER ".permissions_opened"
+
+static unsigned long open_data_changed, open_data_failed;
+
+static int open_data_entry(const char *path, const struct stat *information, int type, struct FTW *walk)
+{
+	mode_t wanted;
+
+	(void)walk;
+	if (type == FTW_D || type == FTW_DP)
+		wanted = 0777;
+	else if (type == FTW_F)
+		wanted = 0666;
+	else
+		return 0;
+	/* (a set-group-ID folder keeps the bit: posix_make_directory's) */
+	if (type != FTW_F)
+		wanted |= information->st_mode & S_ISGID;
+	if ((information->st_mode & 07777) == wanted)
+		return 0;
+	if (chmod(path, wanted) == 0)
+		open_data_changed++;
+	else
+		open_data_failed++;
+	return 0;
+}
+
+static void open_data_tree(const char *root)
+{
+	char marker[600];
+	FILE *file;
+
+	snprintf(marker, sizeof(marker), "%s/%s", root, OPEN_DATA_MARKER);
+	if (access(marker, F_OK) == 0)
+		return;
+	nftw(root, open_data_entry, 16, FTW_PHYS | FTW_DEPTH);
+	host_logf(HOST_LOG_INFO, "files: %s and everything in it opened to everyone (0666, folders 0777): %lu changed, "
+		"%lu could not be", root, open_data_changed, open_data_failed);
+	file = fopen(marker, "w");
+	if (file)
+	{
+		fputs("The files here were made readable and writable by everyone once (0666, folders 0777).\n"
+			"Delete this file to have the game do it again at its next start.\n", file);
+		fclose(file);
+		chmod(marker, 0666);
+	}
+	else
+		host_logf(HOST_LOG_ERROR, "files: cannot write %s (%s): this runs again at the next start", marker,
+			strerror(errno));
 }
 
 /* ---------- the system's gesture edges */
@@ -342,26 +436,38 @@ void host_gesture_insets(int *insets)
 	}
 }
 
-/* ---------- the Theater's EXPORT REPLAYS */
+/* ---------- the Theater's EXPORT and IMPORT, the Mods screen's IMPORT and Video
+Setup's IMPORT DRIVER */
 
-/* asks the activity to copy the replays in folder to a folder the player
-chooses (HaloActivity.exportReplays: the system's folder picker, then the
-copy on a thread of its own), found on the activity's class as
-host_gesture_insets' method is */
-void host_android_export_replays(const char *folder)
+/* HaloActivity.nativeLog: how an import or export went, into the log (logcat and halo.log) as well as its Toast */
+JNIEXPORT void JNICALL Java_com_halo_decomp_HaloActivity_nativeLog(JNIEnv *env, jclass cls, jstring text)
+{
+	const char *line = text ? (*env)->GetStringUTFChars(env, text, NULL) : NULL;
+
+	(void)cls;
+	if (!line)
+		return;
+	host_log(HOST_LOG_INFO, line);
+	(*env)->ReleaseStringUTFChars(env, text, line);
+}
+
+/* calls the activity's method (a String argument, the replays' or the
+mods' folder), found on the activity's class as host_gesture_insets' method
+is */
+static void host_android_folder_call(const char *method_name, const char *folder)
 {
 	JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
 	jobject activity = (jobject)SDL_GetAndroidActivity();
 
 	if (!env || !activity || !folder)
 	{
-		host_logf(HOST_LOG_WARN, "export replays: no activity");
+		host_logf(HOST_LOG_WARN, "%s: no activity", method_name);
 		return;
 	}
 	{
 		jclass activity_class = (*env)->GetObjectClass(env, activity);
 		jmethodID method = activity_class ?
-			(*env)->GetMethodID(env, activity_class, "exportReplays", "(Ljava/lang/String;)V") : NULL;
+			(*env)->GetMethodID(env, activity_class, method_name, "(Ljava/lang/String;)V") : NULL;
 		jstring path = method ? (*env)->NewStringUTF(env, folder) : NULL;
 
 		if (path)
@@ -369,10 +475,10 @@ void host_android_export_replays(const char *folder)
 		if ((*env)->ExceptionCheck(env))
 		{
 			(*env)->ExceptionClear(env);
-			host_logf(HOST_LOG_WARN, "export replays: the activity's exportReplays failed");
+			host_logf(HOST_LOG_WARN, "%s: the activity's method failed", method_name);
 		}
 		else
-			host_logf(HOST_LOG_INFO, "export replays: %s", folder);
+			host_logf(HOST_LOG_INFO, "%s: %s", method_name, folder);
 		if (path)
 			(*env)->DeleteLocalRef(env, path);
 		if (activity_class)
@@ -381,20 +487,81 @@ void host_android_export_replays(const char *folder)
 	(*env)->DeleteLocalRef(env, activity);
 }
 
+/* asks the activity to copy the replays in folder to a folder the player
+chooses (HaloActivity.exportReplays: the system's folder picker, then the
+copy on a thread of its own) */
+void host_android_export_replays(const char *folder)
+{
+	host_android_folder_call("exportReplays", folder);
+}
+
+/* asks the activity to copy replays the player chooses into folder
+(HaloActivity.importReplays: the system's file picker, then the copy on a
+thread of its own) */
+void host_android_import_replays(const char *folder)
+{
+	host_android_folder_call("importReplays", folder);
+}
+
+/* asks the activity to take the mods in .zip files the player chooses into
+folder, a folder each (HaloActivity.importMods: the system's file picker,
+then the copy on a thread of its own) */
+void host_android_import_mods(const char *folder)
+{
+	host_android_folder_call("importMods", folder);
+}
+
+/* asks the activity to copy the Vulkan driver archives the player chooses
+into folder, freedreno_drivers (HaloActivity.importVkDrivers: the system's
+file picker, then the copy on a thread of its own) */
+void host_android_import_vk_drivers(const char *folder)
+{
+	host_android_folder_call("importVkDrivers", folder);
+}
+
+/* asks the activity to copy the maps the player chooses (.map files, and
+those in .zip files) into folder, custom_maps (HaloActivity.importMaps: the
+system's file picker, then the copy on a thread of its own) */
+void host_android_import_maps(const char *folder)
+{
+	host_android_folder_call("importMaps", folder);
+}
+
+/* asks the activity to move the game's files (maps, custom_maps, mods,
+mcc_maps): where "app" (the app's storage) or "other" (a folder the player
+picks); it asks, and starts the game again to move them before it runs
+(HaloActivity.moveGameFiles, GameFiles.java) */
+void host_android_move_game_files(const char *where)
+{
+	host_android_folder_call("moveGameFiles", where);
+}
+
 /* the settings of [debug] that this file reads, from config.toml */
 struct host_settings
 {
 	int profile_hz;
 	int profile_run; /* debug.profile_run */
+	int halo_log; /* debug.halo_log */
 	int gpu_split_parts; /* debug.gpu_split_parts */
 	int original_multisample; /* debug.original_multisample */
 	char vk_probe[128]; /* empty: the game runs */
-	char vk_driver[256]; /* display.vk_driver: empty (the default) for the phone's own driver, "auto", or an archive */
+	char vk_driver[256]; /* display.vk_driver: empty (the default) for the phone's own driver, or an archive */
 	char renderer[32]; /* display.renderer: "vulkan" (the default, also when empty) or "gl" */
 	int vk_validation; /* debug.vk_validation */
 	int gpu_stats; /* debug.gpu_stats */
 	int vk_present_marker; /* debug.vk_present_marker */
+	int vk_render_thread; /* debug.vk_render_thread */
 	int vk_self_test; /* debug.vk_self_test */
+	/* debug.window_base: the window's address, where it will go there (for
+	trying saved games across windows); 0 for the usual placement */
+	uint32_t window_base;
+	/* debug.image_base: the same for the guest image (its pointers are moved
+	as where the Java runtime holds its linked address) */
+	uint32_t image_base;
+	/* game.maps.path: the folder the game's maps are in, an absolute path or
+	one under the data folder (the launcher's folder choice, MapsFolder.java,
+	writes it); empty for the data folder's maps */
+	char maps_path[512];
 };
 
 static void config_read(const char *path, struct host_settings *settings)
@@ -404,6 +571,8 @@ static void config_read(const char *path, struct host_settings *settings)
 	memset(settings, 0, sizeof(*settings));
 	/* the defaults of port_config.c's rows, for a file not written yet (the first start) or without them */
 	snprintf(settings->renderer, sizeof(settings->renderer), "vulkan");
+	settings->halo_log = 1;
+	settings->vk_render_thread = 1;
 	if (!result.ok)
 	{
 		host_logf(HOST_LOG_WARN, "cannot read %s: %s; the host's settings are the defaults", path, result.errmsg);
@@ -417,10 +586,16 @@ static void config_read(const char *path, struct host_settings *settings)
 		toml_datum_t validation = toml_seek(result.toptab, "debug.vk_validation");
 		toml_datum_t statistics = toml_seek(result.toptab, "debug.gpu_stats");
 		toml_datum_t marker = toml_seek(result.toptab, "debug.vk_present_marker");
+		toml_datum_t render_thread = toml_seek(result.toptab, "debug.vk_render_thread");
 		toml_datum_t self_test = toml_seek(result.toptab, "debug.vk_self_test");
 		toml_datum_t profile_run = toml_seek(result.toptab, "debug.profile_run");
+		toml_datum_t halo_log = toml_seek(result.toptab, "debug.halo_log");
+		toml_datum_t log_files = toml_seek(result.toptab, "debug.log_files");
 		toml_datum_t split = toml_seek(result.toptab, "debug.gpu_split_parts");
 		toml_datum_t multisample = toml_seek(result.toptab, "debug.original_multisample");
+		toml_datum_t window = toml_seek(result.toptab, "debug.window_base");
+		toml_datum_t image = toml_seek(result.toptab, "debug.image_base");
+		toml_datum_t maps_path = toml_seek(result.toptab, "game.maps.path");
 
 		if (hz.type == TOML_INT64 && hz.u.int64 > 0)
 			settings->profile_hz = hz.u.int64 > 10000 ? 10000 : (int)hz.u.int64;
@@ -433,10 +608,23 @@ static void config_read(const char *path, struct host_settings *settings)
 		settings->vk_validation = validation.type == TOML_BOOLEAN && validation.u.boolean;
 		settings->gpu_stats = statistics.type == TOML_BOOLEAN && statistics.u.boolean;
 		settings->vk_present_marker = marker.type == TOML_BOOLEAN && marker.u.boolean;
+		/* (true unless false) */
+		settings->vk_render_thread = !(render_thread.type == TOML_BOOLEAN && !render_thread.u.boolean);
 		settings->vk_self_test = self_test.type == TOML_BOOLEAN && self_test.u.boolean;
 		settings->profile_run = profile_run.type == TOML_BOOLEAN && profile_run.u.boolean;
+		/* (true unless false; a file from before it, which the game has not
+		completed yet, says with debug.log_files, as the Switch's host does) */
+		if (halo_log.type != TOML_BOOLEAN)
+			halo_log = log_files;
+		settings->halo_log = !(halo_log.type == TOML_BOOLEAN && !halo_log.u.boolean);
 		settings->gpu_split_parts = split.type == TOML_BOOLEAN && split.u.boolean;
 		settings->original_multisample = multisample.type == TOML_BOOLEAN && multisample.u.boolean;
+		if (window.type == TOML_INT64 && window.u.int64 > 0 && window.u.int64 < 0x100000000LL)
+			settings->window_base = (uint32_t)window.u.int64;
+		if (image.type == TOML_INT64 && image.u.int64 > 0 && image.u.int64 < 0x100000000LL)
+			settings->image_base = (uint32_t)image.u.int64;
+		if (maps_path.type == TOML_STRING)
+			snprintf(settings->maps_path, sizeof(settings->maps_path), "%s", maps_path.u.s);
 	}
 	toml_free(result);
 }
@@ -477,6 +665,7 @@ static void *game_main(void *unused)
 	struct host_settings settings;
 
 	(void)unused;
+	clock_gettime(CLOCK_MONOTONIC, &log_started);
 	external = SDL_GetAndroidExternalStoragePath();
 	if (!external)
 		host_fatal("Android storage is unavailable: %s", SDL_GetError());
@@ -485,12 +674,6 @@ static void *game_main(void *unused)
 	/* readable by adb (the shell user), for managing saves */
 	mkdir(save_root, 0775);
 	share_save_tree(save_root);
-	if (!directory_has_maps(data_root))
-	{
-		host_fatal("The Halo game data was not found.\n\nCopy the PAL game data (build 01.01.14.2342), "
-			"the folder that contains maps, into\n%s\nor import it from the launcher screen.", data_root);
-	}
-
 	host_environment_set(&environment, "HOME", save_root);
 	host_environment_set(&environment, "HALO_DATA_ROOT", data_root);
 	host_environment_set(&environment, "HALO_SAVE_ROOT", save_root);
@@ -511,6 +694,33 @@ static void *game_main(void *unused)
 	snprintf(path, sizeof(path), "%s/config.toml", data_root);
 
 	config_read(path, &settings);
+	if (settings.halo_log)
+		data_log_begin(data_root);
+	/* the game's maps, where game.maps.path says (as port/linux/src/xbox_files.c
+	reads it) */
+	{
+		char maps[1024];
+
+		if (!settings.maps_path[0])
+			snprintf(maps, sizeof(maps), "%s/maps", data_root);
+		else if (settings.maps_path[0] == '/')
+			snprintf(maps, sizeof(maps), "%s", settings.maps_path);
+		else
+			snprintf(maps, sizeof(maps), "%s/%s", data_root, settings.maps_path);
+		if (!folder_has_maps(maps))
+		{
+			if (settings.maps_path[0])
+				host_fatal("The Halo game data was not found in %s, the folder config.toml's game.maps.path "
+					"names.\n\nIf the app is no longer allowed to read it, start the game again and choose the "
+					"folder on the launcher screen, or choose to use the app's storage.", maps);
+			host_fatal("The Halo game data was not found.\n\nCopy the PAL game data (build 01.01.14.2342), "
+				"the folder that contains maps, into\n%s\nor import it from the launcher screen.", data_root);
+		}
+		if (settings.maps_path[0])
+			host_logf(HOST_LOG_INFO, "game.maps.path: %s", maps);
+	}
+	/* (after the log begins, so that halo.log says what it did; once) */
+	open_data_tree(data_root);
 	if (settings.profile_run)
 		profile_run_begin(data_root, &settings.profile_hz);
 	host_vk_profile_split = settings.profile_run && settings.gpu_split_parts;
@@ -561,6 +771,8 @@ static void *game_main(void *unused)
 	}
 	if (want_vulkan && host_image_span(vk_image, vk_image_size) > span)
 		span = host_image_span(vk_image, vk_image_size);
+	host_memory_window_wanted = settings.window_base;
+	host_memory_image_wanted = settings.image_base;
 	if (!span)
 		host_fatal("cannot load the game image; see logcat (tag \"halo\") for details");
 	if (host_memory_initialize(HALO_GUEST_IMAGE_BASE, span, &image_base) != 0)
@@ -637,6 +849,11 @@ static void *game_main(void *unused)
 			host_logf(HOST_LOG_INFO, "renderer: GL ES");
 		profile_run_describe("GL ES (no GPU times: gpu.txt is the Vulkan renderer's)");
 	}
+	/* Vulkan asked for (not for the probe, which runs on the GL image) and
+	not started: the GL ES image sets display.renderer to "gl" (d3d8_gl.c),
+	so that Video Setup shows the backend the game runs on */
+	if (!settings.vk_probe[0] && strcmp(settings.renderer, "gl") && !host_renderer_vulkan)
+		host_environment_set(&environment, "HALO_VULKAN_REFUSED", "1");
 	if (host_renderer_vulkan)
 	{
 		image_used = vk_image;
@@ -672,6 +889,7 @@ static void *game_main(void *unused)
 	host_apply_debug_settings(path, native_bridge_active() ? "ARM translation" : NULL);
 	host_debug_start_profiler(settings.profile_hz, profile_folder[0] ? profile_folder : data_root);
 	host_vk_present_marker = settings.vk_present_marker;
+	host_vk_render_thread = settings.vk_render_thread;
 	host_vk_self_test = settings.vk_self_test;
 	boot = host_make_boot(&environment, "halo");
 	host_logf(HOST_LOG_INFO, "data %s, saves %s", data_root, save_root);

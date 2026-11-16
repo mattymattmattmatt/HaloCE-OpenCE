@@ -55,8 +55,7 @@ GitHub Actions need no package: they bring their own SDL3
 
 ### Portable build
 
-The builds from GitHub Actions are portable builds (`--portable`; refer to
-"Build options" in the main [README](../../README.md#build-options)). The
+The builds from GitHub Actions are portable builds (`--portable`). The
 portable build starts on more systems than the build machine's:
 
 - It is compiled and linked against the 32-bit glibc 2.31 of Debian 11, the
@@ -229,7 +228,8 @@ backtrace to the standard error. To find the function at the address, enter
 
 The keyboard and the mouse are a control scheme of their own for the player
 of controller 1: each action has up to two keys or mouse buttons, which
-Settings > Controls Setup (or `[controls]` in `config.toml`) changes. The
+Settings > Controls Setup changes, for each profile (its `settings.toml`; `[controls]` in `config.toml`
+for those it has not changed). The
 game adds the input of the first gamepad to controller 1. The other
 gamepads operate controllers 2 to 4. With two or more players on this
 computer (co-op, or split screen in a network game) and only one gamepad,
@@ -359,12 +359,10 @@ Theater is open, that downloads the replays and uploads others
 the newest `network.replays_kept`, and a recording shorter than 15 seconds
 is deleted as it ends.
 
-The menus' text is in the language of the Custom Edition whose `loc.map` is
-in `custom_maps` (French, German, Italian, Spanish and so on), as that
-edition shows it: each of the PC version's texts is that `loc.map`'s
-(`display.menu_language`). Without one, and for the lines the port adds,
-it is English. The pictures with words in them (the screens' titles, the
-main menu's items) are drawn in English.
+The menus' text is English, from `port/assets/menus`, whatever the
+language of a Custom Edition `loc.map` in `custom_maps`. The pictures with
+words in them (the screens' titles, the main menu's items) are drawn in
+English too.
 
 Multiplayer > CO-OP CAMPAIGN is the Xbox's cooperative play, which the PC
 version does not have: two players on this computer play the campaign in
@@ -570,8 +568,20 @@ changes the useful settings, writes them into the file (only their lines
 change) and applies them at once, but `audio.enabled`, and `display.menus`
 from the next main menu.
 
+Each profile keeps some settings of its own, in `settings.toml` in its folder
+(beside its `blam.sav`): its keys (`[controls]`, Controls Setup), its mouse's
+(`input.mouse_sensitivity`, `input.mouse_vertical_sensitivity`,
+`input.invert_mouse`, `input.mouse_aim_assist`) and its gyroscope's
+(`input.gyro_aim` and the four after it, Gyro Aim). Those menus write them
+there, for the profile they were opened from. A setting the profile's file
+does not have is `config.toml`'s, which is also the setting of a game played
+with no profile. The keys and the mouse are player 1's profile's; with the
+gyroscope, each local player has their own profile's. A profile renamed keeps
+its file, and one deleted takes it with it.
+
 Each setting has an environment variable. The environment variable changes
-the setting for one start of the game. It has priority over the file.
+the setting for one start of the game. It has priority over the file, and
+over a profile's own `settings.toml`.
 
 | Setting | Default | Environment variable | Function |
 | --- | --- | --- | --- |
@@ -616,7 +626,6 @@ the setting for one start of the game. It has priority over the file.
 | `display.widescreen_loading` | `true` | `HALO_WIDESCREEN_LOADING` | Widen the original loading screen, keeping its stock mask, sweep, blur and glow trails. Off keeps the central 4:3 framing. PC Settings > Video > Graphics, including from the PC-style pause menu. See [loading presentation](../../docs/loading_presentation.md). |
 | `display.shadow_resolution` | `128` | `HALO_SHADOW_RESOLUTION` | The size of the maps that the shadows of the objects are drawn in, in pixels each way: `128`, `256`, `512` or `1024` (other values go down to one of these). The game draws the shadow of each object into a map of 128x128 pixels, blurs it and projects it onto the ground. On a large screen, the edges of these shadows show steps that move when the object moves. A larger map makes the edges smooth; the blur is made wider to match, so the shadows are as soft as on the Xbox. Each doubling adds two passes of the blur. `128`: as on the Xbox. |
 | `display.menus` | `"pc"` | `HALO_MENUS` | `"pc"`: the PC version's menus, from the files in `port/assets/menus` and a `menus` folder next to `config.toml`. Refer to "Menus". `"xbox"`: the Xbox's menus. |
-| `display.menu_language` | `"maps"` | `HALO_MENU_LANGUAGE` | The PC menus' language. `"maps"`: the language of the Custom Edition whose `loc.map` is in `custom_maps` (English without one). `"english"`: English. The port's own lines are English. |
 | `display.player_names` | `"all"` | `HALO_PLAYER_NAMES` | In multiplayer, whose names are drawn above their heads: `"all"`, `"allies"`, `"enemies"` or `"none"`. An ally's name is drawn above the triangle the game shows over teammates. An enemy's name shows only within the motion sensor's reach, while the enemy is in sight and not camouflaged, so it never shows where an enemy hides. The gametype's motion tracker setting also applies: no names if it shows no players, only allies' if it shows only friends. |
 | `display.player_name_scale` | `1.0` | `HALO_PLAYER_NAME_SCALE` | How large the players' names are drawn: `1.0` is three quarters of the size of the HUD's text, from `0.25` to `4`. With high-res text, larger names are rasterized at their size, so they stay sharp. |
 | `display.match_timer` | `false` | `HALO_MATCH_TIMER` | `true`: a multiplayer game draws its clock at the bottom right, counting up from the game's first tick, which the items' respawn periods count from too: a weapon is back on the map at every multiple of its period on the clock. Campaign and co-op have none. MATCH TIMER in Settings > Network Setup > Multiplayer HUD. |
@@ -660,7 +669,8 @@ the setting for one start of the game. It has priority over the file.
 | `input.mouse_sensitivity` | `1.0` | `HALO_MOUSE_SENSITIVITY` | The multiplier for the mouse aim. |
 | `input.mouse_vertical_sensitivity` | `0.0` | `HALO_MOUSE_VERTICAL_SENSITIVITY` | The multiplier for the vertical mouse aim. `0`: the same as `input.mouse_sensitivity`. |
 | `input.playstation_kernel_driver` | `false` | `HALO_PLAYSTATION_KERNEL_DRIVER` | Linux: `true` drives a PlayStation controller (DualSense, DualShock 4) through the kernel's driver of it (`hid-playstation` since Linux 5.12, `hid-sony`): its buttons, sticks, triggers and rumble, with no setup, but not its lightbar. `false`: SDL's own driver, which needs access to the controller's `/dev/hidraw` device, as Steam's udev rules give it (`steam-devices`, or Steam installed). Read at start-up. |
-| `input.left_stick_dead_zone` | `-1` | `HALO_LEFT_STICK_DEAD_ZONE` | How far the controller's left stick moves before it moves the player, in percent of its travel (`0` to `50`). Lower for finer control, higher for a worn stick that drifts. `-1`: the game's own (9000 of 32767, about 27%). On Android, the touch controls' stick too. Settings > Gamepads > Stick Dead Zones sets it. |
+| `input.stick_vertical_sensitivity` | `0` | `HALO_STICK_VERTICAL_SENSITIVITY` | How fast the controller's right stick turns the view up and down, each profile its own (its `settings.toml`): `1` to `15`, 40 degrees a second and about 24.4 more a step (`10` is 260, the top of the Xbox's Look Sensitivity left and right; `15` about 382). `0`: the game's own, half of Look Sensitivity's turn. Settings > Gamepads > Vertical Sensitivity sets it (SAME is `0`). |
+| `input.left_stick_dead_zone` | `-1` | `HALO_LEFT_STICK_DEAD_ZONE` | How far the controller's left stick moves before it moves the player, in percent of its travel (`0` to `50`). Lower for finer control, higher for a worn stick that drifts. `-1`: the game's own (9000 of 32767, about 27%). Not the touch controls' sticks, which have their own. Settings > Gamepads > Stick Dead Zones sets it. |
 | `input.right_stick_dead_zone` | `-1` | `HALO_RIGHT_STICK_DEAD_ZONE` | The same for the right stick, which turns the view. |
 | `input.invert_mouse` | `false` | `HALO_MOUSE_INVERT=1` sets `true` | `true`: the vertical mouse aim is inverted. |
 | `input.mouse_aim_assist` | `false` | `HALO_MOUSE_AIM_ASSIST` | `true`: the magnetism of the controller also operates for the mouse. `false`: when the mouse moved after the right stick, the view is not slowed or dragged by a target. The autoaim of the bullets operates in both cases. |
@@ -680,11 +690,13 @@ the setting for one start of the game. It has priority over the file.
 | `game.terminal_output` | `"menus"` | `HALO_TERMINAL_OUTPUT` | The game's messages at the bottom left of the screen ("Shaders preloaded.", what the console's commands print). `"none"`: never. `"menus"`: in the main menu, not in a campaign or a multiplayer game. `"always"`: everywhere, as the original game. While the console is open they are shown. Settings > Gameplay, or here. |
 | `game.ragdoll` | `"none"` | `HALO_RAGDOLL` | The older ragdoll setting. When `game.ragdoll_players` or `game.ragdoll_ai` is not in the file, that one takes this value. A file from before the two settings has this, and both start as it; a new file has `"none"`, so both stay off. Once each has its own line, this is not read. |
 | `game.downloaded_maps` | `""` | `HALO_DOWNLOADED_MAPS` | Maps to play as downloaded maps, besides the maps that map sharing downloaded (it names them in `downloaded_maps.txt` in `custom_maps`): their names (`bloodgulch`, `hugeass`), separated by commas, or `"*"` for all the maps. The scripts of a downloaded map cannot change the settings of the player or the games of other players. `debug.txt` names what the game refused. |
-| `game.maps.path` | `""` | `HALO_MAPS_PATH` | The folder that the game reads its maps from. Empty: the `maps` folder in the data folder. A relative path is in the data folder. The game reads it once, at the start. The game unpacks a disc image only into the `maps` folder in the data folder, so the folder that this setting names must already hold the maps. On the Switch, a folder that is missing or has no `ui.map` stops the game at the start with an error. |
+| `game.maps.path` | `""` | `HALO_MAPS_PATH` | The folder that the game reads its maps from. Empty: the `maps` folder in the data folder. A relative path is in the data folder. The game reads it once, at the start. The game unpacks a disc image only into the `maps` folder in the data folder, so the folder that this setting names must already hold the maps (on Android, "Use another folder" on the launcher screen sets this setting, and unpacks the disc image into that folder). On the Switch, a folder that is missing or has no `ui.map` stops the game at the start with an error. |
 | `game.custom_maps.path` | `""` | `HALO_CUSTOM_MAPS_PATH` | The folder that the game reads Custom Edition maps from, and that map sharing downloads maps into. Empty: the `custom_maps` folder in the data folder. A relative path is in the data folder. The game reads it once, at the start. On the Switch, a folder that is missing gets a warning at the start. |
+| `game.mods.path` | `""` | `HALO_MODS_PATH` | The folder that the game reads the mods from, and that the IMPORT of the Mods menu on Android puts mods into. Empty: the `mods` folder in the data folder. A relative path is in the data folder. |
 | `game.unlock_all_levels` | `false` | `HALO_UNLOCK_ALL_LEVELS` | `true`: a profile created afterward starts with all the campaign levels finished on all the difficulties. `false`: a new profile starts at The Pillar of Autumn, and each level opens when you finish the level before it, as on the Xbox. Existing profiles keep their progress. To start a profile over, type `profile_reset_campaign` in the console. |
 | `bots.count` | `0` | `HALO_BOTS` | Computer players (bots) in a game hosted here, local (split screen), system link or a private internet game: `0` to `63` join its lobby with the players, as far as the game has room. Not in public internet games. `0`: none, as in the stock game. Refer to "Bots". |
 | `bots.skill` | `"normal"` | `HALO_BOT_SKILL` | How well the bots play: `"recruit"`, `"easy"`, `"normal"`, `"heroic"`, `"veteran"` or `"legendary"`: how soon they react, how far and how wide they see, how large their aim error is and how fast it settles, how fast they turn, and how they fight. `"easy"`, `"normal"`, `"heroic"` and `"legendary"` keep their numbers; `"recruit"` is below `"easy"`, and `"veteran"` halfway from `"heroic"` to `"legendary"`. Refer to "Bots". |
+| `bots.kind` | `"birchwood"` | `HALO_BOT_KIND` | The kind of bot added from now on: `"birchwood"`, the bots as they were, or `"provinggrounds"`, a second kind with hidden personalities that also plays Oddball and Race. Each bot keeps the kind it joined as, so one game can hold both. Refer to "Bots". |
 | `bots.teams` | `"even"` | `HALO_BOT_TEAMS` | In a team game: `"even"` puts the bots on both teams, evening them with the players; `"against"` puts them all on the team the players are not on. |
 | `bots.vehicles` | `1` | `HALO_BOT_VEHICLES` | `1`: the bots drive and ride the map's vehicles to goals a long way off, and man its turrets. `0`: they stay on foot. |
 | `bots.routes` | `"direct"` | `HALO_BOT_ROUTES` | How the bots go to their goals: `"direct"`, everyone the shortest way; `"lanes"`, each team's attackers spread over the map's side lanes; `"mixed"`, most direct and a few on the side lanes. |
@@ -731,9 +743,9 @@ the setting for one start of the game. It has priority over the file.
 | `network.vehicle_riding` | `false` | `HALO_NET_VEHICLE_RIDING` | Host: with `true`, a player standing on a moving vehicle is carried by it, turns with it, lands back on it after a jump and keeps its motion when stepping or jumping off; the vehicle it stands on does not hurt it. The base setting (co-op's options in Server Setup write it). In multiplayer (online, system link, split screen) the gametype's VEHICLE RIDING rule under Vehicle Options, saved with the gametype, overrides it; a gametype without the rule is off, whatever this setting says (stock gametypes and older saved ones have none). A co-op rotation entry's `riding` rule overrides it for that entry. Changes count from the next map; clients use the host's decision, including when joining mid-map, and its `debug.riding_` values. Film playback and the editor never ride. Saved games of builds before this setting are not offered or loaded. No row in the Settings menu. A map can choose for itself, winning over the base setting, the gametype and the dedicated override until the next map: with `(global boolean vehicle_riding true)` (or `false`; its value at the map's start counts, a later `set` does not), or with `(vehicle_riding true)` or `(vehicle_riding false)` in a startup script, which counts only on the map's first tick and wins over the global. The old `game.vehicle_riding` name is not read. |
 | `network.block_mouse_aim_assist` | `false` | `HALO_NET_BLOCK_MOUSE_AIM_ASSIST` | Host: Player Options > Aim Assist, Allowed or Block M+KB. Block overrides optional mouse magnetism while mouse/keyboard aims, including on the host, without changing the saved preference. Controllers and touch retain their existing behavior; bullet autoaim is unchanged. |
 | `network.map_share` | `true` | `HALO_NET_MAP_SHARE` | When you host: automatically offer CE maps and MCC packages. MCC base resources stay local to each machine; players consent before an MCC download. SHARE MAPS in Server Setup > Map Sharing writes its choice here. Refer to "Map sharing". |
-| `network.map_share_upload` | `1024` | `HALO_NET_MAP_SHARE_UPLOAD` | When you host: the most kilobytes per second that the game sends of maps (`16` to `20480`, 20 MB/s). UPLOAD LIMIT in Server Setup > Map Sharing writes its choice here. |
+| `network.map_share_upload` | `1024` | `HALO_NET_MAP_SHARE_UPLOAD` | When you host: the most kilobytes per second that the game sends of maps (`16` to `256000`, 250 MB/s). UPLOAD LIMIT in Server Setup > Map Sharing writes its choice here. |
 | `network.map_seed` | `true` | `HALO_NET_MAP_SEED` | When you play in the game of another machine: help send its map to players who join without it. HELP SEND MAPS in Settings > Network Setup > Map Sharing. |
-| `network.map_seed_upload` | `256` | `HALO_NET_MAP_SEED_UPLOAD` | When you play in the game of another machine: the most kilobytes per second that the game sends of maps to other players (`16` to `10240`, 10 MB/s). UPLOAD LIMIT in Settings > Network Setup > Map Sharing. |
+| `network.map_seed_upload` | `256` | `HALO_NET_MAP_SEED_UPLOAD` | When you play in the game of another machine: the most kilobytes per second that the game sends of maps to other players (`16` to `256000`, 250 MB/s). UPLOAD LIMIT in Settings > Network Setup > Map Sharing. |
 | `network.map_download` | `true` | `HALO_NET_MAP_DOWNLOAD` | DOWNLOAD MAPS in Settings > Network Setup > Map Sharing. CE downloads from players as before; MCC permits a host offer and asks before transferring files. Off: CE leaves a missing-map game; MCC offers manual/Workshop installation and cancellation. |
 | `network.coop_public` | `false` | `HALO_NET_COOP_PUBLIC` | `true`: an online co-op game (Create Game > Internet, a SINGLEPLAYER map) starts as PUBLIC. `false`: it starts as PRIVATE. LISTING in co-op's Server Setup writes its choice here. Refer to "Server browser". |
 | `network.coop_team_wipe` | `"auto"` | `HALO_NET_COOP_TEAM_WIPE` | TEAM WIPE in Server Setup > Co-op Options: `"auto"` reverts the checkpoint in a PRIVATE game and only respawns the team in a PUBLIC game (a dedicated server's: `server.public` with internet play). `"revert"` or `"respawn"` overrides visibility; a password does not make a PUBLIC game private. Changed players/machine assignments fall back to position-only respawn with a host diagnostic. A missing checkpoint also uses position-only respawn. Scripted mission failures keep their existing revert behavior. |
@@ -752,7 +764,7 @@ the setting for one start of the game. It has priority over the file.
 | `network.browser_show_empty`, `network.browser_show_full` | `true` | `HALO_NET_BROWSER_SHOW_EMPTY`, `HALO_NET_BROWSER_SHOW_FULL` | `false`: the server browser does not list the games with no player, the full games. The server browser's Filters screen sets them. |
 | `network.browser_maps` | `"yes"` | `HALO_NET_BROWSER_MAPS` | `"yes"`: the server browser lists the games on maps this computer does not have. `"no"`: it does not. `"downloadable"`: only those of a Custom Edition map that the host shares. |
 | `network.browser_gametype` | `"any"` | `HALO_NET_BROWSER_GAMETYPE` | The server browser lists the games of one kind only: `"any"`, `"ctf"`, `"slayer"`, `"oddball"`, `"king"` or `"race"` (the Filters screen). |
-| `network.browser_sort` | `"players"` | `HALO_NET_BROWSER_SORT` | The server browser's order. `"players"`: the games with the most players first. `"servers"`: dedicated servers first, then by players. `"name"`, `"map"`, `"type"` or `"locked"` (games with a password first). A `-` before one reverses it (`"-players"`). A column's title sorts by it, and again the other way. |
+| `network.browser_sort` | `"players"` | `HALO_NET_BROWSER_SORT` | The server browser's order. `"players"`: the games with the most players first. `"servers"`: dedicated servers first, then by players. `"name"`, `"map"`, `"type"`, `"locked"` (games with a password first) or `"ping"` (the lowest ping first; games whose host is not timed yet, or has a password and is not timed, last either way). A `-` before one reverses it (`"-players"`). A column's title sorts by it, and again the other way. |
 | `server.enabled` | `false` | `HALO_SERVER` | `true`: run as a dedicated server, as `halo --server` does. Refer to "Dedicated server". The `server.*` settings are written to `config.toml` only by a dedicated server. |
 | `server.name` | `"OpenCE Server"` | `HALO_SERVER_NAME` | The game's name in the lobby and the server browser: 15 characters of printable ASCII. |
 | `server.max_players` | `16` | `HALO_SERVER_MAX_PLAYERS` | The most players (2 to 127). |
@@ -829,6 +841,7 @@ the setting for one start of the game. It has priority over the file.
 | `debug.menu_open` | `""` | `HALO_MENU_OPEN` | Start on this screen of the menus (`main_menu/settings_select/...`, as `port/assets/menus` names it), a player profile being edited, to look at it. |
 | `debug.gpu_skip_vertex_shaders`, `debug.gpu_debug_expression`, `debug.gpu_debug_flat`, `debug.gpu_debug_texture0` | off | `HALO_GPU_SKIP_VS`, `HALO_GPU_DEBUG_EXPR`, `HALO_GPU_DEBUG_FLAT`, `HALO_GPU_DEBUG_T0` | Tools to find problems in the graphics: skip the draws of a vertex shader, or replace the output of all pixel shaders with a GLSL expression (for example `t0.rgb`). |
 | `debug.benchmark`, `debug.benchmark_bots`, `debug.benchmark_quit` | `""`, `63`, `true` | `HALO_BENCHMARK`, `HALO_BENCHMARK_BOTS`, `HALO_BENCHMARK_QUIT` | A benchmark run that is the same each time (`game/benchmark.c`). `"standard"` plays The Pillar of Autumn (from the waking up in the cryo bay), Halo (the waterfall), The Silent Cartographer, 343 Guilty Spark and The Library (its crowd of enemies) for 30 seconds each, and Blood Gulch, Damnation, Sidewinder and Chill Out for 15 seconds each as local Slayer games with `debug.benchmark_bots` computer players (63 by default: 64 players with the player). The player cannot be hurt and the view turns at a fixed rate. A list such as `"a30:30,bloodgulch:15"` plays other maps. The frame rates of each map (the average, the 1% low, the median, the 99th percentile and the longest frame) go to `benchmark.txt` in the data folder, or in the profile folder of the run on Android (`debug.profile_run`), and the game then quits (`debug.benchmark_quit`). |
+| `debug.core_dump_tick`, `debug.core_load` | `0`, `""` | `HALO_CORE_DUMP_TICK`, `HALO_CORE_LOAD` | For trying saved games across memory windows (`docs/saved_game_relocation.md`). At this game tick of the first level played, a core of the game state goes to `d:\core\game_state_<address>.bin`, named for where the game state is; with `debug.core_load`, the core of that name in `d:\core` is loaded at the tick instead. `tools/game_state_compare.py` compares two cores. `0`: none. |
 | `debug.network_test`, `debug.network_test_start`, `debug.network_test_kill`, `debug.network_test_score`, `debug.network_test_shoot`, `debug.network_test_vehicle`, `debug.network_test_pickup`, `debug.network_test_pickup_weapon`, `debug.network_test_chat`, `debug.network_test_name`, `debug.network_test_public`, `debug.test_input` | off | `HALO_NETWORK_TEST`, `HALO_NETWORK_TEST_START`, `HALO_NETWORK_TEST_KILL`, `HALO_NETWORK_TEST_SCORE`, `HALO_NETWORK_TEST_SHOOT`, `HALO_NETWORK_TEST_VEHICLE`, `HALO_NETWORK_TEST_PICKUP`, `HALO_NETWORK_TEST_PICKUP_WEAPON`, `HALO_NETWORK_TEST_CHAT`, `HALO_NETWORK_TEST_NAME`, `HALO_NETWORK_TEST_PUBLIC`, `HALO_TEST_INPUT` | Automatic tests of system link, or (`log`) a log of the game one machine plays (`game/network_test.c`). Refer to `NETCODE.md`. `debug.test_input = "menu:a down down a"` presses menu buttons one a second (`a`, `b`, `x`, `y`, `up`, `down`, `left`, `right`, `start`, `back` or `wait`), for testing the menus. |
 | `debug.virtual_gamepads`, `debug.virtual_gamepad_script` | `0`, empty | `HALO_VIRTUAL_GAMEPADS`, `HALO_VIRTUAL_GAMEPAD_SCRIPT` | Desktop: attach this many SDL virtual gamepads (`0` to `4`), which the game takes for gamepads plugged in, and press their buttons from a script of `<seconds> <pad> <what>` entries separated by semicolons: the seconds from when the network lobby first opens, the pad `1` to `4` (`0`: the keyboard, whose `a` is SPACE and `start` Enter), and a button (`a`, `b`, `x`, `y`, `start`, `back`, `up`, `down`, `left`, `right`, `lb`, `rb`, `lt`, `rt`), `walk` (the sticks move from then on) or `still`. For testing split screen without four controllers, for example `"3 2 start; 6 2 a; 8 0 a; 10 1 a; 11 1 a; 14 0 start"` with `debug.network_test = "host:bloodgulch"`. |
 | `debug.network_test_cues`, `debug.network_test_cue_players` | none, `1` | `HALO_NETWORK_TEST_CUES`, `HALO_NETWORK_TEST_CUE_PLAYERS` | Console lines a test runs at their seconds, from the first tick that many players are in (`"<second> <line>\|..."`; not on the web). |
@@ -842,7 +855,7 @@ the setting for one start of the game. It has priority over the file.
 | `debug.sample_seconds` | `0.0` | `HALO_SAMPLE` | The 64-bit ARM and 64-bit x86 builds only. The host writes to the log, this often in seconds, where each game thread is: its program counter and frame chain, to find where the game spends its time or stops. `0`: never. |
 | `debug.memory_watch` | `true` | `HALO_MEMORY_WATCH` | The 64-bit ARM and 64-bit x86 builds only. `true`: the host notices the game's writes to cached textures and vertices by page protection. `false`: it compares page contents once a frame instead, which is slower. |
 | `debug.telnet_console`, `debug.telnet_console_port` | `false`, `2323` | `HALO_TELNET_CONSOLE`, `HALO_TELNET_CONSOLE_PORT` | The game listens on 127.0.0.1, on this port, for a script console (connect with telnet). The console has no password, so only this computer can reach it. |
-| `debug.profile_record`, `debug.profile_record_when`, `debug.profile_memory` | `false`, `"start"`, `256` | `HALO_PROFILE_RECORD`, `HALO_PROFILE_RECORD_WHEN`, `HALO_PROFILE_MEMORY` | Profiling builds only (`configure.py --profile`). Record without a command; `"start"` records from the first frame until the first map change, `"game"` records each game outside the main menu. Memory is 4Ã¢â‚¬â€œ1024 MB. Numbered `profile_<stamp>_<role>.part<n>.json` files remain in `profiles/` after recording. Refer to "Profiling builds" in the main README. |
+| `debug.profile_record`, `debug.profile_record_when`, `debug.profile_memory` | `false`, `"start"`, `256` | `HALO_PROFILE_RECORD`, `HALO_PROFILE_RECORD_WHEN`, `HALO_PROFILE_MEMORY` | Profiling builds only (`configure.py --profile`). Record without a command; `"start"` records from the first frame until the first map change, `"game"` records each game outside the main menu. Memory is 4–1024 MB. Numbered `profile_<stamp>_<role>.part<n>.json` files remain in `profiles/` after recording. Refer to "Profiling builds" in the main README. |
 
 
 With Mesa drivers, the game sends its GL calls through the GL thread of
@@ -926,7 +939,7 @@ The direction of the view is an exception. The game reads the mouse and the
 sticks in each frame. In first person, on foot, each frame points the view
 where the player aims at that time (`display.direct_camera`). Thus the view
 turns in the frame that the mouse moves. In a vehicle and in cinematics, the
-view mixes as the other things do. On Android, the view mixes as before.
+view mixes as the other things do.
 
 To get 30 frames each second, set `display.interpolation = false`.
 
@@ -1498,8 +1511,12 @@ asked again. To keep the upload free for the game, the host sends at most
 `network.map_share_upload` (1024 KB/s: UPLOAD LIMIT in Server Setup > Map
 Sharing) and each other player at most `network.map_seed_upload` (256 KB/s:
 UPLOAD LIMIT in Settings > Network Setup > Map Sharing). Set these lower on
-a slow connection. DOWNLOAD MAPS there (`network.map_download`) turns
-downloading off: you then leave a game whose map you do not have.
+a slow connection. A download from one machine goes at most about 1 MB a
+frame (some 50 MB/s at 60 frames a second, 100 MB/s at 144), whatever the
+limit; the host's limit is shared by every download at once, so a host with
+a fast connection can choose up to 250 MB/s. DOWNLOAD MAPS there
+(`network.map_download`) turns downloading off: you then leave a game whose
+map you do not have.
 
 Maps keep their names. A game is on a map by its name (`hugeass`), and says
 which version of it by the start of the map's hash, so a game always loads
@@ -1626,7 +1643,7 @@ Only machines with the invite can find the game:
     leaving.
   So that every player can be named, the host trims the spaces around a
   name and removes characters that draw as nothing. A
-  letter with a mark is typed as the plain letter (`ban jose` for "JosÃƒÂ©").
+  letter with a mark is typed as the plain letter (`ban jose` for "José").
   A name with nothing left to type becomes "Player", and a name that another
   player already has gets a number ("Player 2"). The game refuses a profile
   name that is blank, and a multiplayer game refuses a profile whose name was
@@ -2261,7 +2278,7 @@ Other changes:
 | `sound/sound_manager.c`, `interface/hud.c`, `game/game_engine.c` | The music's and the other sounds' volumes; the HUD's and the scoreboard's settings are read again when Settings changes them. |
 | `rasterizer/xbox/rasterizer_xbox_shadows.c` | With larger shadow maps (`display.shadow_resolution`), the blur's taps stay half a texel apart, and more passes widen it to cover the same part of the map as on the Xbox. |
 | `rasterizer/xbox/rasterizer_xbox_screen_effect.c` | A screen effect's passes (a scope's zoom blur) cover the whole screen when it is drawn at more pixels than the Xbox's: each pass's quad, and its texture coordinates with it, is moved back by the half pixel of the game's 480 lines that the shader translator adds (`src/nv2a_vsh.c`). Without that, the first pixels on the left and top were never drawn, and the zoom's warp spread their stale contents into a dark band down the left and along the top of the blur. |
-| `rasterizer/rasterizer_lights.c` | Each lens flare's occlusion test has a slot of its own, kept while the flare goes on being tested, and the flare's visibility is read from there. The Xbox waited for each test at the start of the next frame, so the test at each place in the frame's list of flares was that flare's; the native builds read the counts two or more frames late, and as flares come into view and go out of it, a flare was read another's count, and a hidden one's put it out (the Pelicans' thrusters, a corridor's lights). A slot just taken gives the last flare's count while the GPU is behind or drops tests, so it is read only once a count of one of the new flare's own tests has come: the renderer numbers each index's tests and says which one a count is from (`xgpu_visibility_tests_ended`, `xgpu_visibility_test_counted`, `src/d3d8_gl.c`). A flare that finds no slot is tested where no count is read, and keeps its visibility. |
+| `rasterizer/rasterizer_lights.c` | Each lens flare's occlusion test has a slot of its own, kept while the flare goes on being tested, and the flare's visibility is read from there. The Xbox waited for each test at the start of the next frame, so the test at each place in the frame's list of flares was that flare's; the native builds read the counts two or more frames late, and as flares come into view and go out of it, a flare was read another's count, and a hidden one's put it out (the Pelicans' thrusters, a corridor's lights). A slot just taken gives the last flare's count while the GPU is behind or drops tests, so it is read only once a count of one of the new flare's own tests has come: the renderer numbers each index's tests and says which one a count is from (`xgpu_visibility_tests_ended`, `xgpu_visibility_test_counted`: `src/d3d8_gl.c`; Vulkan's host gives each count with its test's number, `port/android/host/host_vk_visibility.c`; deko3d's guest takes a test's count as come once the GPU has finished its submission, `port/switch/guest/d3d8_dk.c`). A flare that finds no slot is tested where no count is read, and keeps its visibility. |
 | `rasterizer/rasterizer.c` | The 128 KB of vertices of the debug display of a model's vertices are static, not on the stack: the compiler inlines the function in `render_model`, and the Windows build probed the stack a page at a time for every model drawn. |
 | `render/render.c` | The 3D view of each window is tone mapped (`display.hdr`) and antialiased (`display.anti_aliasing`) before the HUD is drawn. |
 | `render/render.c` | `render_initialize` reads the structure culling tests from `display.structure_culling`. |

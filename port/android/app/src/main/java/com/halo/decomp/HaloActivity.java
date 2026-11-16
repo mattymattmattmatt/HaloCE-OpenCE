@@ -11,6 +11,7 @@ import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.OpenableColumns;
 import android.provider.DocumentsContract;
 import android.view.Display;
 import android.view.View;
@@ -23,12 +24,18 @@ import android.widget.Toast;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
+import java.util.zip.ZipInputStream;
 
 import org.libsdl.app.SDLActivity;
 
@@ -47,12 +54,127 @@ public class HaloActivity extends SDLActivity {
     private volatile int[] gestureInsets = new int[] { 0, 0, 0, 0 };
     /** the on-screen touch controls, over SDL's surface */
     private TouchControls touchControls;
-    private static final int EXPORT_LAYOUT = 401, IMPORT_LAYOUT = 402, EXPORT_REPLAYS = 403;
+    private static final int EXPORT_LAYOUT = 401, IMPORT_LAYOUT = 402, EXPORT_REPLAYS = 403, IMPORT_REPLAYS = 404,
+        IMPORT_MODS = 405, IMPORT_VK_DRIVERS = 406, IMPORT_MAPS = 407, MOVE_GAME_FILES = 408;
+    /** All files access asked for in the system's settings for GAME FILES' OTHER FOLDER: the picker follows */
+    private boolean awaitingGameFilesAccess;
     private String pendingLayoutExport;
     /** the folder of the replays the Theater's EXPORT REPLAYS copies, while the folder picker is open */
     private String pendingReplaysFolder;
-    /** a replay's file name ends so (port/linux/game/network_replay.c) */
+    /** the folder the Theater's IMPORT copies replays into, while the file picker is open */
+    private String pendingImportFolder;
+    /** the mods folder the Mods screen's IMPORT takes .zip files into, while the file picker is open */
+    private String pendingModsFolder;
+    /** the longest mod folder name the game takes (port/linux/src/port_mods.c's MAXIMUM_MOD_FOLDER_LENGTH less its
+     * terminator), in UTF-8's bytes, and the most files a mod's .zip may hold (its MAXIMUM_MOD_FILES) */
+    private static final int MOD_FOLDER_LENGTH = 63;
+    private static final int MOD_MAXIMUM_FILES = 262144;
+    /** the freedreno_drivers folder Video Setup's IMPORT DRIVER copies archives into, while the file picker is open */
+    private String pendingDriversFolder;
+    /** the most an archive and its entries may be (port/android/host/host_vk_driver.c's ARCHIVE_MAXIMUM and
+     * ENTRY_COUNT_MAXIMUM), and the longest name Video Setup lists (menu_functions.c's VK_DRIVER_NAME_SIZE) */
+    private static final long DRIVER_MAXIMUM_SIZE = 256L * 1024 * 1024;
+    private static final int DRIVER_MAXIMUM_ENTRIES = 256;
+    private static final int DRIVER_NAME_LENGTH = 127;
+    /** the custom_maps folder the map lists' IMPORT copies maps into, while the file picker is open */
+    private String pendingMapsFolder;
+    /** the most bytes of one file IMPORT copies into the import inbox (an MCC package's .zip can pass 4 GB) */
+    private static final long IMPORT_MAXIMUM_SIZE = 16L << 30;
+    /** a replay's file name ends so, and the file begins so (port/linux/game/network_replay.c) */
     private static final String REPLAY_EXTENSION = ".ocreplay";
+    private static final byte[] REPLAY_MAGIC = "OCREPLAY".getBytes(StandardCharsets.US_ASCII);
+    /** the longest name the Theater lists (NETWORK_REPLAY_NAME_SIZE less its terminator), and the largest replay
+     * taken (network_replay_page.c's REPLAY_PAGE_MAXIMUM_UPLOAD) */
+    private static final int REPLAY_NAME_LENGTH = 95;
+    private static final long REPLAY_MAXIMUM_SIZE = 256L * 1024 * 1024;
+
+    /** a line into the game's log: logcat and halo.log (host_main.c) */
+    private static native void nativeLog(String line);
+
+    // ---------- the Steam sign-in's seal (port/android/host/steam_seal.c, from the Steam client's threads):
+    // an AES-GCM key of the Android Keystore, which never leaves it, seals the refresh token the host keeps in
+    // the app's private storage. A copy of the file opens on no other phone, nor here once the key is gone
+    // (steamForget, at a log out; an uninstall)
+
+    private static final String STEAM_KEY_ALIAS = "steam_session";
+    private static final int STEAM_TAG_BITS = 128;
+
+    private static javax.crypto.SecretKey steamKey(boolean create) throws Exception {
+        java.security.KeyStore store = java.security.KeyStore.getInstance("AndroidKeyStore");
+        store.load(null);
+        java.security.Key key = store.getKey(STEAM_KEY_ALIAS, null);
+        if (key instanceof javax.crypto.SecretKey)
+            return (javax.crypto.SecretKey) key;
+        if (!create)
+            return null;
+        javax.crypto.KeyGenerator generator = javax.crypto.KeyGenerator.getInstance(
+                android.security.keystore.KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
+        generator.init(new android.security.keystore.KeyGenParameterSpec.Builder(STEAM_KEY_ALIAS,
+                android.security.keystore.KeyProperties.PURPOSE_ENCRYPT
+                        | android.security.keystore.KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build());
+        return generator.generateKey();
+    }
+
+    /** plain sealed: its vector's length (a byte), the vector, then the cipher text and its tag; null on a failure */
+    public static byte[] steamSeal(byte[] plain) {
+        try {
+            javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, steamKey(true));
+            byte[] vector = cipher.getIV();
+            byte[] sealed = cipher.doFinal(plain);
+            byte[] out = new byte[1 + vector.length + sealed.length];
+            out[0] = (byte) vector.length;
+            System.arraycopy(vector, 0, out, 1, vector.length);
+            System.arraycopy(sealed, 0, out, 1 + vector.length, sealed.length);
+            return out;
+        } catch (Exception e) {
+            android.util.Log.w("Halo", "steam: the Keystore could not seal the sign-in: " + e);
+            return null;
+        }
+    }
+
+    /** steamSeal's undone: the plain bytes, or null (another key's, damaged, or the key gone) */
+    public static byte[] steamUnseal(byte[] sealed) {
+        try {
+            javax.crypto.SecretKey key = steamKey(false);
+            int vector = sealed.length > 0 ? sealed[0] & 255 : 0;
+            if (key == null || vector < 12 || sealed.length < 1 + vector + STEAM_TAG_BITS / 8)
+                return null;
+            javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, key,
+                    new javax.crypto.spec.GCMParameterSpec(STEAM_TAG_BITS, sealed, 1, vector));
+            return cipher.doFinal(sealed, 1 + vector, sealed.length - 1 - vector);
+        } catch (Exception e) {
+            android.util.Log.w("Halo", "steam: the Keystore could not open the sign-in: " + e);
+            return null;
+        }
+    }
+
+    /** the key deleted (after a log out): what it sealed opens no more */
+    public static byte[] steamForget(byte[] unused) {
+        try {
+            java.security.KeyStore store = java.security.KeyStore.getInstance("AndroidKeyStore");
+            store.load(null);
+            store.deleteEntry(STEAM_KEY_ALIAS);
+        } catch (Exception e) {
+            android.util.Log.w("Halo", "steam: the Keystore's key could not be deleted: " + e);
+        }
+        return null;
+    }
+
+    /** how an import or export went: in a Toast, and in the log, where a report sent in shows it */
+    private void report(String what, String text) {
+        try {
+            nativeLog(what + ": " + text);
+        } catch (UnsatisfiedLinkError e) {
+            // (the game's library not loaded: the Toast alone)
+        }
+        runOnUiThread(() -> Toast.makeText(this, text, Toast.LENGTH_LONG).show());
+    }
 
     @Override
     protected String[] getLibraries() {
@@ -65,6 +187,10 @@ public class HaloActivity extends SDLActivity {
         if (savedInstanceState != null) {
             pendingLayoutExport = savedInstanceState.getString("pending-layout-export");
             pendingReplaysFolder = savedInstanceState.getString("pending-replays-folder");
+            pendingImportFolder = savedInstanceState.getString("pending-import-folder");
+            pendingModsFolder = savedInstanceState.getString("pending-mods-folder");
+            pendingDriversFolder = savedInstanceState.getString("pending-drivers-folder");
+            pendingMapsFolder = savedInstanceState.getString("pending-maps-folder");
         }
         if (mLayout != null) {
             touchControls = new TouchControls(this);
@@ -112,6 +238,10 @@ public class HaloActivity extends SDLActivity {
         super.onSaveInstanceState(state);
         state.putString("pending-layout-export", pendingLayoutExport);
         state.putString("pending-replays-folder", pendingReplaysFolder);
+        state.putString("pending-import-folder", pendingImportFolder);
+        state.putString("pending-mods-folder", pendingModsFolder);
+        state.putString("pending-drivers-folder", pendingDriversFolder);
+        state.putString("pending-maps-folder", pendingMapsFolder);
     }
 
     /**
@@ -186,11 +316,678 @@ public class HaloActivity extends SDLActivity {
         String text = failed != null ? "The export stopped: " + failed
             : copied + (copied == 1 ? " replay exported" : " replays exported")
                 + (skipped > 0 ? " (" + skipped + " already there)" : "") + ".";
-        runOnUiThread(() -> Toast.makeText(this, text, Toast.LENGTH_LONG).show());
+        report("export replays", text);
+    }
+
+    /**
+     * The Theater's IMPORT (port/linux/game/menu_functions.c, through host_android_import_replays): the system's
+     * file picker, several files at once, then each one chosen copied into folder, where the Theater's list finds
+     * it. Called on the game's thread; no storage permission.
+     */
+    public void importReplays(String folder) {
+        runOnUiThread(() -> {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            // (a replay has no type of its own: the providers call it anything)
+            intent.setType("*/*");
+            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            pendingImportFolder = folder;
+            try {
+                startActivityForResult(intent, IMPORT_REPLAYS);
+            } catch (android.content.ActivityNotFoundException e) {
+                pendingImportFolder = null;
+                Toast.makeText(this, "This device has no file picker.", Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    /**
+     * the name a replay chosen is kept under: its own, with anything but letters, digits, '-', '_' and '.' made
+     * '_' (as the consoles' replay page takes them), ending .ocreplay, short enough for the Theater to list
+     */
+    private static String replayName(String chosen) {
+        String name = chosen != null ? chosen.replaceAll("[^A-Za-z0-9._-]", "_") : "";
+        if (name.endsWith(REPLAY_EXTENSION))
+            name = name.substring(0, name.length() - REPLAY_EXTENSION.length());
+        if (name.isEmpty())
+            name = "imported";
+        if (name.length() > REPLAY_NAME_LENGTH - REPLAY_EXTENSION.length())
+            name = name.substring(0, REPLAY_NAME_LENGTH - REPLAY_EXTENSION.length());
+        return name + REPLAY_EXTENSION;
+    }
+
+    /** the document's name as its provider shows it, else its path's last part */
+    private String documentName(Uri document) {
+        try (Cursor cursor = getContentResolver().query(document,
+                new String[] { OpenableColumns.DISPLAY_NAME }, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst() && cursor.getString(0) != null)
+                return cursor.getString(0);
+        } catch (Exception e) {
+            // (the path's, then)
+        }
+        return document.getLastPathSegment();
+    }
+
+    /**
+     * the documents chosen copied into folder, on a thread of their own; a Toast says how many. Each goes to
+     * <name>.part, which becomes the replay only once it is whole and begins as a replay does; a name the folder has
+     * already is left as it is.
+     */
+    private void copyReplaysIn(List<Uri> documents, String folder) {
+        File directory = new File(folder);
+        directory.mkdirs();
+        int copied = 0, skipped = 0, refused = 0;
+        String failed = null;
+        for (Uri document : documents) {
+            String name = replayName(documentName(document));
+            File replay = new File(directory, name);
+            File part = new File(directory, name + ".part");
+            if (replay.exists()) {
+                skipped++;
+                continue;
+            }
+            try (InputStream input = getContentResolver().openInputStream(document)) {
+                if (input == null)
+                    throw new IOException(name + " cannot be opened");
+                byte[] buffer = new byte[65536];
+                int first = 0, size;
+                while (first < REPLAY_MAGIC.length && (size = input.read(buffer, first, REPLAY_MAGIC.length - first)) != -1)
+                    first += size;
+                boolean isReplay = first == REPLAY_MAGIC.length;
+                for (int index = 0; isReplay && index < REPLAY_MAGIC.length; index++)
+                    isReplay = buffer[index] == REPLAY_MAGIC[index];
+                if (!isReplay) {
+                    refused++;
+                    continue;
+                }
+                long total = first;
+                try (OutputStream output = new FileOutputStream(part)) {
+                    output.write(buffer, 0, first);
+                    while ((size = input.read(buffer)) != -1) {
+                        total += size;
+                        if (total > REPLAY_MAXIMUM_SIZE)
+                            throw new IOException(name + " is too large");
+                        output.write(buffer, 0, size);
+                    }
+                }
+                if (!part.renameTo(replay))
+                    throw new IOException(name + " cannot be kept");
+                copied++;
+            } catch (Exception e) {
+                part.delete();
+                failed = e.getMessage();
+                break;
+            }
+        }
+        String text = failed != null ? "The import stopped: " + failed
+            : copied + (copied == 1 ? " replay imported" : " replays imported")
+                + (skipped > 0 ? " (" + skipped + " already there)" : "")
+                + (refused > 0 ? " (" + refused + (refused == 1 ? " is" : " are") + " not a replay)" : "") + ".";
+        report("import replays", text);
+    }
+
+    /**
+     * The Mods screen's IMPORT (port/linux/game/menu_functions.c, through host_android_import_mods): the system's
+     * file picker, several .zip files at once, then the mods in each taken into folder, the mods folder, where the
+     * Mods screen finds them (copyModsIn). A mod's .zip holds its folder's files as they are laid out there (mod.toml
+     * and tags/ at its top), and a pack's any number of mods, each in a folder of its own at the .zip's top. Called on the game's
+     * thread; no storage permission.
+     */
+    public void importMods(String folder) {
+        runOnUiThread(() -> {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            // (the providers call a .zip any of these)
+            intent.setType("*/*");
+            intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] { "application/zip", "application/x-zip-compressed",
+                "application/x-zip", "application/octet-stream" });
+            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            pendingModsFolder = folder;
+            try {
+                startActivityForResult(intent, IMPORT_MODS);
+            } catch (android.content.ActivityNotFoundException e) {
+                pendingModsFolder = null;
+                Toast.makeText(this, "This device has no file picker.", Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    /**
+     * the folder a mod's .zip is taken into: the file's name without .zip, with what a folder's name cannot hold
+     * (slashes, a leading dot, which the game passes over, and control characters) made '_', no longer than the game
+     * takes
+     */
+    private static String modFolderName(String chosen) {
+        String name = chosen != null ? chosen : "";
+        if (name.toLowerCase(java.util.Locale.ROOT).endsWith(".zip"))
+            name = name.substring(0, name.length() - 4);
+        name = name.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_").trim();
+        if (name.startsWith("."))
+            name = "_" + name.substring(1);
+        if (name.isEmpty())
+            name = "mod";
+        while (name.getBytes(StandardCharsets.UTF_8).length > MOD_FOLDER_LENGTH)
+            name = name.substring(0, name.offsetByCodePoints(name.length(), -1));
+        return name;
+    }
+
+    /** a file, or a folder and everything in it, deleted */
+    private static void deleteTree(File file) {
+        File[] children = file.isDirectory() ? file.listFiles() : null;
+        if (children != null) {
+            for (File child : children)
+                deleteTree(child);
+        }
+        file.delete();
+    }
+
+    /** a .zip's entries written into folder, which none may leave */
+    private void unzipInto(Uri document, File folder) throws IOException {
+        String top = folder.getCanonicalPath() + File.separator;
+        int files = 0;
+        try (InputStream input = getContentResolver().openInputStream(document)) {
+            if (input == null)
+                throw new IOException("it cannot be opened");
+            try (ZipInputStream zip = new ZipInputStream(input)) {
+                byte[] buffer = new byte[65536];
+                ZipEntry entry;
+                while ((entry = zip.getNextEntry()) != null) {
+                    String path = entry.getName().replace('\\', '/');
+                    File target = new File(folder, path);
+                    if (!target.getCanonicalPath().startsWith(top) && !target.getCanonicalPath().equals(folder.getCanonicalPath()))
+                        throw new IOException("it names a file outside its folder (" + entry.getName() + ")");
+                    if (entry.isDirectory()) {
+                        target.mkdirs();
+                        continue;
+                    }
+                    if (++files > MOD_MAXIMUM_FILES)
+                        throw new IOException("it has more than " + MOD_MAXIMUM_FILES + " files");
+                    File parent = target.getParentFile();
+                    if (parent != null)
+                        parent.mkdirs();
+                    try (OutputStream output = new FileOutputStream(target)) {
+                        int size;
+                        while ((size = zip.read(buffer)) != -1)
+                            output.write(buffer, 0, size);
+                    }
+                }
+            }
+        }
+        if (files == 0)
+            throw new IOException("it is not a .zip file, or it is empty");
+    }
+
+    /**
+     * the mods a .zip unpacked into folder holds, by the name each is kept under: folder itself, named as the .zip
+     * (zipName), when its mod.toml is at the top; else each folder at the top with a mod.toml at its own top (a pack
+     * of mods), named as that folder. Mods further down are not looked for.
+     */
+    private static java.util.Map<String, File> modsIn(File folder, String zipName) {
+        java.util.Map<String, File> found = new java.util.LinkedHashMap<>();
+        if (new File(folder, "mod.toml").isFile()) {
+            found.put(zipName, folder);
+            return found;
+        }
+        File[] children = folder.listFiles(File::isDirectory);
+        if (children == null)
+            return found;
+        java.util.Arrays.sort(children);
+        for (File child : children) {
+            if (new File(child, "mod.toml").isFile())
+                found.putIfAbsent(modFolderName(child.getName()), child);
+        }
+        return found;
+    }
+
+    /**
+     * the .zip files chosen taken into the mods folder, on a thread of their own; a Toast (and the log) says how it
+     * went. Each is unpacked into .import/<name> (the game passes over a folder whose name begins with a dot), and
+     * each mod in it (modsIn: one at its top, or one in each folder at its top) moved into the mods folder under its
+     * name; a mod whose name the folder has already is left as it is, and a .zip that cannot be taken does not stop
+     * the others.
+     */
+    private void copyModsIn(List<Uri> documents, String folder) {
+        File mods = new File(folder);
+        File staging = new File(mods, ".import");
+        List<String> copied = new ArrayList<>();
+        List<String> skipped = new ArrayList<>();
+        List<String> failed = new ArrayList<>();
+        runOnUiThread(() -> Toast.makeText(this, "Importing...", Toast.LENGTH_SHORT).show());
+        for (Uri document : documents) {
+            String chosen = documentName(document);
+            String name = modFolderName(chosen);
+            File part = new File(staging, name);
+            try {
+                deleteTree(part);
+                if (!part.mkdirs())
+                    throw new IOException("its folder cannot be made");
+                unzipInto(document, part);
+                java.util.Map<String, File> found = modsIn(part, name);
+                if (found.isEmpty())
+                    throw new IOException("it has no mod.toml at its top, nor folders at its top with one each");
+                for (java.util.Map.Entry<String, File> mod : found.entrySet()) {
+                    File target = new File(mods, mod.getKey());
+                    if (target.exists())
+                        skipped.add(mod.getKey());
+                    else if (mod.getValue().renameTo(target))
+                        copied.add(mod.getKey());
+                    else
+                        failed.add(mod.getKey() + ": its folder cannot be kept");
+                }
+            } catch (Exception e) {
+                failed.add((chosen != null ? chosen : name) + ": " + e.getMessage());
+            } finally {
+                deleteTree(part);
+            }
+        }
+        deleteTree(staging);
+        String text = (copied.isEmpty() ? "" : "Imported " + String.join(", ", copied) + ". ")
+            + (skipped.isEmpty() ? "" : String.join(", ", skipped) + (skipped.size() == 1 ? " was" : " were")
+                + " already there (delete " + (skipped.size() == 1 ? "it" : "them") + " first to import again). ")
+            + (failed.isEmpty() ? "" : "Not imported: " + String.join("; ", failed) + ".")
+            + (copied.isEmpty() && skipped.isEmpty() && failed.isEmpty() ? "Nothing imported." : "");
+        report("import mods", text.trim());
+    }
+
+    /**
+     * Video Setup's IMPORT DRIVER (port/linux/game/menu_functions.c, through host_android_import_vk_drivers): the
+     * system's file picker, several archives at once, then each one copied into folder, freedreno_drivers, where
+     * VULKAN DRIVER lists it the next time Video Setup opens. An archive is an adrenotools zip: a meta.json naming
+     * the driver's library, and the library, at its top. Called on the game's thread; no storage permission.
+     */
+    public void importVkDrivers(String folder) {
+        runOnUiThread(() -> {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("*/*");
+            intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] { "application/zip", "application/x-zip-compressed",
+                "application/x-zip", "application/octet-stream" });
+            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            pendingDriversFolder = folder;
+            try {
+                startActivityForResult(intent, IMPORT_VK_DRIVERS);
+            } catch (android.content.ActivityNotFoundException e) {
+                pendingDriversFolder = null;
+                Toast.makeText(this, "This device has no file picker.", Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    /** the name a driver archive is kept under: its own, with anything but letters, digits, '-', '_' and '.' made
+     * '_', ending .zip, short enough for Video Setup to list */
+    private static String driverName(String chosen) {
+        String name = chosen != null ? chosen.replaceAll("[^A-Za-z0-9._-]", "_") : "";
+        if (name.toLowerCase(java.util.Locale.ROOT).endsWith(".zip"))
+            name = name.substring(0, name.length() - 4);
+        if (name.isEmpty() || name.startsWith("."))
+            name = "driver" + name;
+        if (name.length() > DRIVER_NAME_LENGTH - 4)
+            name = name.substring(0, DRIVER_NAME_LENGTH - 4);
+        return name + ".zip";
+    }
+
+    /** why an archive is not one the game can load (as host_vk_driver.c reads it), else null */
+    private static String driverArchiveProblem(File archive) {
+        try (ZipFile zip = new ZipFile(archive)) {
+            if (zip.size() > DRIVER_MAXIMUM_ENTRIES)
+                return "it has more than " + DRIVER_MAXIMUM_ENTRIES + " files";
+            ZipEntry meta = zip.getEntry("meta.json");
+            if (meta == null)
+                return "it has no meta.json at its top (it is not a driver archive)";
+            String library;
+            try (InputStream input = zip.getInputStream(meta)) {
+                ByteArrayOutputStream text = new ByteArrayOutputStream();
+                byte[] buffer = new byte[4096];
+                int size;
+                while ((size = input.read(buffer)) != -1) {
+                    if (text.size() + size > 65536)
+                        return "its meta.json is too large";
+                    text.write(buffer, 0, size);
+                }
+                library = new org.json.JSONObject(new String(text.toByteArray(), StandardCharsets.UTF_8))
+                    .optString("libraryName", "");
+            }
+            if (library.isEmpty() || library.contains("/") || library.contains("\\") || library.contains(".."))
+                return "its meta.json names no library";
+            if (zip.getEntry(library) == null)
+                return "it has no " + library;
+            return null;
+        } catch (Exception e) {
+            return "it is not a zip file (" + e.getMessage() + ")";
+        }
+    }
+
+    /**
+     * the archives chosen copied into folder, on a thread of their own; a Toast says how it went. Each goes to
+     * <name>.part, which becomes the archive only once it is whole and holds a driver; a name the folder has already
+     * is left as it is.
+     */
+    private void copyVkDriversIn(List<Uri> documents, String folder) {
+        File directory = new File(folder);
+        directory.mkdirs();
+        List<String> copied = new ArrayList<>();
+        int skipped = 0;
+        String failed = null;
+        for (Uri document : documents) {
+            String name = driverName(documentName(document));
+            File archive = new File(directory, name);
+            File part = new File(directory, name + ".part");
+            if (archive.exists()) {
+                skipped++;
+                continue;
+            }
+            try {
+                try (InputStream input = getContentResolver().openInputStream(document);
+                     OutputStream output = new FileOutputStream(part)) {
+                    if (input == null)
+                        throw new IOException("it cannot be opened");
+                    byte[] buffer = new byte[65536];
+                    long total = 0;
+                    int size;
+                    while ((size = input.read(buffer)) != -1) {
+                        total += size;
+                        if (total > DRIVER_MAXIMUM_SIZE)
+                            throw new IOException("it is larger than " + (DRIVER_MAXIMUM_SIZE >> 20) + " MB");
+                        output.write(buffer, 0, size);
+                    }
+                }
+                String problem = driverArchiveProblem(part);
+                if (problem != null)
+                    throw new IOException(problem);
+                if (!part.renameTo(archive))
+                    throw new IOException("it cannot be kept");
+                copied.add(name.substring(0, name.length() - 4));
+            } catch (Exception e) {
+                failed = name + ": " + e.getMessage();
+                break;
+            } finally {
+                part.delete();
+            }
+        }
+        String text = (copied.isEmpty() ? "" : "Imported " + String.join(", ", copied)
+                + ". Open Video Setup again and choose it as VULKAN DRIVER. ")
+            + (skipped > 0 ? skipped + (skipped == 1 ? " archive was" : " archives were") + " already there. " : "")
+            + (failed != null ? "The import stopped: " + failed : copied.isEmpty() && skipped == 0 ? "Nothing imported." : "");
+        report("import driver", text.trim());
+    }
+
+    /**
+     * Settings > Gameplay > GAME FILES (port/linux/game/menu_functions.c, through host_android_move_game_files):
+     * "app" moves the maps, custom_maps, mods and mcc_maps folders into the app's storage, "other" into a folder the
+     * player picks (All files access asked for first, as the launcher's "Use another folder" does). Once the player
+     * says yes, the move is asked for (GameFiles.request) and the game starts again: the launcher moves them before
+     * the game opens them (GameFiles.run). Called on the game's thread.
+     */
+    public void moveGameFiles(String where) {
+        runOnUiThread(() -> {
+            File dataRoot = getExternalFilesDir(null);
+            if (dataRoot == null)
+                return;
+            if (!"other".equals(where)) {
+                if (GameFiles.inAppData(dataRoot)) {
+                    Toast.makeText(this, "The game's files are in the app's storage already.", Toast.LENGTH_LONG)
+                        .show();
+                    return;
+                }
+                confirmGameFilesMove(dataRoot, null);
+                return;
+            }
+            if (MapsFolder.hasStorageAccess(this)) {
+                openGameFilesPicker();
+                return;
+            }
+            boolean settings = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R;
+            new AlertDialog.Builder(this)
+                .setTitle("Allow access to your folder")
+                .setMessage("The game reads its maps and mods with ordinary file access, which Android allows outside "
+                    + "the app's storage only with " + (settings ? "All files access. Android's settings open next: "
+                    + "turn on \"Allow access to manage all files\" for SlipstreamCE, then come back." : "storage access.")
+                    + " Only the folder you choose is used.")
+                .setPositiveButton("Continue", (dialog, which) -> askGameFilesAccess())
+                .setNegativeButton("Cancel", null)
+                .show();
+        });
+    }
+
+    private void askGameFilesAccess() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            requestPermissions(new String[] { android.Manifest.permission.WRITE_EXTERNAL_STORAGE }, MOVE_GAME_FILES);
+            return;
+        }
+        awaitingGameFilesAccess = true;
+        try {
+            startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                Uri.parse("package:" + getPackageName())));
+        } catch (android.content.ActivityNotFoundException e) {
+            try {
+                startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+            } catch (android.content.ActivityNotFoundException again) {
+                awaitingGameFilesAccess = false;
+                Toast.makeText(this, "This device has no All files access setting.", Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(request, permissions, results);
+        if (request == MOVE_GAME_FILES && MapsFolder.hasStorageAccess(this))
+            openGameFilesPicker();
+    }
+
+    private void openGameFilesPicker() {
+        try {
+            startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), MOVE_GAME_FILES);
+        } catch (android.content.ActivityNotFoundException e) {
+            Toast.makeText(this, "This device has no folder picker.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /** the folder picked: checked, then the player asked */
+    private void gameFilesFolderPicked(Uri tree) {
+        File dataRoot = getExternalFilesDir(null);
+        File chosen = MapsFolder.fromTree(this, tree);
+        if (dataRoot == null)
+            return;
+        if (chosen == null) {
+            Toast.makeText(this, "Choose a folder on this device's storage or memory card.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        String problem = GameFiles.refused(dataRoot, chosen);
+        if (problem != null) {
+            Toast.makeText(this, problem, Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (GameFiles.moves(dataRoot, chosen).isEmpty()) {
+            Toast.makeText(this, "The game's files are in that folder already.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        confirmGameFilesMove(dataRoot, chosen);
+    }
+
+    /** the player asked (the size counted away from the UI thread), then the move asked for and the game restarted */
+    private void confirmGameFilesMove(File dataRoot, File chosen) {
+        new Thread(() -> {
+            long size = GameFiles.totalSize(dataRoot);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed())
+                    return;
+                String where = chosen != null ? chosen.getAbsolutePath()
+                    : "the app's storage (Android empties it when the app is removed)";
+                new AlertDialog.Builder(this)
+                    .setTitle("Move the game's files?")
+                    .setMessage("The maps, custom maps, mods and MCC maps (" + GameFiles.size(size) + ") go to "
+                        + where + ".\n\nThe game closes and starts again to move them, and shows how far it has "
+                        + "got. Don't close the app until it's done.")
+                    .setPositiveButton("Move", (dialog, which) -> {
+                        String problem = GameFiles.request(dataRoot, chosen);
+                        if (problem != null) {
+                            Toast.makeText(this, problem, Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        restartForGameFiles();
+                    })
+                    .setNegativeButton("Cancel", null)
+                    .show();
+            });
+        }, "halo-game-files-size").start();
+    }
+
+    /**
+     * the launcher started again (in the app's main process: this one is the game's, HaloActivity's :game), which
+     * moves the files before the game runs, then this process ended
+     */
+    private void restartForGameFiles() {
+        Intent launcher = new Intent(this, LauncherActivity.class);
+        launcher.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        startActivity(launcher);
+        finishAffinity();
+        android.os.Process.killProcess(android.os.Process.myPid());
+    }
+
+    /**
+     * The map lists' IMPORT (New Game's and the Map screen's: port/linux/game/menu_functions.c, through
+     * host_android_import_maps): the system's file picker, several files at once, each copied as it is into folder,
+     * the import inbox, which the game takes in from (port/android/host/host_mcc_import.c: Custom Edition maps, .zip files of
+     * them, and MCC packages, which only come in .zip files). Called on the game's thread; no storage permission.
+     */
+    public void importMaps(String folder) {
+        runOnUiThread(() -> {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            // (a .map has no type of its own: the providers call it anything)
+            intent.setType("*/*");
+            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            pendingMapsFolder = folder;
+            try {
+                startActivityForResult(intent, IMPORT_MAPS);
+            } catch (android.content.ActivityNotFoundException e) {
+                pendingMapsFolder = null;
+                Toast.makeText(this, "This device has no file picker.", Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    /**
+     * a file's name in the import inbox: the document's own, without folders, with what a file system refuses made
+     * '_', no dot or space at its ends, and a number added if one of that name is there already; null when nothing
+     * is left of it
+     */
+    private static File inboxFile(File inbox, String chosen) {
+        String name = chosen != null ? chosen : "";
+        name = name.substring(Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\')) + 1);
+        name = name.replaceAll("[\\x00-\\x1F\\x7F\\\\/:*?\"<>|]", "_").replaceAll("^[. ]+|[. ]+$", "");
+        if (name.isEmpty())
+            return null;
+        int dot = name.lastIndexOf('.');
+        String stem = dot > 0 ? name.substring(0, dot) : name, extension = dot > 0 ? name.substring(dot) : "";
+        File file = new File(inbox, name);
+        for (int number = 2; file.exists() || new File(inbox, file.getName() + ".part").exists(); number++)
+            file = new File(inbox, stem + " (" + number + ")" + extension);
+        return file;
+    }
+
+    /**
+     * the documents chosen copied into folder, the import inbox, on a thread of their own: each as a .part (which
+     * the game passes over) until it is whole. The game checks and imports them, and says how it went.
+     */
+    private void copyMapsIn(List<Uri> documents, String folder) {
+        File inbox = new File(folder);
+        inbox.mkdirs();
+        List<String> failed = new ArrayList<>();
+        runOnUiThread(() -> Toast.makeText(this, "Importing...", Toast.LENGTH_SHORT).show());
+        for (Uri document : documents) {
+            String chosen = documentName(document);
+            File file = inboxFile(inbox, chosen);
+            if (file == null) {
+                failed.add(chosen + ": it has no name");
+                continue;
+            }
+            File part = new File(inbox, file.getName() + ".part");
+            try (InputStream input = getContentResolver().openInputStream(document)) {
+                if (input == null)
+                    throw new IOException("it cannot be opened");
+                try (OutputStream output = new FileOutputStream(part)) {
+                    byte[] buffer = new byte[65536];
+                    long total = 0;
+                    int size;
+                    while ((size = input.read(buffer)) != -1) {
+                        total += size;
+                        if (total > IMPORT_MAXIMUM_SIZE)
+                            throw new IOException("it is larger than 16 GB");
+                        output.write(buffer, 0, size);
+                    }
+                }
+                if (!part.renameTo(file))
+                    throw new IOException("it cannot be kept");
+            } catch (Exception e) {
+                part.delete();
+                failed.add(file.getName() + ": " + e.getMessage());
+            }
+        }
+        if (!failed.isEmpty())
+            report("import maps", "Not imported: " + String.join("; ", failed) + ".");
+    }
+
+    /** the documents a picker of several files chose */
+    private static List<Uri> chosenDocuments(Intent data) {
+        List<Uri> documents = new ArrayList<>();
+        if (data.getClipData() != null) {
+            for (int index = 0; index < data.getClipData().getItemCount(); index++)
+                documents.add(data.getClipData().getItemAt(index).getUri());
+        } else if (data.getData() != null) {
+            documents.add(data.getData());
+        }
+        return documents;
     }
 
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
+        if (request == MOVE_GAME_FILES) {
+            if (result == RESULT_OK && data != null && data.getData() != null)
+                gameFilesFolderPicked(data.getData());
+            return;
+        }
+        if (request == IMPORT_REPLAYS) {
+            String folder = pendingImportFolder;
+            pendingImportFolder = null;
+            if (result != RESULT_OK || data == null || folder == null)
+                return;
+            List<Uri> documents = chosenDocuments(data);
+            if (!documents.isEmpty())
+                new Thread(() -> copyReplaysIn(documents, folder), "halo-import-replays").start();
+            return;
+        }
+        if (request == IMPORT_VK_DRIVERS) {
+            String folder = pendingDriversFolder;
+            pendingDriversFolder = null;
+            if (result != RESULT_OK || data == null || folder == null)
+                return;
+            List<Uri> documents = chosenDocuments(data);
+            if (!documents.isEmpty())
+                new Thread(() -> copyVkDriversIn(documents, folder), "halo-import-vk-drivers").start();
+            return;
+        }
+        if (request == IMPORT_MAPS) {
+            String folder = pendingMapsFolder;
+            pendingMapsFolder = null;
+            if (result != RESULT_OK || data == null || folder == null)
+                return;
+            List<Uri> documents = chosenDocuments(data);
+            if (!documents.isEmpty())
+                new Thread(() -> copyMapsIn(documents, folder), "halo-import-maps").start();
+            return;
+        }
+        if (request == IMPORT_MODS) {
+            String folder = pendingModsFolder;
+            pendingModsFolder = null;
+            if (result != RESULT_OK || data == null || folder == null)
+                return;
+            List<Uri> documents = chosenDocuments(data);
+            if (!documents.isEmpty())
+                new Thread(() -> copyModsIn(documents, folder), "halo-import-mods").start();
+            return;
+        }
         if (request == EXPORT_REPLAYS) {
             String folder = pendingReplaysFolder;
             pendingReplaysFolder = null;
@@ -274,6 +1071,14 @@ public class HaloActivity extends SDLActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        // (back from the system's All files access setting, for GAME FILES' OTHER FOLDER)
+        if (awaitingGameFilesAccess) {
+            awaitingGameFilesAccess = false;
+            if (MapsFolder.hasStorageAccess(this))
+                openGameFilesPicker();
+            else
+                Toast.makeText(this, "All files access was not allowed.", Toast.LENGTH_LONG).show();
+        }
         if (touchControls != null && getWindow().getDecorView().hasWindowFocus())
             touchControls.startDeviceInput();
     }

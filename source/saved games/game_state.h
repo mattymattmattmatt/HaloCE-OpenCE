@@ -31,7 +31,12 @@ struct game_state_header
 	/* and how far the port had moved the game's own image, whose addresses
 	the state holds too (halo_port_window.h's PORT_IMAGE_SHIFT) */
 	unsigned long image_shift;
-	long unused[5];
+	/* and how far an MCC map's tags were from the base they were written for
+	(halo_port_window.h's PORT_MCC_SHIFT), whose addresses the state holds
+	as it does a map's tag data's; 0 in a save from before this was kept,
+	when they were always at their base (0x134) */
+	unsigned long mcc_tag_shift;
+	long unused[4];
 	unsigned long checksum; // 0x148
 };
 
@@ -47,12 +52,19 @@ void game_state_save(
 	void);
 void game_state_revert(
 	void);
+/* port: where the game state is in this run (main.c's core dump) */
+void *game_state_port_base_address(
+	void);
 /* port: network co-op's (game_state.c) */
 boolean game_state_port_saved_game_valid(
 	void);
 void game_state_port_restamp_revert_time(
 	void);
 void game_state_save_to_persistent_storage(
+	void);
+/* port: the menus' check of the saved game made ahead, on a thread, while
+the main menu is up (game_state_xbox.c) */
+void game_state_persistent_storage_check_ahead(
 	void);
 boolean game_state_test_persistent_storage(
 	char *map_name,
@@ -63,6 +75,51 @@ this build's (game_state.c) */
 boolean game_state_image_accept(
 	void *image,
 	long size);
+
+/* port: an image written where the Xbox memory window, and so the game state
+in it, lay elsewhere, or with the game's image moved by another shift, has
+its addresses moved to this run's before it is checked and taken
+(game_state_image_accept). The game state's own containers are moved there;
+what else holds an address is moved by the module that owns it, in the image,
+through these */
+struct game_state_relocation
+{
+	byte *image;
+	/* where the saved game's window began, and how far this run's is from
+	it (modulo 2^32) */
+	unsigned long window_from;
+	unsigned long window_delta;
+	/* this run's PORT_IMAGE_SHIFT less the saved game's */
+	unsigned long image_delta;
+	/* where an MCC map's tags were in the saved game, and how far this run's
+	are from there (0 when they are where they were, or for another map) */
+	unsigned long mcc_from;
+	unsigned long mcc_delta;
+};
+
+/* how far an address the saved game held of the map's tag data moves: by
+the MCC tags' distance where they hold live (this run's address), else by
+the window's */
+unsigned long game_state_relocation_tag_delta(
+	struct game_state_relocation const *relocation,
+	void const *live);
+
+/* where the image holds what this run's game state has at live */
+void *game_state_relocation_pointer(
+	struct game_state_relocation const *relocation,
+	void const *live);
+/* the 4 bytes at field, at any alignment: moved to this run's window if they
+are an address in the saved game's, else left as they are (NULL, NONE, a
+field that holds something else) */
+void game_state_relocate(
+	struct game_state_relocation const *relocation,
+	void *field);
+/* the image's element of live (a game state data array), or NULL if it is
+free there or past the image's count */
+void *game_state_relocation_element(
+	struct game_state_relocation const *relocation,
+	struct data_array *live,
+	long index);
 void game_state_save_core(
 	const char *name);
 boolean game_state_reverted(

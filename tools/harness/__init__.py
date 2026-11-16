@@ -77,24 +77,22 @@ _directory = tempfile.TemporaryDirectory(prefix="halo-harness-")
 
 
 CHECK_FAILED = 1  # a case's exit status when a CHECK fails (harness.h)
+SSE_MATH = ("-msse2", "-mfpmath=sse")  # see build
 
 
 @functools.lru_cache(maxsize=None)
-def build(test, generated):
-    """tests/<test>.c compiled with the generated includes ((name, text), ...) for the game's 32-bit ABI."""
-    work = Path(_directory.name) / f"{test}-{abs(hash(generated)):x}"
+def build(test, generated, flags=()):
+    """tests/<test>.c compiled with the generated includes ((name, text), ...) for the game's 32-bit ABI; flags are more
+    of the compiler's (SSE_MATH: the floats of every target the lighting runs on, where the 32-bit default keeps excess
+    precision in x87 registers and an exact comparison of two floats means little)."""
+    work = Path(_directory.name) / f"{test}-{abs(hash((generated, flags))):x}"
     work.mkdir(parents=True, exist_ok=True)
     for name, text in generated:
         (work / name).write_text(text)
     executable = work / (test + (".exe" if os.name == "nt" else ""))
     command = [os.environ.get("CC", "clang"), "-m32", "-std=gnu99", "-O2", "-Wall", "-Werror", "-Wno-unused-function",
-               "-Wno-unused-variable", "-I", str(HARNESS / "include"), "-I", str(work),
-               str(HARNESS / "tests" / f"{test}.c"), "-o", str(executable)]
-    # MSVC's runtime includes maths; there is no separate m.lib on Windows.
-    if os.name == "nt":
-        command.append("-D_CRT_SECURE_NO_WARNINGS=")
-    else:
-        command.append("-lm")
+               "-Wno-unused-variable", "-I", str(HARNESS / "include"), "-I", str(work), *flags,
+               str(HARNESS / "tests" / f"{test}.c"), "-o", str(executable), "-lm"]
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode:
         raise RuntimeError(f"{test}.c does not compile:\n{result.stderr}")

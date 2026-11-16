@@ -20,6 +20,13 @@ static boolean config_text(char const *name,char *text,unsigned int size){(void)
 static boolean config_boolean(char const *name){(void)name;return FALSE;}
 static int config_writes;
 static boolean config_write(char const *name,char const *value){(void)name;(void)value;config_writes++;return TRUE;}
+/* (this fork's settings: the lighting menu's grouped rows, which these are
+not, and the profile's own settings.toml, which counts as a write) */
+static int lighting_menu_text(char const *name,char *text,unsigned int size,int defaults){(void)name;(void)text;(void)size;(void)defaults;return -1;}
+static int lighting_menu_write(char const *name,char const *value){(void)name;(void)value;return -1;}
+static char const *settings_profile_folder(void){return NULL;}
+static int config_profile_text(char const *folder,char const *name,char *text,unsigned int size){(void)folder;return config_text(name,text,size);}
+static int config_profile_write(char const *folder,char const *name,char const *value){(void)folder;return config_write(name,value);}
 static void platform_log(char const *format,...){(void)format;}
 /* gore mod: setting_write arms campaign allies when bots.coop changes */
 static void coop_allies_arm(void){}

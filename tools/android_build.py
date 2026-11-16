@@ -62,6 +62,13 @@ MUSL_VERSION = "1.2.5"
 MUSL_DIR = THIRD_PARTY / f"musl-{MUSL_VERSION}"
 MUSL_URL = f"https://musl.libc.org/releases/musl-{MUSL_VERSION}.tar.gz"
 MUSL_SHA256 = "a9a118bbe84d8764da0ea0d28b3ab3fae8477fc7e4085d90102b8596fc7c75e4"
+# (the same archive, byte for byte, where musl.libc.org does not answer: it was
+# down on 2026-11-03 and failed a branch's Switch build, whose cache is only the
+# tags'; download checks each against MUSL_SHA256)
+MUSL_MIRRORS = [
+    f"https://deb.debian.org/debian/pool/main/m/musl/musl_{MUSL_VERSION}.orig.tar.gz",
+    f"https://sources.buildroot.net/musl/musl-{MUSL_VERSION}.tar.gz",
+]
 # (as tools/windows_build.py's and tools/linux_sysroot.py's SDL_VERSION)
 # (the download's SHA-256, and the tag's commit, when they were pinned)
 MUSL_SHA256 = "a9a118bbe84d8764da0ea0d28b3ab3fae8477fc7e4085d90102b8596fc7c75e4"
@@ -72,6 +79,18 @@ SDL_URL = "https://github.com/libsdl-org/SDL.git"
 SDL_ANDROID_MOUSE_PATCH = Path("port/android/patches/sdl-relative-mouse.patch")
 SDL_ANDROID_MOUSE_LISTENER = "android-project/app/src/main/java/org/libsdl/app/SDLControllerManager.java"
 ANDROID_API = 28
+# The dynamic lighting's modules (docs/dynamic_lighting_port.md): the Vulkan and
+# deko3d images link them. An OpenGL image links dynamic_lighting_disabled.c in
+# their place, so that it has none of their lights, rays, textures or shaders.
+DYNAMIC_LIGHTING_GAME_SOURCES = {
+    "ambient_emitter_lighting.c", "ammo_counter_falloff.c", "ammo_counter_lighting.c",
+    "authored_emitter_lighting.c", "covenant_emitter_lighting.c", "covenant_lighting.c", "lighting_config.c",
+    "lighting_menu.c",
+    "muzzle_lighting.c", "needler_lighting.c", "plasma_falloff.c", "plasma_lighting.c",
+    "plasma_collision.c", "plasma_collision_models.c", "plasma_collision_scene.c", "plasma_occlusion.c",
+    "rocket_lighting.c", "shield_glow.c",
+}
+DYNAMIC_LIGHTING_PLATFORM_SOURCES = {"plasma_model_shader.c"}
 # the Vulkan probe's shader compiler (port/android/VULKAN.md, phase 0, step 4)
 GLSLANG_TAG = "16.6.0"
 GLSLANG_DIR = THIRD_PARTY / "glslang"
@@ -233,7 +252,7 @@ def fetch_third_party(third_party: Path = THIRD_PARTY) -> None:
     if not musl_dir.is_dir():
         print(f"Downloading {MUSL_URL}")
         archive = third_party / f"musl-{MUSL_VERSION}.tar.gz"
-        archive.write_bytes(download([MUSL_URL], MUSL_SHA256))
+        archive.write_bytes(download([MUSL_URL] + MUSL_MIRRORS, MUSL_SHA256))
         # (unpacked beside it and then moved, so that an interrupted unpacking
         # leaves no folder that a later configure would take as complete)
         unpacked = third_party / f"musl-{MUSL_VERSION}.unpacked"
@@ -562,8 +581,12 @@ def generate_guest_image(n: Writer, sln: Any, config: Dict[str, Any], *, arch: G
         if source.as_posix() in VARIADIC_PROTOTYPE_FILES:
             cflags += f" -include {PORT_DIR}/include/halo_android_variadic_prototypes.h"
         objects.append(guest_object(source, cflags))
+    dynamic_lighting_objects = []
     for source in sorted(Path(config["game_sources"]).glob("*.c")):
-        objects.append(guest_object(source, game_cflags))
+        if source.name in DYNAMIC_LIGHTING_GAME_SOURCES:
+            dynamic_lighting_objects.append(guest_object(source, game_cflags))
+        else:
+            objects.append(guest_object(source, game_cflags))
     objects.append(guest_object(STB_VORBIS_SOURCE, game_cflags))
 
     # the platform layer shared with Linux, and the guest runtime
@@ -580,9 +603,13 @@ def generate_guest_image(n: Writer, sln: Any, config: Dict[str, Any], *, arch: G
     gl_textures_object = None
     gl_post_object = None
     for source in sorted((LINUX_DIR / "src").glob("*.c")):
-        if source.name.startswith("posix_") or source.name in guest_host_only:
+        # (posix_server.c is the guest's: the clock and files of hosting from the
+        # menus, over the guest's own C library; the other posix_ files are the host's)
+        if (source.name.startswith("posix_") and source.name != "posix_server.c") or source.name in guest_host_only:
             continue
-        if source.name == "updater.c" and updater_cflags:
+        if source.name in DYNAMIC_LIGHTING_PLATFORM_SOURCES:
+            dynamic_lighting_objects.append(guest_object(source, platform_cflags))
+        elif source.name == "updater.c" and updater_cflags:
             objects.append(guest_object(source, f"{platform_cflags} {updater_cflags}"))
         else:
             objects.append(guest_object(source, platform_cflags))
@@ -685,7 +712,9 @@ def generate_guest_image(n: Writer, sln: Any, config: Dict[str, Any], *, arch: G
     if relocatable:
         link_implicit.append(Path("tools/guest_relocations.py"))
     relocations = build / "halo_guest.relocs"
-    n.build(outputs=image, rule=f"{prefix}_guest_link", inputs=objects,
+    # (the OpenGL renderer's image: the dynamic lighting's hooks do nothing)
+    gl_objects = objects + [guest_object(PORT_DIR / "guest" / "dynamic_lighting_disabled.c", game_cflags)]
+    n.build(outputs=image, rule=f"{prefix}_guest_link", inputs=gl_objects,
             implicit_outputs=[relocations] if relocatable else None, implicit=link_implicit,
             variables={"relocations": str(relocations)} if relocatable else None)
     # what the host cannot give the image: thread-local storage, the thread
@@ -711,6 +740,7 @@ def generate_guest_image(n: Writer, sln: Any, config: Dict[str, Any], *, arch: G
         # (its texture cache, xbox_textures_vk.c, takes the place of xbox_textures.c the same way)
         vk_image = build / "halo_guest_vk.elf"
         vk_objects = [obj for obj in objects if obj not in (gl_renderer_object, gl_textures_object, gl_post_object)]
+        vk_objects.extend(dynamic_lighting_objects)
         vk_objects.append(guest_object(PORT_DIR / "guest" / "xbox_textures_vk.c", platform_cflags))
         vk_objects.append(guest_object(PORT_DIR / "guest" / "d3d8_vk.c", platform_cflags))
         # the generators for glslang (port/android/VULKAN.md, phase 4): the originals stay in both images
@@ -885,12 +915,24 @@ def generate_android_build(n: Writer, sln: Any) -> None:
         LINUX_DIR / "src" / "posix_files.c", LINUX_DIR / "src" / "posix_net.c",
         LINUX_DIR / "src" / "posix_mcc_preview.c",
         LINUX_DIR / "src" / "posix_mcc_share.c",
+        # the map lists' IMPORT's JSON reader (host_mcc_import.c)
+        LINUX_DIR / "src" / "server_json.c",
         # the app reads debug.sample_seconds from config.toml (host_main.c)
         TOML_DIR / "tomlc17.c",
+        # the file connection's X25519 and ChaCha20-Poly1305 (host_file_share_crypto.c)
+        MONOCYPHER_DIR / "monocypher.c",
     ]
     for source in host_sources:
         obj = host_obj_dir / (source.name + ".o")
-        n.build(outputs=obj, rule="android_host_cc", inputs=source, variables={"cflags": host_cflags},
+        # (the Steam client's chunk unpacker: the LZMA SDK's and Zstandard's
+        # decoders, whose warnings are not ours)
+        # (an MCC map's conversion: the guest's codecs, whose bcdec shifts
+        # signed values as the guest's -fwrapv defines, host_mcc_convert.c)
+        n.build(outputs=obj, rule="android_host_cc", inputs=source,
+                variables={"cflags": host_cflags + (" -w" if source.name == "steam_unpack.c" else "") +
+                           (" -fwrapv" if source.name == "host_mcc_convert.c" else "") +
+                           (f" -I{MONOCYPHER_DIR}" if source.name in ("host_file_share_crypto.c", "monocypher.c")
+                            else "")},
                 implicit=[build_stamp] if source.name == "host_vk_probe.c" else None)
         host_objects.append(obj)
     # internet play's UPnP (posix_upnp.c, with port/third_party/miniupnpc),

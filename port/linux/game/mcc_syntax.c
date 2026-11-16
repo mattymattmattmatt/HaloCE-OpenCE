@@ -3,6 +3,7 @@
  * their existing representation. The shared interpreter's signed indices
  * support this format's 32767 slots without widening any engine structure. */
 #include "cseries.h"
+#include "tag_files/tag_groups.h"
 #include "errors.h"
 #include "math/real_math.h"
 #include "hs/hs.h"
@@ -13,15 +14,33 @@
 #include "mcc_syntax.h"
 #include <stdint.h>
 #include <string.h>
+#include <stdlib.h>
 
 typedef char mcc_syntax_wire_size_matches_runtime[
     sizeof(struct data_array) + MCC_SYNTAX_CAPACITY * sizeof(struct hs_syntax_node) ==
         MCC_SYNTAX_MAXIMUM_DATA_BYTES ? 1 : -1];
 
-static byte mcc_syntax_colors[MCC_SYNTAX_CAPACITY];
-static byte mcc_syntax_edges[MCC_SYNTAX_CAPACITY];
-static unsigned short mcc_syntax_stack[MCC_SYNTAX_CAPACITY];
-static byte mcc_syntax_seen[MCC_SYNTAX_CAPACITY];
+/* (allocated at the first use, zeroed as static data is: the guest images,
+whose code and data have to fit below 0x40000000, have no room for it as
+static data) */
+static struct mcc_syntax_tables
+{
+    byte colors[MCC_SYNTAX_CAPACITY];
+    byte edges[MCC_SYNTAX_CAPACITY];
+    unsigned short stack[MCC_SYNTAX_CAPACITY];
+    byte seen[MCC_SYNTAX_CAPACITY];
+} *mcc_syntax_storage;
+
+static struct mcc_syntax_tables *mcc_syntax_storage_get(void)
+{
+    if (!mcc_syntax_storage && !(mcc_syntax_storage = calloc(1, sizeof(*mcc_syntax_storage))))
+        abort();
+    return mcc_syntax_storage;
+}
+#define mcc_syntax_colors (mcc_syntax_storage_get()->colors)
+#define mcc_syntax_edges (mcc_syntax_storage_get()->edges)
+#define mcc_syntax_stack (mcc_syntax_storage_get()->stack)
+#define mcc_syntax_seen (mcc_syntax_storage_get()->seen)
 
 static struct hs_syntax_node const *mcc_syntax_node(
     struct data_array const *syntax, long handle)
@@ -129,7 +148,7 @@ boolean mcc_syntax_functions_check(struct scenario *scenario, struct data_array 
     char const *name, *first_name = NULL, *first_owner = NULL;
     if (!mcc_cache_tags_loaded()) return FALSE;
     for (i = 0; i < scenario->hs_scripts.count; ++i) {
-        struct hs_script const *script = (struct hs_script const *)scenario->hs_scripts.address + i;
+        struct hs_script const *script = (struct hs_script const *)TAG_BLOCK_ADDRESS(scenario->hs_scripts) + i;
         if (!mcc_syntax_expression_valid(syntax, script->root_expression_index, script->return_type,
             node_refusal, &name)) {
             BIT_VECTOR_SET_FLAG(disabled_scripts, i, TRUE);
@@ -140,7 +159,7 @@ boolean mcc_syntax_functions_check(struct scenario *scenario, struct data_array 
         }
     }
     for (i = 0; i < scenario->hs_globals.count; ++i) {
-        struct hs_global const *global = (struct hs_global const *)scenario->hs_globals.address + i;
+        struct hs_global const *global = (struct hs_global const *)TAG_BLOCK_ADDRESS(scenario->hs_globals) + i;
         if (!mcc_syntax_expression_valid(syntax, global->initialization_expression_index, global->type,
             node_refusal, &name)) {
             BIT_VECTOR_SET_FLAG(disabled_globals, i, TRUE);

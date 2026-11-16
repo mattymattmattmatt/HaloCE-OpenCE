@@ -1,6 +1,9 @@
-/* MCC pixels already live in immutable, independently owned storage. Keep
- * their GPU copies here rather than staging them through the Xbox LRU heap.
- * A header's exact registered identity, never its Data word, grants access. */
+/* MCC pixels already live in immutable, independently owned storage. Their
+ * GPU copies are the renderer's (xgpu_mcc_texture_*: xbox_textures.c for
+ * OpenGL, and the Vulkan and deko3d texture caches), never staged through the
+ * Xbox LRU heap. A header's exact registered identity, never its Data word,
+ * grants access. This registry draws nothing itself, so it is in every
+ * renderer's image. */
 #include "xgpu.h"
 #include "mcc_texture_bridge.h"
 #include "hud_hires.h"
@@ -16,10 +19,6 @@ struct mcc_gpu_texture {
     DWORD header[5];
     void const *pixels;
     unsigned long bytes;
-    GLuint texture;
-    D3DCOLOR palette[256];
-    BOOL palette_present;
-    GLenum target;
     struct xgpu_texture_description description;
     long hud_asset;
 };
@@ -117,8 +116,6 @@ static void *mcc_texture_register(void const *bitmap,unsigned long format,
     entry->bitmap=bitmap;entry->pixels=pixels;entry->bytes=bytes;
     entry->description=description;
     entry->hud_asset=mcc_hud_texture_asset(&description,pixels,bytes);
-    entry->target=description.cube_map ? GL_TEXTURE_CUBE_MAP :
-        description.depth>1 ? GL_TEXTURE_3D : GL_TEXTURE_2D;
     entry->header[0]=D3DCOMMON_TYPE_TEXTURE|1;
     /* Outside the guest physical arena and never dereferenced. The device
      * requires nonzero Data; the exact header registry resolves this token. */
@@ -154,44 +151,20 @@ BOOL xgpu_mcc_texture_describe(DWORD const *resource,struct xgpu_texture_descrip
     return FALSE;
 }
 
-BOOL xgpu_mcc_texture_get(DWORD const *resource,D3DCOLOR const *palette,
-    GLuint *texture,GLenum *target,struct xgpu_texture_description *description)
+/* A registered header's pixels, description and stock HUD replacement (-1:
+ * none), for the renderer to make its copy from. FALSE for any other header. */
+BOOL mcc_texture_bridge_source(DWORD const *resource,void const **pixels,unsigned long *bytes,
+    struct xgpu_texture_description *description,long *hud_asset)
 {
     struct mcc_gpu_texture *entry;
     /* Resource identity is checked without dereferencing arbitrary addresses;
      * hardware and bitmap lookups both use independent MCC hash tables. */
-    for (entry=mcc_gpu_hardware[mcc_texture_bucket(resource)];entry;entry=entry->hardware_next) {
-        if (entry->header!=resource) continue;
-        *description=entry->description;*target=entry->target;
-        if (entry->hud_asset>=0 && config_boolean("display.high_res_hud")) {
-            GLuint replacement=hud_hires_override_texture(entry->hud_asset,&description->levels);
-            if (replacement) {
-                description->hires=TRUE;*texture=replacement;
-                return TRUE;
-            }
-            /* Allocation/upload failure retains the original descriptor. */
-            *description=entry->description;
+    for (entry=mcc_gpu_hardware[mcc_texture_bucket(resource)];entry;entry=entry->hardware_next)
+        if (entry->header==resource) {
+            *pixels=entry->pixels;*bytes=entry->bytes;
+            *description=entry->description;*hud_asset=entry->hud_asset;
+            return TRUE;
         }
-        if (entry->texture && entry->description.format==0x0b &&
-            (entry->palette_present!=(palette!=NULL) ||
-             (palette && memcmp(entry->palette,palette,sizeof(entry->palette))))) {
-            glDeleteTextures(1,&entry->texture);entry->texture=0;xgpu_gl_state_invalidate();
-        }
-        if (!entry->texture) {
-            GLuint created=0;
-            glGenTextures(1,&created);
-            if (created && xgpu_mcc_texture_upload(created,entry->target,
-                &entry->description,entry->pixels,entry->bytes,palette)) {
-                entry->texture=created;
-                entry->palette_present=palette!=NULL;
-                if (palette && entry->description.format==0x0b)
-                    memcpy(entry->palette,palette,sizeof(entry->palette));
-            }
-            else if (created) {glDeleteTextures(1,&created);xgpu_gl_state_invalidate();}
-        }
-        *texture=entry->texture;
-        return TRUE;
-    }
     return FALSE;
 }
 
@@ -205,7 +178,7 @@ void mcc_texture_bridge_dispose(void)
         while (entry) {
             struct mcc_gpu_texture *next=entry->next;
             xgpu_mcc_texture_unbind(entry->header);
-            if (entry->texture) {glDeleteTextures(1,&entry->texture);xgpu_gl_state_invalidate();}
+            xgpu_mcc_texture_forget(entry->header);
             free(entry);entry=next;
         }
     }
@@ -213,17 +186,15 @@ void mcc_texture_bridge_dispose(void)
 
 unsigned long mcc_texture_bridge_prepare(void const *bitmap, unsigned long budget)
 {
-#ifndef HALO_GLES
     struct mcc_gpu_texture *entry;
     for (entry=mcc_gpu_textures[mcc_texture_bucket(bitmap)];entry;entry=entry->next) {
         struct xgpu_texture_description const *description=&entry->description;
         unsigned long long estimate=0;
         unsigned long width,height,depth,level;
-        GLuint created=0;
         if (entry->bitmap!=bitmap) continue;
         /* Paletted textures need their draw's palette. HUD replacements are
          * independently owned and must not be charged to this budget. */
-        if (entry->texture || description->format==0x0b ||
+        if (description->format==0x0b ||
             (entry->hud_asset>=0 && config_boolean("display.high_res_hud"))) return 0;
         width=description->width;height=description->height;depth=description->depth;
         if (!width || !height || !depth || !description->levels || description->levels>14) return 0;
@@ -238,17 +209,9 @@ unsigned long mcc_texture_bridge_prepare(void const *bitmap, unsigned long budge
             }
         }
         if (estimate<256*1024 || estimate>budget) return 0;
-        glGenTextures(1,&created);
-        if (created && xgpu_mcc_texture_upload(created,entry->target,description,entry->pixels,entry->bytes,NULL)) {
-            entry->texture=created;entry->palette_present=FALSE;
-            return (unsigned long)estimate;
-        }
-        if (created) glDeleteTextures(1,&created);
-        xgpu_gl_state_invalidate();
-        return 0;
+        /* (the renderer's copy made now, while the map loads; FALSE where it
+         * has one already, or makes its copies at their first draw) */
+        return xgpu_mcc_texture_prepare(entry->header) ? (unsigned long)estimate : 0;
     }
-#else
-    (void)bitmap;(void)budget;
-#endif
     return 0;
 }

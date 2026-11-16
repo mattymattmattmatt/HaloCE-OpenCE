@@ -25,14 +25,14 @@ cube), so the view's type always matches the shader's sampler.
 
 /* ---------- barriers */
 
-/* a full barrier (all commands to all commands, memory read and write) from one layout to another, outside a rendering */
+/* a barrier from one layout to another, outside a rendering (host_vk_barrier_scope's stages and accesses) */
 static void image_barrier(VkCommandBuffer command, VkImage image, VkImageAspectFlags aspect, uint32_t levels,
 	uint32_t layers, VkImageLayout from, VkImageLayout to)
 {
 	VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+	VkPipelineStageFlags source_stage, destination_stage;
 
-	barrier.srcAccessMask = from == VK_IMAGE_LAYOUT_UNDEFINED ? 0 : VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-	barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+	host_vk_barrier_scope(from, to, &source_stage, &barrier.srcAccessMask, &destination_stage, &barrier.dstAccessMask);
 	barrier.oldLayout = from;
 	barrier.newLayout = to;
 	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -41,8 +41,7 @@ static void image_barrier(VkCommandBuffer command, VkImage image, VkImageAspectF
 	barrier.subresourceRange.aspectMask = aspect;
 	barrier.subresourceRange.levelCount = levels;
 	barrier.subresourceRange.layerCount = layers;
-	vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0, NULL,
-		1, &barrier);
+	vkCmdPipelineBarrier(command, source_stage, destination_stage, 0, 0, NULL, 0, NULL, 1, &barrier);
 }
 
 /* ---------- the dummies */
@@ -207,6 +206,11 @@ static VkSampler sampler_get(const struct vk_sampler_state *state)
 
 #define POOL_SETS 512
 
+/* the dynamic lighting's fields' set for the images named last: one a frame until they change */
+static struct host_vk_frame *plasma_set_frame;
+static VkDescriptorSet plasma_set;
+static VkImageView plasma_set_views[2];
+
 void host_vk_draw_frame_reset(struct host_vk_frame *frame)
 {
 	unsigned index;
@@ -214,11 +218,13 @@ void host_vk_draw_frame_reset(struct host_vk_frame *frame)
 	for (index = 0; index < frame->pool_count; index++)
 		HOST_VK_CHECK(vkResetDescriptorPool(B.device, frame->pools[index], 0));
 	host_vk_texture_frame_reset((unsigned)(frame - B.frames));
+	host_vk_static_frame_reset((unsigned)(frame - B.frames));
 	frame->pool_current = 0;
+	plasma_set_frame = NULL;
 }
 
-/* a descriptor set of the draws' layout, from the frame's pools (a new one when they are full) */
-static VkDescriptorSet set_allocate(struct host_vk_frame *frame)
+/* a descriptor set of a layout, the draws' or the dynamic lighting's, from the frame's pools (a new one when they are full) */
+static VkDescriptorSet set_allocate(struct host_vk_frame *frame, VkDescriptorSetLayout layout)
 {
 	for (;;)
 	{
@@ -230,7 +236,7 @@ static VkDescriptorSet set_allocate(struct host_vk_frame *frame)
 
 			info.descriptorPool = frame->pools[frame->pool_current];
 			info.descriptorSetCount = 1;
-			info.pSetLayouts = &B.draw_set_layout;
+			info.pSetLayouts = &layout;
 			result = vkAllocateDescriptorSets(B.device, &info, &set);
 			if (result == VK_SUCCESS)
 				return set;
@@ -272,6 +278,58 @@ static VkDescriptorSet set_allocate(struct host_vk_frame *frame)
 			frame->pools[frame->pool_count++] = pool;
 		}
 	}
+}
+
+/* the set of the fields a model variant with occlusion reads. A field that is not there is the 3D dummy, which the shader
+does not read (its slot's plasma_model parameter is 0) but Vulkan has to have */
+static VkDescriptorSet plasma_set_get(struct host_vk_frame *frame)
+{
+	VkDescriptorImageInfo images[2];
+	VkWriteDescriptorSet writes[2];
+	struct vk_sampler_state state;
+	VkImageView views[2];
+	VkSampler sampler;
+	int index;
+
+	for (index = 0; index < 2; index++)
+	{
+		const struct host_vk_image *image = host_vk_image_get(B.plasma_images[index]);
+
+		views[index] = image && image->kind == VK_IMAGE_3D ? image->view : dummies.view[1];
+	}
+	if (plasma_set_frame == frame && plasma_set && !memcmp(plasma_set_views, views, sizeof(views)))
+		return plasma_set;
+	memset(&state, 0, sizeof(state));
+	state.min_filter = state.mag_filter = 1;
+	state.address[0] = state.address[1] = state.address[2] = 2; /* clamp to edge */
+	sampler = sampler_get(&state);
+	plasma_set = sampler ? set_allocate(frame, B.plasma_set_layout) : VK_NULL_HANDLE;
+	if (!plasma_set)
+		return VK_NULL_HANDLE;
+	memset(writes, 0, sizeof(writes));
+	for (index = 0; index < 2; index++)
+	{
+		images[index].sampler = sampler;
+		images[index].imageView = views[index];
+		images[index].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writes[index].dstSet = plasma_set;
+		writes[index].dstBinding = VK_PLASMA_BINDING_TEXTURE0 + index;
+		writes[index].descriptorCount = 1;
+		writes[index].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		writes[index].pImageInfo = &images[index];
+	}
+	vkUpdateDescriptorSets(B.device, 2, writes, 0, NULL);
+	plasma_set_frame = frame;
+	memcpy(plasma_set_views, views, sizeof(views));
+	return plasma_set;
+}
+
+/* VK_COMMAND_PLASMA_OCCLUSION */
+void host_vk_plasma_occlusion_command(const struct vk_command_plasma_occlusion *command)
+{
+	B.plasma_images[0] = command->images[0];
+	B.plasma_images[1] = command->images[1];
 }
 
 /* ---------- render targets as textures, and the mip composite */
@@ -319,12 +377,12 @@ static unsigned dimension(unsigned base, unsigned level)
 static void level_barrier(VkCommandBuffer command, struct composite *composite, unsigned level, VkImageLayout to)
 {
 	VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+	VkPipelineStageFlags source_stage, destination_stage;
 
 	if (composite->layout[level] == to)
 		return;
-	barrier.srcAccessMask = composite->layout[level] == VK_IMAGE_LAYOUT_UNDEFINED ? 0 :
-		VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-	barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+	host_vk_barrier_scope(composite->layout[level], to, &source_stage, &barrier.srcAccessMask, &destination_stage,
+		&barrier.dstAccessMask);
 	barrier.oldLayout = composite->layout[level];
 	barrier.newLayout = to;
 	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -334,8 +392,7 @@ static void level_barrier(VkCommandBuffer command, struct composite *composite, 
 	barrier.subresourceRange.baseMipLevel = level;
 	barrier.subresourceRange.levelCount = 1;
 	barrier.subresourceRange.layerCount = 1;
-	vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0, NULL,
-		1, &barrier);
+	vkCmdPipelineBarrier(command, source_stage, destination_stage, 0, 0, NULL, 0, NULL, 1, &barrier);
 	composite->layout[level] = to;
 }
 
@@ -526,7 +583,7 @@ void host_vk_command_draw(const struct vk_command_draw *draw, uint32_t size)
 		skipped(&B.counts.draws_skipped_other, "more bindings than a draw can have");
 		return;
 	}
-	pipeline = host_vk_pipeline_find(draw->vertex_shader, draw->pixel_shader, &draw->state);
+	pipeline = host_vk_pipeline_find(draw->vertex_shader, draw->pixel_shader, &draw->state, draw->plasma_occlusion != 0);
 	if (!pipeline)
 		return;
 	if (!B.color && !B.depth)
@@ -641,7 +698,7 @@ void host_vk_command_draw(const struct vk_command_draw *draw, uint32_t size)
 	command = host_vk_frame_command();
 	/* a visibility test being made counts this draw's samples */
 	host_vk_visibility_draw(command);
-	set = set_allocate(frame);
+	set = set_allocate(frame, B.draw_set_layout);
 	if (!set)
 	{
 		B.counts.draws_skipped_other++;
@@ -687,6 +744,17 @@ void host_vk_command_draw(const struct vk_command_draw *draw, uint32_t size)
 
 	vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 	vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS, B.draw_layout, 0, 1, &set, 0, NULL);
+	if (draw->plasma_occlusion)
+	{
+		VkDescriptorSet fields = plasma_set_get(frame);
+
+		if (!fields)
+		{
+			B.counts.draws_skipped_other++;
+			return;
+		}
+		vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS, B.plasma_layout, VK_PLASMA_SET, 1, &fields, 0, NULL);
+	}
 
 	/* the viewport in the target's pixels with a negative height (y from the bottom of its rectangle, the height negated:
 	Vulkan 1.1's rule): the one place the picture is turned, since the shaders make Direct3D's clip space. Set with the

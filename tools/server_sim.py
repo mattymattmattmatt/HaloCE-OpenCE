@@ -204,6 +204,11 @@ LOADOUT_WEAPONS = ["none", "random", "assault_rifle", "pistol", "shotgun", "snip
                    "plasma_pistol", "plasma_rifle", "needler"]
 
 
+# (team_vehicles' and blue_team_vehicles' words: server_rotation.c's)
+TEAM_VEHICLES = ["gametype", "pc", "custom", "default", "none", "warthogs", "ghosts", "scorpions", "rocket_warthogs",
+                 "banshees", "gun_turrets"]
+
+
 def _field(table, key, kind, description, engine="all", alias=None, low=None, high=None, choices=None):
     if kind == "boolean":
         low, high = None, None
@@ -252,7 +257,7 @@ SCHEMA = [
     _field("options", "secondary_weapon", "choice", "A custom loadout's second weapon", choices=LOADOUT_WEAPONS),
     _field("options", "no_map_weapons", "boolean", "No weapons lie on the map"),
     _field("options", "team_vehicles", "choice", "Each team's vehicles: the vehicle set's (gametype), every one the "
-           "map places (pc), or the counts below (custom)", choices=["gametype", "pc", "custom"]),
+           "map places (pc), the counts below (custom), or a vehicle set by its name", choices=TEAM_VEHICLES),
     _field("options", "warthogs", "integer", "Warthogs of each team, with team_vehicles custom", low=0, high=4),
     _field("options", "ghosts", "integer", "Ghosts of each team, with team_vehicles custom", low=0, high=4),
     _field("options", "scorpions", "integer", "Scorpions of each team, with team_vehicles custom", low=0, high=4),
@@ -260,6 +265,17 @@ SCHEMA = [
            high=4),
     _field("options", "banshees", "integer", "Banshees of each team, with team_vehicles custom", low=0, high=4),
     _field("options", "gun_turrets", "integer", "Gun turrets of each team, with team_vehicles custom", low=0, high=4),
+    _field("options", "blue_team_vehicles", "choice", "Blue's vehicles, when they are not red's: as team_vehicles",
+           choices=TEAM_VEHICLES),
+    _field("options", "blue_warthogs", "integer", "Blue's Warthogs, with blue_team_vehicles custom", low=0, high=4),
+    _field("options", "blue_ghosts", "integer", "Blue's Ghosts, with blue_team_vehicles custom", low=0, high=4),
+    _field("options", "blue_scorpions", "integer", "Blue's Scorpions, with blue_team_vehicles custom", low=0, high=4),
+    _field("options", "blue_rocket_warthogs", "integer", "Blue's Rocket Warthogs, with blue_team_vehicles custom",
+           low=0, high=4),
+    _field("options", "blue_banshees", "integer", "Blue's Banshees, with blue_team_vehicles custom", low=0, high=4),
+    _field("options", "blue_gun_turrets", "integer", "Blue's gun turrets, with blue_team_vehicles custom", low=0,
+           high=4),
+    _field("options", "force_team_spawns", "boolean", "Team games spawn each team on its own side, as CTF"),
     _field("options", "hardcore", "boolean", "Hardcore: no motion sensor, no aim assist, a kill restores the "
            "killer's health and shields"),
     _field("ctf", "assault", "boolean", "One team defends the flag, the other attacks", engine="ctf"),
@@ -334,7 +350,7 @@ def default_settings():
         _setting("network.map_share", "boolean", True, "Hosting: send a player who joins without the game's Custom "
                  "Edition map the map.", "HALO_NET_MAP_SHARE"),
         _setting("network.map_share_upload", "integer", 1024, "Hosting: the most kilobytes a second the host sends "
-                 "of maps (16 to 20480).", "HALO_NET_MAP_SHARE_UPLOAD", low=16, high=20480),
+                 "of maps (16 to 256000).", "HALO_NET_MAP_SHARE_UPLOAD", low=16, high=256000),
         _setting("network.coop_friendly_fire", "string", "on", "Whether the players of an online co-op game hurt "
                  "each other.", "HALO_NET_COOP_FRIENDLY_FIRE", choices=["off", "on", "shields_only", "explosives_only"]),
         _setting("network.coop_ally_friendly_fire", "boolean", True, "Whether the players of an online co-op game "
@@ -1083,7 +1099,7 @@ class Sim:
         if not found:
             entry["rejected"] = {
                 "name": f"there is no map {name} (maps/{name}.map, custom_maps/{name}.map)",
-                "custom": f"there is no Custom Edition map {name} (custom_maps/{name}.map)",
+                "custom": f"there is no map {name} in custom_maps (custom_maps/{name}.map)",
                 "path": f"there is no map file maps/{name}.map for {map_text}"}[kind]
             return entry
         entry["level"] = found[0] if kind != "path" else map_text

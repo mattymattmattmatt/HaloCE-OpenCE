@@ -4265,7 +4265,7 @@ static void refresh_listener(
 	{
 		/* port: a replay's playback listens from its view, local player 0's,
 		who has no player (port/linux/game/network_replay_playback.c) */
-		struct observer_result const *replay_camera = local_player_index == 0 && network_replay_playing() ?
+		struct observer_result const *replay_camera = local_player_index == 0 && network_replay_viewing() ?
 			network_replay_camera() : NULL;
 
 		listener = listener_get(local_player_index);

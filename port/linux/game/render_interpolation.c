@@ -48,6 +48,7 @@ tick, such as a nav marker, is moved as far as the object is drawn from there
 #include "render/render_cameras.h"
 #include "units/units.h"
 #include "biped_ragdoll.h"
+#include "plasma_lighting.h" /* port: port/linux/game/plasma_lighting.c */
 #include "vehicle_riding.h"
 
 /* port/linux/src/port_config.c */
@@ -126,6 +127,9 @@ struct interpolated_object
 	/* ... the two snapshots' rotations, found when first blended */
 	struct interpolation_rotation *rotations;
 	boolean rotations_valid[2];
+	/* port: both snapshots hold the same pose, so it is drawn as it is, and a tick
+	that finds it there again copies nothing (scenery, a parked vehicle, a body) */
+	boolean still;
 };
 
 struct interpolated_camera
@@ -438,6 +442,8 @@ void render_interpolation_tick(void)
 		short node_count = (short)(object->object.node_matrices.size / (short)sizeof(real_matrix4x3));
 		boolean continuing;
 		real_matrix4x3 *drawn;
+		real_matrix4x3 const *source;
+		boolean unchanged;
 
 		if (absolute_index >= MAXIMUM_INTERPOLATED_OBJECTS)
 			continue;
@@ -471,25 +477,32 @@ void render_interpolation_tick(void)
 		continuing = record->object_index == iterator.index &&
 			record->node_count == node_count &&
 			record->tick == previous_tick;
+		/* (a body the host of a network game only draws as a ragdoll, as
+		it lies: biped_ragdoll.c) */
+		drawn = TEST_FLAG(object->object.damage_flags, _object_dead_bit) ?
+			biped_ragdoll_drawn_nodes(iterator.index) : NULL;
+		source = drawn ? drawn : object_get_node_matrices(iterator.index);
+		/* port: the pose it was in at the last tick, exactly */
+		unchanged = continuing && !memcmp(record->nodes + record->latest * record->node_capacity, source,
+			node_count * sizeof(real_matrix4x3));
 		if (continuing)
-		{
-			record->latest ^= 1;
 			correction_advance(&record->correction, &record->correction_pending);
-		}
 		else
 		{
 			record->correction = *global_zero_vector3d;
 			record->correction_pending = *global_zero_vector3d;
 		}
-		/* (a body the host of a network game only draws as a ragdoll, as
-		it lies: biped_ragdoll.c) */
-		drawn = TEST_FLAG(object->object.damage_flags, _object_dead_bit) ?
-			biped_ragdoll_drawn_nodes(iterator.index) : NULL;
-		memcpy(
-			record->nodes + record->latest * record->node_capacity,
-			drawn ? drawn : object_get_node_matrices(iterator.index),
-			node_count * sizeof(real_matrix4x3));
+		if (unchanged && record->still)
+		{
+			record->tick = interpolation_tick;
+			record->blended_frame = NONE;
+			continue;
+		}
+		if (continuing)
+			record->latest ^= 1;
+		memcpy(record->nodes + record->latest * record->node_capacity, source, node_count * sizeof(real_matrix4x3));
 		record->rotations_valid[record->latest] = FALSE;
+		record->still = unchanged;
 		record->object_index = iterator.index;
 		record->node_count = node_count;
 		record->tick = interpolation_tick;
@@ -525,12 +538,14 @@ void render_interpolation_frame_begin(void)
 	interpolation_drawing = TRUE;
 	interpolation_frame++;
 	interpolation_fraction = game_time_get_tick_fraction();
+	plasma_lighting_frame_begin();
 }
 
 void render_interpolation_frame_end(void)
 {
 	interpolation_rendering = FALSE;
 	interpolation_drawing = FALSE;
+	plasma_lighting_frame_end();
 }
 
 real render_interpolation_fraction(void)
@@ -572,7 +587,8 @@ static real_matrix4x3 *interpolated_object_node_matrices(long object_index)
 		real_matrix4x3 *blended = record->nodes + 2 * record->node_capacity;
 		short node_index;
 		/* (so written that a position not a number snaps) */
-		boolean snap = !(distance_squared(&previous[0].position, &latest[0].position) <=
+		/* (a still one's two poses are the same: drawn as it is, unblended) */
+		boolean snap = record->still || !(distance_squared(&previous[0].position, &latest[0].position) <=
 			OBJECT_SNAP_DISTANCE * OBJECT_SNAP_DISTANCE);
 
 		/* a node moved further in the root's frame than a tick allows: the
@@ -734,17 +750,11 @@ static struct observer_result const *render_interpolation_blended_camera(
 turns every frame (player_control.c), but the observer keeps it as of the
 last tick and the blend above draws it a tick later still. On foot, the view
 points where the player aims now (display.direct_camera). In a vehicle's
-seat or a cinematic the view is the seat's or the script's: left as it is.
-Desktop only: display.direct_camera is not an Android setting, and its
-default would otherwise apply there. */
+seat or a cinematic the view is the seat's or the script's: left as it is. */
 static struct observer_result const *render_interpolation_direct_camera(
 	short local_player_index,
 	struct observer_result const *observer)
 {
-#ifdef HALO_ANDROID
-	(void)local_player_index;
-	return observer;
-#else
 	static int enabled;
 	static unsigned long read_at = (unsigned long)-1;
 	struct observer_result *direct;
@@ -783,7 +793,6 @@ static struct observer_result const *render_interpolation_direct_camera(
 	}
 	observer_up_from_forward(&direct->forward, &direct->up);
 	return direct;
-#endif
 }
 
 struct observer_result const *render_interpolation_camera(

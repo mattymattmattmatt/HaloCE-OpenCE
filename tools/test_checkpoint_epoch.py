@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 from harness import enum_with, function, structure
-from test_hud_button_style import run_c
+from c_runner import run_c
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -28,6 +28,12 @@ typedef float real;
 #define TRUE 1
 #define FALSE 0
 #define NONE -1
+/* (this fork's network replays, network_replay.h: none records or plays here) */
+enum {_network_replay_datagram=1,_network_replay_reliable,_network_replay_reliable_to_machine};
+static boolean network_replay_skips_message(byte type){(void)type;return FALSE;}
+static void network_replay_record(byte kind,void const *data,long size){(void)kind;(void)data;(void)size;}
+static void network_replay_stop(void){}
+static struct {boolean valid;long recorder;} distributed_machines={FALSE,NONE};
 #define csmemcpy memcpy
 #define csmemset memset
 #define HALO_PORT_MAXIMUM_NETWORK_MACHINES 4
@@ -250,7 +256,7 @@ static void distributed_batch_add(short sender,void const *message,word size,wor
 #define network_distributed_client_send_reliably(m,s) distributed_batch_add(HOST_SENDER,m,s,0)
 #define network_distributed_server_send_to_machine_reliably(i,m,s) distributed_batch_add(i,m,s,0)
 '''
-    for name in ("distributed_fill_header", "distributed_entry_size", "distributed_send",
+    for name in ("distributed_fill_header", "distributed_entry_size", "distributed_viewing_machines", "distributed_send",
                  "distributed_send_to_machine", "distributed_send_to_machine_reliably",
                  "distributed_packer_flush"):
         code += function(source, name)
@@ -307,7 +313,6 @@ static int distributed_sends[2],distributed_host_states[2],distributed_host_acti
 static int distributed_sent_statistics[2],distributed_statistics_cursor,distributed_statistics_due;
 static long distributed_game_state_checksum,distributed_game_state_time,distributed_host_update_number;
 static long distributed_sent_structure_bsp_index,distributed_pickup_count;
-static struct {boolean valid;} distributed_machines;
 static struct {long flags,unit_index,vehicle_index,seat_index;} distributed_sent_units[2];
 static long distributed_player_machines[2];
 static struct {long taken_time[2],taken_host_time[2],input_time[2];} distributed_divergence;

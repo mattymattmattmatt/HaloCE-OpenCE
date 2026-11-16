@@ -10,6 +10,7 @@
 #include "units/units.h"
 #include "network_distributed.h"
 #include <math.h>
+#include <stdlib.h>
 
 struct mcc_network_inventory {
     long unit;
@@ -23,8 +24,23 @@ struct mcc_network_history {
     long changed[2];
     long sent;
 };
-static struct mcc_network_history mcc_network_sent[MAXIMUM_TRACKED_OBJECTS];
-static struct mcc_network_history mcc_network_own[MAXIMUM_TRACKED_OBJECTS];
+/* (allocated at the first use, zeroed as static data is: the guest images,
+whose code and data have to fit below 0x40000000, have no room for it as
+static data) */
+static struct mcc_network_histories
+{
+    struct mcc_network_history sent[MAXIMUM_TRACKED_OBJECTS];
+    struct mcc_network_history own[MAXIMUM_TRACKED_OBJECTS];
+} *mcc_network_storage;
+
+static struct mcc_network_histories *mcc_network_storage_get(void)
+{
+    if (!mcc_network_storage && !(mcc_network_storage = calloc(1, sizeof(*mcc_network_storage))))
+        abort();
+    return mcc_network_storage;
+}
+#define mcc_network_sent (mcc_network_storage_get()->sent)
+#define mcc_network_own (mcc_network_storage_get()->own)
 static long mcc_network_last_tick = NONE;
 
 void mcc_network_new_game(void)

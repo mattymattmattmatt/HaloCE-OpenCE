@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, mutated, read, run  # noqa: E402
 
 CASES = [
-    "names", "custom-maps", "paths", "gametypes", "rules", "whitespace-comments", "quotes", "long", "ui",
+    "names", "custom-maps", "mcc-maps", "paths", "gametypes", "rules", "whitespace-comments", "quotes", "long", "ui",
     "rotation-separators", "rotation-limits", "round-trip", "rule-find", "rule-values", "check-kind", "map-header",
     "resolve", "maps-each",
     "long-map-level",
@@ -21,6 +21,8 @@ CASES = [
     "resolve-case",
     "riding-rule",
     "riding-coop-entry",
+    "saved-gametypes",
+    "resolve-subfolder",
 ]
 
 # a fault in server_rotation.c and the case that must catch it
@@ -32,8 +34,11 @@ NEGATIVE_CONTROLS = {
     "long-map-cut": (("if (map_length >= sizeof(entry->map))", "if (map_length > sizeof(entry->map))"), "long"),
     "long-gametype-cut": (("gametype_length >= sizeof(entry->gametype)", "gametype_length > sizeof(entry->gametype)"),
                           "gametypes"),
-    "file-names-unchecked": (('!plain_name(!strncmp(gametype, "file=", 5) ? gametype + 5 : gametype)',
-                              '!plain_name(gametype)'), "gametypes"),
+    "file-names-unchecked": (('plain_name(!strncmp(gametype, "file=", 5) ? gametype + 5 : gametype)',
+                              'plain_name(gametype)'), "gametypes"),
+    "saved-names-unchecked": (('? saved_name(gametype + 6) :', '? 1 :'), "saved-gametypes"),
+    "saved-case-lost": (('if (strncmp(gametype, "saved=", 6))\n\t\t{', 'if (1)\n\t\t{'), "saved-gametypes"),
+    "subfolders-unsearched": (("found = map_file(nested, name, path, size);", "found = 0;"), "resolve-subfolder"),
     "ui-played": (('if (!strcmp(entry->map_name, "ui"))', "if (0)"), "ui"),
     "rule-twice-counted": (("&& strcmp(entry->rules[existing].key, definition->key);", ";"), "rules"),
     "rule-untrimmed": (("while (key_end > rule && is_space(key_end[-1]))", "while (0)"), "rules"),

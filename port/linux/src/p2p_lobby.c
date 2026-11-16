@@ -512,9 +512,11 @@ static void update_hosting(const unsigned char *token, int player_count, int max
 {
 	/* (a dedicated server is listed by the master servers, not among the
 	games players host: server_master.c; server.list_on_brokers, until
-	there are masters, lists it here too) */
+	there are masters, lists it here too. Hosting from the menus is listed
+	here as a player's game is: a console has no publisher key for the
+	masters, and was listed nowhere) */
 	int want = token && lobby.public && config_boolean("network.public_lobby") &&
-		(!halo_server_mode() || config_boolean("server.list_on_brokers"));
+		(!halo_server_headless() || config_boolean("server.list_on_brokers"));
 
 	lobby.hosting_token_valid = token != NULL;
 	if (token)
@@ -1360,7 +1362,7 @@ int p2p_lobby_brokers_reached(void)
 
 static const char *const sort_names[NUMBER_OF_P2P_LOBBY_SORTS] =
 {
-	"servers", "players", "name", "map", "type", "locked",
+	"servers", "players", "name", "map", "type", "locked", "ping",
 };
 
 int p2p_lobby_filter(struct p2p_listing *games, int count, const struct p2p_lobby_choices *choices,
@@ -1429,6 +1431,10 @@ static int sort_order(const struct p2p_listing *first, const struct p2p_listing 
 	case P2P_LOBBY_SORT_LOCKED:
 		difference = second->locked - first->locked;
 		break;
+	case P2P_LOBBY_SORT_PING:
+		/* (those with none known go after these: p2p_lobby_sort) */
+		difference = first->ping - second->ping;
+		break;
 	case P2P_LOBBY_SORT_SERVERS:
 		/* (as p2p_lobby_games has them: then those joining has not failed,
 		and the open ones) */
@@ -1444,6 +1450,16 @@ static int sort_order(const struct p2p_listing *first, const struct p2p_listing 
 	return difference ? difference : text_order(first->name, second->name);
 }
 
+/* where a game goes whichever way the order is: those of another network
+version last, and by ping, those whose ping is not known yet (not timed, or
+a password's, whose host is not) after those whose is */
+static int sort_group(const struct p2p_listing *game, int order)
+{
+	if (game->network_version != HALO_PORT_NETWORK_VERSION)
+		return 2;
+	return order == P2P_LOBBY_SORT_PING && game->ping < 0;
+}
+
 void p2p_lobby_sort(struct p2p_listing *games, int count, int order, int reverse)
 {
 	int index;
@@ -1452,16 +1468,16 @@ void p2p_lobby_sort(struct p2p_listing *games, int count, int order, int reverse
 	for (index = 1; index < count; index++)
 	{
 		struct p2p_listing game = games[index];
-		int other_version = game.network_version != HALO_PORT_NETWORK_VERSION;
+		int group = sort_group(&game, order);
 		int place = index;
 
 		while (place > 0)
 		{
 			const struct p2p_listing *before = &games[place - 1];
-			int before_other = before->network_version != HALO_PORT_NETWORK_VERSION;
+			int before_group = sort_group(before, order);
 			int difference = sort_order(before, &game, order);
 
-			if (before_other != other_version ? !before_other : (reverse ? -difference : difference) <= 0)
+			if (before_group != group ? before_group < group : (reverse ? -difference : difference) <= 0)
 				break;
 			games[place] = games[place - 1];
 			place--;

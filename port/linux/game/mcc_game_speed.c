@@ -35,7 +35,7 @@ boolean mcc_game_speed_global(word designator)
     if (!mcc_cache_tags_loaded() || (designator&0x8000)) return FALSE;
     scenario=global_scenario_get();
     if (!scenario || designator>=scenario->hs_globals.count) return FALSE;
-    global=(struct hs_global const *)scenario->hs_globals.address+designator;
+    global=(struct hs_global const *)TAG_BLOCK_ADDRESS(scenario->hs_globals)+designator;
     return global->type==_hs_type_real && memchr(global->name,0,sizeof(global->name)) &&
         !csstrcasecmp(global->name,"game_speed_value");
 }

@@ -129,10 +129,13 @@ complete map/required resource contents must match the host. Optional
 required.
 
 A package from the Steam Workshop can say which item it is, so a joiner who
-cannot match the host's map is told what to do. The item is the package folder
-when Steam's own name (the item id, all digits) is kept, or a `workshop_id.txt`
-in the folder: the id on the first line and, optionally, the title on the
-second. The host sends the id and title in the map name's reserved tail
+cannot match the host's map is told what to do. The item is a `workshop_id.txt`
+in the folder (the id on the first line and, optionally, the title on the
+second), or the package folder when Steam's own name (the item id, all digits)
+is kept, or else the `ModIdentifier.HostedModIds.SteamWorkshopId` that MCC's
+tools write into the package's `ModInfo.json` (a number or a string, not 0, with
+`Title.Neutral` as its title), so a package copied in under a name of its own
+is still known. The host sends the id and title in the map name's reserved tail
 (`mcc_workshop.c`). The original fork introduced this advisory extension under
 MCC protocol 64. The upstream contribution uses one shared OpenCE protocol, 42,
 including MCC content/metadata digests and checkpoint lifetime fencing; see the
@@ -936,6 +939,21 @@ the conditional `sleep` calls used in shipped and Ruby campaign scripts.
 It does not call `core_save_name`: that Xbox function writes a raw debug
 save, and remains unchanged and unavailable to map scripts.
 
+An MCC campaign mission's scripts may call `map_name`, which H1A custom
+campaigns use to end a mission and load the next: `(map_name "x05_captured")`
+names a mission of the same package (`mcc_maps\<package>\x05_captured`),
+whose script ends the level as `game_won` does, with that mission next, with
+or without a campaign manifest (`mcc_main_campaign_won`). Alone it loads; a
+network co-op host takes every machine there; a dedicated server plays its
+rotation's next entry, as after any won level. A name that is no campaign
+mission of the package does nothing (logged), and no map's script may load
+any other map. Before, the refused call disabled its whole script: the
+missions' endings (their last cutscene and level change) never ran.
+Global initializers may not change maps, even through a static script; the
+call is logged and ignored until made by a script thread or the console.
+`mcc_main_script_level_resolve` owns the same-package destination lookup;
+the shared `main_script_level_resolve` delegates only MCC level names to it.
+
 MCC scenarios may call the zero-argument, void `ai_deselect` operation through
 the MCC registry in [`mcc_scripts.c`](../port/linux/game/mcc_scripts.c).
 Its evaluator calls the existing `ai_scripting_deselect` service in
@@ -1086,6 +1104,54 @@ the legacy texture cache's size policy is unchanged. Each bitmap tag has
 its own virtual stream with exact tag-handle checks, allowing the total
 decoded texture storage to exceed the former single 512 MiB offset range.
 
+## Where the tags lie, and conversion on the host's threads
+
+**The tag window moves where its base is taken.** A map's tags are linked to
+its base (MCC Tool's is `0x50000000`). On the Switch the launcher places the
+program's main stack or its own code at random below `0x80000000`, often in
+`0x50000000`'s 64 MiB, before the program runs; no hold made at the start of
+`main` can win that. Where the base cannot be had (or `debug.mcc_elsewhere`
+is set), `mcc_cache.c` puts the 64 MiB elsewhere, clear of every linked range
+(the map's own, Custom Edition's and the window's), and `platform_mcc_shift`
+says how far. As for Custom Edition's tag cache (6e31ff1ed):
+
+- `halo_port_window.h`'s `PORT_WINDOW_REBASE` moves an address in the map's
+  linked range by the shift, so the game's rebasing accessors follow the tags;
+- `mcc_runtime_pointer` takes either form of an address during conversion, and
+  `mcc_tag_validate.c` moves every block, data, root, name and BSP root
+  pointer in place as it first reads it;
+- the hosts keep `0x50000000`'s range out of the window, the pools and their
+  own mappings for the whole run (Switch: `range_claimed`; Android:
+  `crosses_custom_edition`), so a value in it is always one still to move;
+- the Switch's host hands the moved tags out of the guest's pools
+  (`host_mcc_memory_reserve(0, ...)`): the guest's own 64 MiB `mmap` is given
+  the window's reserved range there;
+- a saved game records the shift (`mcc_tag_shift`, in the header's unused
+  words; 0 in older saves) and its MCC tag addresses move by the difference
+  (`game_state_relocate`, and the script string constants'
+  `game_state_relocation_tag_delta`).
+
+The Switch's host still maps the base at the start of `main` where it is free,
+and holds it for the run.
+
+**Sounds and textures convert on the host's threads.** On a Switch, a
+campaign map's 87 s load was 62 s of sounds and 18 s of textures, one piece
+after another on the game's thread. Now `mcc_audio.c` and `mcc_bitmaps.c`
+plan each piece and read its input in the map's order, the host converts it
+(`port/android/host/host_mcc_convert.c`: two workers on the Switch's spare
+cores, three elsewhere, and the game's own thread while it waits), and the
+loader takes each result in the order it asked. What it writes into the tags,
+the per-sound and total limits and the messages are what one thread
+converting in turn produces. The codecs are shared, with no game state:
+`mcc_audio_kernels.h`, `mcc_bitmap_kernels.h` and `mcc_vorbis.c`. A sound's
+converted samples stay in the host's memory (`host_mcc_audio_read`), not the
+guest's heap. A texture's packed pixels are written into the guest's memory,
+where the game draws them from. `game.mcc_host_conversion` set to `false`
+converts on the game's thread as before. Geometry (about 4% of that load)
+still converts on the game's thread. `tools/test_mcc_convert.py` checks that
+the host's results are the bytes the codecs give converting the same input on
+one thread.
+
 ## Current boundaries
 
 - Modern uncompressed version-13 maps are the target. Earlier Anniversary
@@ -1094,8 +1160,9 @@ decoded texture storage to exceed the former single 512 MiB offset range.
   when matching files are installed as described above.
 - The portable inspector accepts files up to `INT32_MAX`; runtime raw files
   must be smaller than `0x50000000` bytes because higher offsets identify
-  MCC virtual resources. Runtime tag windows must be free, 64 KiB-aligned,
-  64 MiB allocations based between `0x42000000` and `0x70000000` inclusive.
+  MCC virtual resources. Runtime tag windows are 64 KiB-aligned, 64 MiB
+  allocations based between `0x42000000` and `0x70000000` inclusive, at that
+  base where it is free and elsewhere otherwise (see above).
   The observed MCC base is `0x50000000`.
   Windows delay-loads `SDL3.dll` and reserves this address range at constructor
   priority 101, before CE's settings read (priority 102) first calls SDL.

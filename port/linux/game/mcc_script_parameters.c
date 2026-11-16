@@ -14,17 +14,36 @@
 #include "mcc_script_parameters.h"
 #include "mcc_syntax.h"
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define MCC_PARAMETER_SCRIPTS 512
 #define MCC_PARAMETER_NODES MCC_SYNTAX_CAPACITY
 extern struct data_array *hs_syntax_data;
 extern short const hs_external_global_count;
-static struct mcc_script_signature mcc_signatures[MCC_PARAMETER_SCRIPTS];
-static short mcc_parameter_owners[MCC_PARAMETER_NODES];
-static short mcc_parameter_types[MCC_PARAMETER_NODES];
-static unsigned short mcc_parameter_seen[MCC_PARAMETER_NODES];
-static long mcc_parameter_walk[MCC_PARAMETER_NODES];
+/* (allocated at the first use, zeroed as static data is: the guest images,
+whose code and data have to fit below 0x40000000, have no room for it as
+static data) */
+static struct mcc_parameter_tables
+{
+    struct mcc_script_signature signatures[MCC_PARAMETER_SCRIPTS];
+    short owners[MCC_PARAMETER_NODES];
+    short types[MCC_PARAMETER_NODES];
+    unsigned short seen[MCC_PARAMETER_NODES];
+    long walk[MCC_PARAMETER_NODES];
+} *mcc_parameter_storage;
+
+static struct mcc_parameter_tables *mcc_parameter_storage_get(void)
+{
+    if (!mcc_parameter_storage && !(mcc_parameter_storage = calloc(1, sizeof(*mcc_parameter_storage))))
+        abort();
+    return mcc_parameter_storage;
+}
+#define mcc_signatures (mcc_parameter_storage_get()->signatures)
+#define mcc_parameter_owners (mcc_parameter_storage_get()->owners)
+#define mcc_parameter_types (mcc_parameter_storage_get()->types)
+#define mcc_parameter_seen (mcc_parameter_storage_get()->seen)
+#define mcc_parameter_walk (mcc_parameter_storage_get()->walk)
 static unsigned mcc_signature_count, mcc_parameter_node_count;
 
 /* Preparation precedes active MCC state. Account for MCC's AI conversions

@@ -5,11 +5,23 @@
 #include "scenario/scenario_definitions.h"
 #include "objects/objects.h"
 #include <string.h>
+#include <stdlib.h>
 
 /* Signed script and placement indices reserve -1 for no name. A count of
  * 32767 also lets the native short-index loops terminate without wrapping. */
 typedef char mcc_name_handle_size[sizeof(long) == 4 ? 1 : -1];
-static long mcc_names[MCC_OBJECT_NAMES_MAXIMUM];
+/* (allocated at the first use, zeroed as static data is: the guest images,
+whose code and data have to fit below 0x40000000, have no room for it as
+static data) */
+static struct mcc_name_table { long names[MCC_OBJECT_NAMES_MAXIMUM]; } *mcc_name_storage;
+
+static struct mcc_name_table *mcc_name_storage_get(void)
+{
+    if (!mcc_name_storage && !(mcc_name_storage = calloc(1, sizeof(*mcc_name_storage))))
+        abort();
+    return mcc_name_storage;
+}
+#define mcc_names (mcc_name_storage_get()->names)
 
 long mcc_object_names_count(void)
 {

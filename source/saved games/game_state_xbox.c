@@ -98,9 +98,12 @@ symbols in this file:
 #include "cseries/cseries.h"
 #include "cseries/errors.h"
 #include "interface/player_ui.h"
+#include "saved games/player_profile.h" /* port: the check ahead */
 #include "memory/crc.h"
 #include "saved games/game_state.h"
+#include "bungie_net/common/thread.h" /* port: the check ahead */
 #include "sound/sound_manager.h"
+#include "custom_campaigns.h" /* port: port/linux/game/custom_campaigns.c */
 #include <xtl.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -147,33 +150,36 @@ static void game_state_header_terminate(
 	long header_size);
 static HANDLE game_state_open_persistent_storage(
 	const char *directory);
-static void game_state_writer_wait(
-	void);
-static boolean game_state_writer_ready(
+static boolean game_state_snapshot_ready(
 	void);
 
 /* ---------- globals */
 
 static struct xbox_game_state_globals_prefix xbox_game_state_globals = { 0 };
 
-/* The checkpoint written behind the game's back (not the Xbox's: the native
-builds' game state is 16 MB, written to the card or the disk with the game
-stopped). A checkpoint copies the game state into the snapshot and returns at
-once; the writer thread writes the snapshot to savegame.bin while the game
-goes on, and a revert copies it back from memory, so it never reads a file
-still being written. The game state cannot be written from where it is: the
-game changes it from the next tick. */
+/* The checkpoint kept in memory (not the Xbox's: the native builds' game
+state is 20 MB, written to the card or the disk with the game stopped). A
+checkpoint copies the game state into the snapshot and returns at once, and a
+revert copies it back. The game state cannot be kept where it is: the game
+changes it from the next tick.
+
+Nothing is written to savegame.bin while the snapshot exists. The file was
+written behind the game's back by a thread of its own, and nothing read it:
+a revert takes the snapshot, a new map clears saved_game_valid, and a saved
+game the player keeps is the profile's (game_state_write_to_persistent_storage).
+On the Switch those 20 MB a checkpoint held the card for seconds, and the
+game's texture reads, debug.txt and halo.log waited behind them (a 7.5 s
+frame in a co-op game of 343 Guilty Spark). Only recover_saved_games_hack,
+a developer's script global, read the file; it is written as the Xbox wrote
+it only when the snapshot cannot be made. */
 static struct
 {
-	/* the snapshot, aligned for FILE_FLAG_NO_BUFFERING (allocation is what
-	malloc gave), and whether it holds this file's latest checkpoint */
+	/* the snapshot (allocation is what malloc gave), and whether it holds
+	this file's latest checkpoint */
 	void *allocation;
 	void *snapshot;
 	boolean snapshot_valid;
-	/* work: a snapshot to write; idle: the writer has none (manual reset) */
-	HANDLE thread, work, idle;
-	boolean failed;
-} game_state_writer = { 0 };
+} game_state_snapshot = { 0 };
 
 /* ---------- public code */
 
@@ -265,10 +271,10 @@ void game_state_create_or_open_file(
 		SetEndOfFile(xbox_game_state_globals.handle))
 	{
 		xbox_game_state_globals.file_open = TRUE;
-		/* the writer and its 16 MB snapshot made now, while the map loads:
-		made at the first checkpoint, they cost that frame 0.87 s on the
-		Switch (Assault on the Control Room's first checkpoint) */
-		game_state_writer_ready();
+		/* the 20 MB snapshot made now, while the map loads: made at the first
+		checkpoint, it cost that frame 0.87 s on the Switch (Assault on the
+		Control Room's first checkpoint) */
+		game_state_snapshot_ready();
 	}
 	else
 	{
@@ -290,81 +296,27 @@ void game_state_close_file(
 		"c:\\halo\\SOURCE\\saved games\\game_state_xbox.c",
 		106,
 		xbox_game_state_globals.file_open);
-	/* (the checkpoint being written finished first: the writer has the handle) */
-	game_state_writer_wait();
-	game_state_writer.snapshot_valid = FALSE;
+	game_state_snapshot.snapshot_valid = FALSE;
 	CloseHandle(xbox_game_state_globals.handle);
 	xbox_game_state_globals.file_open = FALSE;
 
 	return;
 }
 
-static DWORD WINAPI game_state_writer_main(
-	LPVOID unused)
-{
-	(void)unused;
-	for (;;)
-	{
-		unsigned long bytes_written;
-
-		WaitForSingleObject(game_state_writer.work, INFINITE);
-		if (SetFilePointer(xbox_game_state_globals.handle, 0, NULL, FILE_BEGIN) !=
-				INVALID_SET_FILE_POINTER &&
-			WriteFile(xbox_game_state_globals.handle, game_state_writer.snapshot,
-				xbox_game_state_globals.buffer_size, &bytes_written, NULL) &&
-			bytes_written == (unsigned long)xbox_game_state_globals.buffer_size)
-		{
-			game_state_writer.failed = FALSE;
-		}
-		else
-		{
-			/* (the checkpoint in memory still stands: only the file, which
-			matters across a crash, is behind) */
-			game_state_writer.failed = TRUE;
-			error(_error_log, "couldn't write saved game file (#%d)", GetLastError());
-		}
-		SetEvent(game_state_writer.idle);
-	}
-	return 0;
-}
-
-/* the writer started, with its snapshot; FALSE if it cannot be, and the
-checkpoint is written as the Xbox wrote it */
-static boolean game_state_writer_ready(
+/* the snapshot made; FALSE if it cannot be, and the checkpoint is written
+to the file as the Xbox wrote it */
+static boolean game_state_snapshot_ready(
 	void)
 {
-	if (game_state_writer.thread)
-		return TRUE;
-	if (!game_state_writer.allocation)
+	if (!game_state_snapshot.allocation)
 	{
-		game_state_writer.allocation = malloc(xbox_game_state_globals.buffer_size + CPU_PAGE_SIZE);
-		if (!game_state_writer.allocation)
+		game_state_snapshot.allocation = malloc(xbox_game_state_globals.buffer_size + CPU_PAGE_SIZE);
+		if (!game_state_snapshot.allocation)
 			return FALSE;
-		game_state_writer.snapshot = (void *)(((uintptr_t)game_state_writer.allocation + CPU_PAGE_SIZE - 1) &
+		game_state_snapshot.snapshot = (void *)(((uintptr_t)game_state_snapshot.allocation + CPU_PAGE_SIZE - 1) &
 			~(uintptr_t)(CPU_PAGE_SIZE - 1));
 	}
-	game_state_writer.work = CreateEventA(NULL, FALSE, FALSE, NULL);
-	game_state_writer.idle = CreateEventA(NULL, TRUE, TRUE, NULL);
-	if (game_state_writer.work && game_state_writer.idle)
-		game_state_writer.thread = CreateThread(NULL, 0, game_state_writer_main, NULL, 0, NULL);
-	if (!game_state_writer.thread)
-	{
-		if (game_state_writer.work)
-			CloseHandle(game_state_writer.work);
-		if (game_state_writer.idle)
-			CloseHandle(game_state_writer.idle);
-		game_state_writer.work = game_state_writer.idle = NULL;
-		return FALSE;
-	}
 	return TRUE;
-}
-
-/* until the writer has written what it was given */
-static void game_state_writer_wait(
-	void)
-{
-	if (game_state_writer.thread)
-		WaitForSingleObject(game_state_writer.idle, INFINITE);
 }
 
 boolean game_state_write_to_file(
@@ -382,15 +334,13 @@ boolean game_state_write_to_file(
 		121,
 		xbox_game_state_globals.file_open);
 
-	/* behind the game's back: the snapshot taken, the writer told, done */
-	if (game_state_writer_ready())
+	/* in memory: the snapshot taken, done (nothing written: see
+	game_state_snapshot) */
+	if (game_state_snapshot_ready())
 	{
-		game_state_writer_wait();
-		memcpy(game_state_writer.snapshot, xbox_game_state_globals.buffer, xbox_game_state_globals.buffer_size);
-		game_state_writer.snapshot_valid = TRUE;
+		memcpy(game_state_snapshot.snapshot, xbox_game_state_globals.buffer, xbox_game_state_globals.buffer_size);
+		game_state_snapshot.snapshot_valid = TRUE;
 		xbox_game_state_globals.file_valid_for_read = TRUE;
-		ResetEvent(game_state_writer.idle);
-		SetEvent(game_state_writer.work);
 		return TRUE;
 	}
 
@@ -435,12 +385,12 @@ boolean game_state_read_from_file(
 		146,
 		xbox_game_state_globals.file_valid_for_read || recover_saved_games_hack);
 
-	/* this file's checkpoint is in memory: the file may still be being
-	written. It is this process's own game state, taken as it was saved, so it
-	is not checked as an image read from a file is */
-	if (game_state_writer.snapshot_valid)
+	/* this file's checkpoint is in memory (game_state_snapshot). It is this
+	process's own game state, taken as it was saved, so it is not checked as
+	an image read from a file is */
+	if (game_state_snapshot.snapshot_valid)
 	{
-		memcpy(xbox_game_state_globals.buffer, game_state_writer.snapshot, xbox_game_state_globals.buffer_size);
+		memcpy(xbox_game_state_globals.buffer, game_state_snapshot.snapshot, xbox_game_state_globals.buffer_size);
 		return TRUE;
 	}
 
@@ -565,15 +515,22 @@ static __inline boolean game_state_get_persistent_storage_path(
 	boolean result;
 
 	result = player_ui_get_path_to_local_player_profile_directory(0, path) != FALSE;
+	/* port: a mounted custom campaign's own saved game, in the profile's
+	campaigns\<folder>\ (port/linux/game/custom_campaigns.c) */
+	if (result)
+		result = custom_campaign_save_directory(path);
 
 	return result;
 }
+
+static void persistent_header_cache_forget(void);
 
 static void delete_persistent_storage(
 	void)
 {
 	char path[256];
 
+	persistent_header_cache_forget();
 	if (game_state_get_persistent_storage_path(path))
 		DeleteFileA(path);
 
@@ -608,6 +565,7 @@ static HANDLE game_state_open_persistent_storage(
 			success = TRUE;
 			if (GetFileSize(file, NULL) != GAME_STATE_FILE_SIZE)
 			{
+				persistent_header_cache_forget(); /* port */
 				memset(zeroes, 0, sizeof(zeroes));
 				if (!WriteFile(file, zeroes, sizeof(zeroes), &bytes_written, NULL) ||
 					bytes_written != sizeof(zeroes) ||
@@ -656,6 +614,54 @@ static void game_state_header_terminate(
 	}
 }
 
+/* port: what the campaign menus ask of the saved game, each time they open
+(game_state_test_persistent_storage), kept: the answer is the whole 20 MB
+file read and checksummed, half a second and more on the Switch's card for
+each menu. It is the same answer while the file is: its path, size and time
+written the same, and nothing here written, resized or deleted it since (the
+file is always the same size, and a FAT card's times are two seconds apart,
+so those alone would not tell a save made just now). */
+static struct
+{
+	boolean valid;
+	char path[256];
+	DWORD size_low, size_high;
+	FILETIME written;
+	long header_size, buffer_size;
+	byte header[2048];
+	boolean result, corrupted;
+} persistent_header_cache;
+
+static unsigned long persistent_header_generation;
+
+static void persistent_header_cache_forget(
+	void)
+{
+	persistent_header_cache.valid = FALSE;
+	persistent_header_generation++;
+}
+
+/* the saved game's path and how it is now; FALSE if there is none */
+static boolean persistent_header_stamp(
+	char *path,
+	WIN32_FILE_ATTRIBUTE_DATA *data)
+{
+	if (!game_state_get_persistent_storage_path(path))
+		return FALSE;
+	strcat(path, "savegame.bin");
+	return GetFileAttributesExA(path, GetFileExInfoStandard, data) != FALSE;
+}
+
+static boolean game_state_read_header_uncached(
+	void *header,
+	unsigned long *header_checksum,
+	long header_size,
+	long buffer_size,
+	boolean *corrupted,
+	char const *directory);
+static void persistent_header_ahead_adopt(
+	boolean wait);
+
 boolean game_state_read_header_from_persistent_storage(
 	void *header,
 	unsigned long *header_checksum,
@@ -663,7 +669,66 @@ boolean game_state_read_header_from_persistent_storage(
 	long buffer_size,
 	boolean *corrupted)
 {
-	byte buffer[128*1024];
+	char path[256];
+	WIN32_FILE_ATTRIBUTE_DATA data;
+	boolean result;
+	boolean corrupted_read = FALSE;
+
+	/* (a check made ahead, on its thread, taken: waited for if it is still
+	going, which is sooner than reading the file again here) */
+	persistent_header_ahead_adopt(TRUE);
+	if (header_size <= (long)sizeof(persistent_header_cache.header) &&
+		persistent_header_cache.valid &&
+		persistent_header_cache.header_size == header_size &&
+		persistent_header_cache.buffer_size == buffer_size &&
+		persistent_header_stamp(path, &data) &&
+		!strcmp(path, persistent_header_cache.path) &&
+		data.nFileSizeLow == persistent_header_cache.size_low &&
+		data.nFileSizeHigh == persistent_header_cache.size_high &&
+		!memcmp(&data.ftLastWriteTime, &persistent_header_cache.written, sizeof(data.ftLastWriteTime)))
+	{
+		/* (the header as the read left it: its checksum, which
+		header_checksum points into, cleared) */
+		memcpy(header, persistent_header_cache.header, header_size);
+		if (corrupted)
+			*corrupted = persistent_header_cache.corrupted;
+		return persistent_header_cache.result;
+	}
+	persistent_header_cache_forget();
+	result = game_state_read_header_uncached(header, header_checksum, header_size, buffer_size, &corrupted_read,
+		NULL);
+	if (corrupted)
+		*corrupted = corrupted_read;
+	/* (stamped after: the read may have made the file, or sized it) */
+	if (header_size <= (long)sizeof(persistent_header_cache.header) && persistent_header_stamp(path, &data))
+	{
+		strcpy(persistent_header_cache.path, path);
+		persistent_header_cache.size_low = data.nFileSizeLow;
+		persistent_header_cache.size_high = data.nFileSizeHigh;
+		persistent_header_cache.written = data.ftLastWriteTime;
+		persistent_header_cache.header_size = header_size;
+		persistent_header_cache.buffer_size = buffer_size;
+		memcpy(persistent_header_cache.header, header, header_size);
+		persistent_header_cache.result = result;
+		persistent_header_cache.corrupted = corrupted_read;
+		persistent_header_cache.valid = TRUE;
+	}
+	return result;
+}
+
+/* (port: with a directory, the profile's folder given, on the check ahead's
+thread: no sound to keep fed, nothing deleted, and its buffer not its
+stack's) */
+static boolean game_state_read_header_uncached(
+	void *header,
+	unsigned long *header_checksum,
+	long header_size,
+	long buffer_size,
+	boolean *corrupted,
+	char const *directory)
+{
+	byte stack_buffer[128*1024];
+	byte *buffer = stack_buffer;
 	HANDLE file;
 	unsigned long checksum;
 	unsigned long stored_checksum;
@@ -672,10 +737,12 @@ boolean game_state_read_header_from_persistent_storage(
 	long read_size;
 	boolean result;
 
-	file = game_state_open_persistent_storage(NULL);
 	result = FALSE;
 	if (corrupted)
 		*corrupted = FALSE;
+	if (directory && (buffer = malloc(sizeof(stack_buffer))) == NULL)
+		return FALSE;
+	file = game_state_open_persistent_storage(directory);
 
 	if (file != INVALID_HANDLE_VALUE)
 	{
@@ -691,7 +758,8 @@ boolean game_state_read_header_from_persistent_storage(
 				csprintf(temporary,
 					"couldn't read header from persistent storage (#%d)",
 					GetLastError()));
-			delete_persistent_storage();
+			if (!directory)
+				delete_persistent_storage();
 		}
 		else
 		{
@@ -705,13 +773,14 @@ boolean game_state_read_header_from_persistent_storage(
 			remaining_size = buffer_size-header_size;
 			while (remaining_size>0)
 			{
-				read_size = MIN(sizeof(buffer), remaining_size);
+				read_size = MIN(sizeof(stack_buffer), remaining_size);
 				if (ReadFile(file, buffer, read_size, &bytes_read, NULL) &&
 					bytes_read == read_size)
 				{
 					crc_checksum_buffer(&checksum, buffer, read_size);
 				}
-				sound_idle();
+				if (!directory)
+					sound_idle();
 				remaining_size -= read_size;
 			}
 
@@ -728,8 +797,113 @@ boolean game_state_read_header_from_persistent_storage(
 		}
 		CloseHandle(file);
 	}
+	if (directory)
+		free(buffer);
 
 	return result;
+}
+
+/* port: the menus' check of the saved game, made ahead while the main menu
+is up (game_state_persistent_storage_check_ahead), on a thread of its own:
+the first one of a run read the whole 20 MB file as the campaign menu
+opened, more than half a second on the Switch's card. Its answer is the
+kept one's (persistent_header_cache), taken on the game's thread
+(persistent_header_ahead_adopt) unless something here has written, sized or
+deleted the file since it began. */
+static struct
+{
+	struct thread_reference *thread;
+	unsigned long generation;
+	char directory[256];
+	char path[256];
+	struct game_state_header header;
+	boolean result, corrupted, stamped;
+	WIN32_FILE_ATTRIBUTE_DATA data;
+} persistent_header_ahead;
+static long persistent_header_ahead_profile = NONE;
+static unsigned long persistent_header_ahead_started_generation = (unsigned long)-1;
+
+static unsigned long __stdcall persistent_header_ahead_proc(
+	void *input)
+{
+	persistent_header_ahead.result = game_state_read_header_uncached(&persistent_header_ahead.header,
+		&persistent_header_ahead.header.checksum, sizeof(persistent_header_ahead.header), GAME_STATE_SIZE,
+		&persistent_header_ahead.corrupted, persistent_header_ahead.directory);
+	persistent_header_ahead.stamped = GetFileAttributesExA(persistent_header_ahead.path, GetFileExInfoStandard,
+		&persistent_header_ahead.data) != FALSE;
+	(void)input;
+
+	return 0;
+}
+
+static void persistent_header_ahead_adopt(
+	boolean wait)
+{
+	if (!persistent_header_ahead.thread)
+		return;
+	if (!thread_has_exited(persistent_header_ahead.thread))
+	{
+		if (!wait)
+			return;
+		while (!thread_has_exited(persistent_header_ahead.thread))
+			Sleep(1);
+	}
+	dispose_thread(persistent_header_ahead.thread);
+	persistent_header_ahead.thread = NULL;
+	if (persistent_header_ahead.stamped && persistent_header_ahead.generation == persistent_header_generation)
+	{
+		strcpy(persistent_header_cache.path, persistent_header_ahead.path);
+		persistent_header_cache.size_low = persistent_header_ahead.data.nFileSizeLow;
+		persistent_header_cache.size_high = persistent_header_ahead.data.nFileSizeHigh;
+		persistent_header_cache.written = persistent_header_ahead.data.ftLastWriteTime;
+		persistent_header_cache.header_size = sizeof(persistent_header_ahead.header);
+		persistent_header_cache.buffer_size = GAME_STATE_SIZE;
+		memcpy(persistent_header_cache.header, &persistent_header_ahead.header, sizeof(persistent_header_ahead.header));
+		persistent_header_cache.result = persistent_header_ahead.result;
+		persistent_header_cache.corrupted = persistent_header_ahead.corrupted;
+		persistent_header_cache.valid = TRUE;
+	}
+}
+
+/* (each tick of the main menu: nothing asked of the card unless player 1's
+profile has changed, or the saved game has, since the last check) */
+void game_state_persistent_storage_check_ahead(
+	void)
+{
+	long profile_index;
+	WIN32_FILE_ATTRIBUTE_DATA data;
+
+	if (persistent_header_ahead.thread)
+	{
+		persistent_header_ahead_adopt(FALSE);
+		return;
+	}
+	/* (on the main menu no profile is active yet: the campaign menu makes
+	player 1's last one active as it opens, so that one is checked) */
+	profile_index = player_ui_get_active_player_profile_index(0);
+	if (profile_index == NONE)
+		profile_index = player_ui_get_player1_last_used_profile_index();
+	if (profile_index == NONE ||
+		(profile_index == persistent_header_ahead_profile &&
+		persistent_header_generation == persistent_header_ahead_started_generation))
+	{
+		return;
+	}
+	persistent_header_ahead_profile = profile_index;
+	persistent_header_ahead_started_generation = persistent_header_generation;
+	if (!player_profile_get_enclosing_directory_path(profile_index, persistent_header_ahead.directory) ||
+		!custom_campaign_save_directory(persistent_header_ahead.directory)) /* port: (as above) */
+		return;
+	snprintf(persistent_header_ahead.path, sizeof(persistent_header_ahead.path), "%ssavegame.bin",
+		persistent_header_ahead.directory);
+	/* (kept already; or no saved game, which the check would make) */
+	if (persistent_header_cache.valid && !strcmp(persistent_header_cache.path, persistent_header_ahead.path))
+		return;
+	if (!GetFileAttributesExA(persistent_header_ahead.path, GetFileExInfoStandard, &data))
+		return;
+	persistent_header_ahead.generation = persistent_header_generation;
+	if (!create_thread(0, persistent_header_ahead_proc, NULL, &persistent_header_ahead.thread))
+		persistent_header_ahead.thread = NULL;
 }
 
 void game_state_write_to_persistent_storage(
@@ -743,6 +917,7 @@ void game_state_write_to_persistent_storage(
 	unsigned long checksum;
 	unsigned long bytes_written;
 
+	persistent_header_cache_forget(); /* port */
 	file = game_state_open_persistent_storage(NULL);
 	if (file != INVALID_HANDLE_VALUE)
 	{

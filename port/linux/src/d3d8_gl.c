@@ -2876,6 +2876,17 @@ static void gl_initialize(void)
 #ifdef HALO_ANDROID
 	platform_log("Android render policy: chip=%d geometry=%s CE textures=%s per-draw refresh=off",
 		android_render_chip, android_geometry_fixes ? "on" : "off", android_texture_fixes ? "on" : "off");
+#if !defined(HALO_SWITCH) && !defined(HALO_PS5)
+	/* the app asked for Vulkan, which did not start (port/android/host/host_main.c
+	says why in logcat): display.renderer back to "gl", so that Video Setup
+	shows OPENGL, the backend the game runs on, and the next start does not
+	try again until Vulkan is chosen there */
+	if (getenv("HALO_VULKAN_REFUSED") && strcmp(config_string("display.renderer"), "gl"))
+	{
+		platform_log("renderer: Vulkan did not start; display.renderer is \"gl\" now");
+		config_write("display.renderer", "gl");
+	}
+#endif
 #endif
 	glGetIntegerv(GL_MINOR_VERSION, &minor);
 #ifdef HALO_GLES
@@ -6371,6 +6382,12 @@ void xgpu_static_range_remove(const void *start, int indices)
 	static_buffer_forget(&static_buffer_lists[indices != 0], (unsigned long)start);
 }
 
+/* (the OpenGL renderer keeps its ranges until the game lets each go, as it
+always has) */
+void xgpu_static_forget_all(void)
+{
+}
+
 /* the GL buffers of released resources, deleted; the state cache forgets
 them, as GL unbinds them and may give their names to new buffers */
 static void static_buffers_collect(void)
@@ -7697,6 +7714,32 @@ void WINAPI D3DDevice_SetVertexData4f(INT reg, FLOAT a, FLOAT b, FLOAT c, FLOAT 
 	set_attribute(reg, a, b, c, d);
 }
 
+void WINAPI D3DDevice_DrawVerticesImmediate(D3DPRIMITIVETYPE type, DWORD mask, CONST FLOAT *data, UINT count)
+{
+	unsigned long registers = (unsigned long)__builtin_popcountl(mask);
+	UINT vertex;
+	int reg, index;
+
+	if (!count || !(mask & 1))
+		return;
+	D3DDevice_Begin(type);
+	for (vertex = 0; vertex < count; vertex++)
+	{
+		const float *in = data + vertex * registers * 4;
+
+		/* (register 0, which completes the vertex, last) */
+		for (reg = 31, index = (int)registers; reg >= 0; reg--)
+		{
+			if (mask & (1UL << reg))
+			{
+				index--;
+				D3DDevice_SetVertexData4f(reg, in[index * 4], in[index * 4 + 1], in[index * 4 + 2], in[index * 4 + 3]);
+			}
+		}
+	}
+	D3DDevice_End();
+}
+
 void WINAPI D3DDevice_SetVertexData2s(INT reg, SHORT a, SHORT b)
 {
 	set_attribute(reg, (float)a, (float)b, 0.0f, 1.0f);
@@ -8491,6 +8534,8 @@ static void frame_end_buffers(void)
 		{
 			device.visibility_latest[device.ring_tests[ring][test][0]] =
 				device.counter_values[device.ring_tests[ring][test][1]];
+			device.visibility_counted[device.ring_tests[ring][test][0]] =
+				device.ring_test_numbers[ring][test];
 		}
 		device.ring_test_count[ring] = 0;
 	}

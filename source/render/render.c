@@ -267,6 +267,9 @@ void render_frame_pregame(
 	halo_screen_ui_offset(TRUE);
 	render_ui_widgets(0, &window->rasterizer_camera.viewport_bounds);
 	halo_screen_ui_offset(FALSE);
+	/* port: hosting from the menus, the host's screen here too, between
+	maps (port/linux/game/host_dashboard.c) */
+	host_dashboard_draw();
 	bink_playback_render();
 
 	{
@@ -353,10 +356,14 @@ static void render_window(
 	else if (!bink_playback_in_progress())
 	{
 		build_sprite_prepare_for_window();
+		first_person_weapon_render_update();
+		/* port: before the first draw, so that the dynamic lighting's fields are
+		sent with no rendering to interrupt (plasma_occlusion_prepare_view). It
+		draws nothing, and the sky's queued lens flares go in after it */
+		lights_preprocess_scene();
 		halo_render_marker("sky");
 		render_sky();
-		first_person_weapon_render_update();
-		lights_preprocess_scene();
+		lights_submit_queued_lens_flares();
 		halo_render_marker("objects");
 		render_objects();
 		structure_render_preprocess();

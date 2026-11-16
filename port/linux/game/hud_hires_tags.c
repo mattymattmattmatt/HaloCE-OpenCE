@@ -80,7 +80,7 @@ void hud_hires_tags_loaded(long scenario_index);
 void hud_hires_tags_unloaded(void);
 long hud_hires_asset_at(unsigned long address, long width, long height);
 struct bitmap_data const *hud_hires_sprite_bitmap(struct bitmap_data const *bitmap, short sequence_index);
-boolean network_replay_playing(void);
+boolean network_replay_viewing(void);
 
 #include "custom_edition_hud_buttons.h"
 
@@ -343,7 +343,7 @@ struct bitmap_data const *hud_hires_sprite_bitmap(
 	/* (the message icons by where they are drawn: a game's text by its buttons' places, the menus', the carnage
 	report's and a replay's as the menus' buttons are: game_engine_showing_postgame, network_replay_playing;
 	xinput_sdl.c swaps them there too) */
-	boolean gameplay = !hud_hires_main_menu_loaded && !game_engine_showing_postgame() && !network_replay_playing();
+	boolean gameplay = !hud_hires_main_menu_loaded && !game_engine_showing_postgame() && !network_replay_viewing();
 	long index;
 
 	for (index = 0; index < hires_sprite_bitmap_count; index++)
@@ -523,8 +523,12 @@ static boolean ce_hud_buttons_stock(struct icon_hud_element_definition const *ic
 	return TRUE;
 }
 
-/* Shared legacy glyph ownership for gameplay and optional menu legends. */
-struct bitmap_data *hud_hires_button_bitmap(short style, short slot)
+/* Match the controller entry itself: weapon icons may reuse its sequence.
+ * Draw the existing Xbox menu faces with straight alpha, independently of
+ * the messaging sheet and its tint. CE custom sheets also need this fallback
+ * with High-Res HUD off: their stock button entries can name weapon art. */
+boolean hud_hires_button_draw(struct icon_hud_element_definition const *icon,
+	rectangle2d *cursor, pixel32 color)
 {
 	static char const *names[] = {
 		"ui\\shell\\bitmaps\\a_butn", "ui\\shell\\bitmaps\\b_butn",
@@ -538,52 +542,13 @@ struct bitmap_data *hud_hires_button_bitmap(short style, short slot)
 		"ui\\hud\\buttons\\gem_a", "ui\\hud\\buttons\\gem_b",
 		"ui\\hud\\buttons\\gem_x", "ui\\hud\\buttons\\gem_y",
 		"ui\\shell\\bitmaps\\black_butn", "ui\\shell\\bitmaps\\white_butn"};
-    struct bitmap_data *bitmap;
-    long asset;
-    if (style < 0 || style > 2 || slot < 0 || slot >= 14) return NULL;
-	if (style != hud_buttons_style)
-	{
-		hud_buttons_forget();
-		hud_buttons_style = style;
-	}
-	if (!hud_buttons[slot].attempted)
-	{
-		hud_buttons[slot].attempted = TRUE;
-		for (asset = 0; asset < hud_hires_asset_count(); asset++)
-		{
-			if (strcmp(hud_hires_asset_tag(asset), slot >= 6 ? hud_button_control_name(slot) : style == 0 ? classic_names[slot] :
-				style == 1 ? gem_names[slot] : names[slot])) continue;
-			bitmap = bitmap_2d_new(slot >= 6 ? 64 : 32, slot >= 6 ? 64 : 32, 0, 11);
-			if (!bitmap) break;
-			if (!rasterizer_bitmap_new(bitmap))
-			{
-				bitmap_delete(bitmap);
-				break;
-			}
-			hud_hires_register_placeholder(asset, bitmap->hardware_format);
-			hud_buttons[slot].asset = asset;
-			hud_buttons[slot].bitmap = bitmap;
-			break;
-		}
-	}
-	bitmap = hud_buttons[slot].bitmap;
-    return bitmap;
-}
-
-/* Match the controller entry itself: weapon icons may reuse its sequence.
- * Draw the existing Xbox menu faces with straight alpha, independently of
- * the messaging sheet and its tint. CE custom sheets also need this fallback
- * with High-Res HUD off: their stock button entries can name weapon art. */
-boolean hud_hires_button_draw(struct icon_hud_element_definition const *icon,
-	rectangle2d *cursor, pixel32 color)
-{
 	struct icon_hud_element_definition const *buttons;
 	struct rasterizer_dynamic_screen_geometry_parameters parameters;
 	struct dynamic_screen_vertex vertices[4];
 	struct bitmap_data *bitmap;
 	real viewport, scale, x, y, width, height, u, v;
 	short advance;
-	long index;
+	long index, asset;
 	short i;
 	short style, slot;
 

@@ -3,15 +3,16 @@ OVERLAY_MENU.C
 
 The game's own overlay menu, on every build alike (the Switch, the PS5,
 Android): a panel down the left 30% of the screen, black at 40%, titled
-"OpenCE for <the platform>", with a list of entries. An entry is a toggle
+"SlipstreamCE", with a list of entries. An entry is a toggle
 (a cheat, a setting: on or off, as the game has it now), a command run once
 (spawn the weapons, a checkpoint), a choice among several (the game's
 speed, the bots' difficulty), or a folder of more entries. They began as
 hardran3's OpenCE-Ultrahand and HaloDrones packages' (the bots': its
 difficulty is the bots' bots.skill here), with the bots' vehicles and routes
 besides. A command is run at once: a line for the console
-(hs_compile_and_evaluate), or "config <setting> <value>" (config_set_text,
-saved as the menus save it).
+(hs_compile_and_evaluate), "config <setting> <value>" (config_set_text,
+saved as the menus save it), or "lighting_force_off <setting> <true|false>"
+(lighting_config.c: for this run, not saved).
 
 Holding L and R (the shoulders) and pressing the d-pad's down opens it and
 closes it, on any controller; on Android without one, three fingers (or
@@ -48,6 +49,8 @@ the data root (below, "the files' entries").
 #include "text/font_group.h"
 #include "halo_overlay_menu.h"
 #include "halo_ui_pointer.h"
+#include "lighting_config.h"
+#include "lighting_menu.h"
 
 #include "../src/posix.h"
 #include "../../third_party/tomlc17/tomlc17.h"
@@ -102,15 +105,8 @@ enum
 	_overlay_text_right = 1,
 };
 
-#if defined(HALO_SWITCH)
-#define OVERLAY_TITLE "OpenCE for Switch"
-#elif defined(HALO_PS5)
-#define OVERLAY_TITLE "OpenCE for PS5"
-#elif defined(HALO_ANDROID)
-#define OVERLAY_TITLE "OpenCE for Android"
-#else
-#define OVERLAY_TITLE "OpenCE"
-#endif
+/* (the platform's name would not fit beside it in the panel) */
+#define OVERLAY_TITLE "SlipstreamCE"
 /* the foot's buttons, as the platform's pictures (the menus' icons in text:
 ui_widget.c's draw_string_and_hack_in_icons; the Switch's and the PS5's are
 their own) */
@@ -160,6 +156,8 @@ enum overlay_entry_state
 	or "config:<setting>=<word>" (on while it is that word), of any kind of
 	setting (config_text) */
 	_overlay_state_config_text,
+	/* a lighting setting forced off for this run (lighting_config.c) */
+	_overlay_state_lighting_forced,
 };
 
 /* ---------- definitions */
@@ -312,11 +310,20 @@ static struct overlay_entry overlay_bots_routes_entries[] =
 };
 static struct overlay_source overlay_bots_routes = OVERLAY_FOLDER_OF("Routes", overlay_bots_routes_entries);
 
+/* port: the kind of bot added from now on (bots_common.h) */
+static struct overlay_entry overlay_bots_kind_entries[] =
+{
+	OVERLAY_SETTING_CHOICE("Birchwood", "bots.kind", "birchwood"),
+	OVERLAY_SETTING_CHOICE("Proving Grounds", "bots.kind", "provinggrounds"),
+};
+static struct overlay_source overlay_bots_kind = OVERLAY_FOLDER_OF("Kind", overlay_bots_kind_entries);
+
 static struct overlay_entry overlay_bots_entries[] =
 {
 	OVERLAY_FOLDER("Add Bots", overlay_bots_add),
 	OVERLAY_FOLDER("Drop Bots", overlay_bots_drop),
 	OVERLAY_FOLDER("Difficulty", overlay_bots_skill),
+	OVERLAY_FOLDER("Kind", overlay_bots_kind),
 	OVERLAY_TOGGLE("Vehicles", _overlay_state_config_integer, "config bots.vehicles 1", "config bots.vehicles 0",
 		"bots.vehicles", 0.0f, FALSE),
 	OVERLAY_FOLDER("Routes", overlay_bots_routes),
@@ -378,6 +385,15 @@ static struct overlay_entry overlay_system_entries[] =
 	/* (a host's recording of its games: network_replay.c, port/linux/REPLAY.md) */
 	OVERLAY_TOGGLE_NOTE("Record Replays", _overlay_state_config, "config network.record_replays true",
 		"config network.record_replays false", "network.record_replays", "From the next network game"),
+	/* (the game's log, source/cseries/errors.c; the host's, from the next
+	start: port/android/host/host_main.c, port/switch/host/host_main.c,
+	port/ps5/host/host_main.c) */
+	OVERLAY_TOGGLE("Write debug.txt", _overlay_state_config, "config debug.log_files true",
+		"config debug.log_files false", "debug.log_files", 0.0f, FALSE),
+#if defined(HALO_ANDROID) || defined(HALO_PS5)
+	OVERLAY_TOGGLE_NOTE("Write halo.log", _overlay_state_config, "config debug.halo_log true",
+		"config debug.halo_log false", "debug.halo_log", "Applies at the next restart"),
+#endif
 #if defined(HALO_SWITCH) || defined(HALO_PS5)
 	OVERLAY_TOGGLE_NOTE("Xbox Button Pictures", _overlay_state_config, "config display.xbox_buttons true",
 		"config display.xbox_buttons false", "display.xbox_buttons", "Applies at the next restart"),
@@ -389,6 +405,52 @@ static struct overlay_entry overlay_system_entries[] =
 };
 static struct overlay_source overlay_system = OVERLAY_FOLDER_OF("System", overlay_system_entries);
 
+/* debugging: each switches a lighting feature off until the game restarts,
+leaving config.toml as it is. ON here can only turn a feature off: one the
+config has off stays off either way. Not offered where lighting_menu_available
+says the image has no dynamic lighting. */
+#define OVERLAY_FORCE_OFF(label, setting) \
+	OVERLAY_TOGGLE_NOTE(label, _overlay_state_lighting_forced, "lighting_force_off " setting " true", \
+		"lighting_force_off " setting " false", setting, "ON forces it off until restart. The config is not changed")
+static struct overlay_entry overlay_lighting_entries[] =
+{
+	OVERLAY_FORCE_OFF("Projectile Lights", "display.plasma_lighting"),
+	OVERLAY_FORCE_OFF("Muzzle Flash Lights", "display.muzzle_lighting"),
+	OVERLAY_FORCE_OFF("Weapon Glow", "display.weapon_glow"),
+	OVERLAY_FORCE_OFF("Fuel Rod Lights", "display.fuel_rod_lighting"),
+	OVERLAY_FORCE_OFF("Ammo Counter Lights", "display.ammo_counter_lighting"),
+	OVERLAY_FORCE_OFF("Needler Lights", "display.needler_lighting"),
+	OVERLAY_FORCE_OFF("Plasma Prong Lighting", "display.plasma_prong_lighting"),
+	OVERLAY_FORCE_OFF("Jackal Shield Lights", "display.jackal_shield_lighting"),
+	OVERLAY_FORCE_OFF("Covenant Shield Lights", "display.covenant_shield_lighting"),
+	OVERLAY_FORCE_OFF("Vehicle Lights", "display.vehicle_lighting"),
+	OVERLAY_FORCE_OFF("World Emitters", "display.world_lighting"),
+	OVERLAY_FORCE_OFF("Light Occlusion", "display.plasma_occlusion"),
+	OVERLAY_FORCE_OFF("Shield Glow", "display.shield_glow"),
+	OVERLAY_TOGGLE_NOTE("Moving Lights: 384 Rays", _overlay_state_lighting_forced,
+		"lighting_force_off debug.moving_lights_384 true", "lighting_force_off debug.moving_lights_384 false",
+		"debug.moving_lights_384", "ON traces a moving light with 384 rays, OFF with 1536. Until restart"),
+	OVERLAY_TOGGLE_NOTE("Fast Occlusion Math", _overlay_state_lighting_forced,
+		"lighting_force_off debug.fast_occlusion_math true", "lighting_force_off debug.fast_occlusion_math false",
+		"debug.fast_occlusion_math", "ON builds light occlusion with approximate divides: faster, near the same. Until restart"),
+	OVERLAY_TOGGLE_NOTE("Parallel Light Rays", _overlay_state_lighting_forced,
+		"lighting_force_off debug.parallel_light_rays true", "lighting_force_off debug.parallel_light_rays false",
+		"debug.parallel_light_rays", "ON shares a light's occlusion rays with helper threads: the same result. Until restart"),
+	OVERLAY_TOGGLE_NOTE("Background Light Rays", _overlay_state_lighting_forced,
+		"lighting_force_off debug.background_light_rays true", "lighting_force_off debug.background_light_rays false",
+		"debug.background_light_rays", "ON traces moving lights while the frame draws: a frame later. Until restart"),
+	OVERLAY_TOGGLE_NOTE("Full Reach: Nearest 8 Lights", _overlay_state_lighting_forced,
+		"lighting_force_off debug.promoted_cap_8 true", "lighting_force_off debug.promoted_cap_8 false",
+		"debug.promoted_cap_8", "ON shrinks the reach of farther lights. All OFF: every light has its full reach"),
+	OVERLAY_TOGGLE_NOTE("Full Reach: Nearest 6 Lights", _overlay_state_lighting_forced,
+		"lighting_force_off debug.promoted_cap_6 true", "lighting_force_off debug.promoted_cap_6 false",
+		"debug.promoted_cap_6", "ON shrinks the reach of farther lights. All OFF: every light has its full reach"),
+	OVERLAY_TOGGLE_NOTE("Full Reach: Nearest 4 Lights", _overlay_state_lighting_forced,
+		"lighting_force_off debug.promoted_cap_4 true", "lighting_force_off debug.promoted_cap_4 false",
+		"debug.promoted_cap_4", "ON shrinks the reach of farther lights. All OFF: every light has its full reach"),
+};
+static struct overlay_source overlay_lighting = OVERLAY_FOLDER_OF("Force Lighting Off", overlay_lighting_entries);
+
 static struct overlay_entry overlay_root_entries[] =
 {
 	OVERLAY_FOLDER("Cheats", overlay_cheats),
@@ -396,6 +458,7 @@ static struct overlay_entry overlay_root_entries[] =
 	OVERLAY_FOLDER("Game Speed", overlay_speed),
 	OVERLAY_FOLDER("HUD", overlay_hud),
 	OVERLAY_FOLDER("Camera", overlay_camera),
+	OVERLAY_FOLDER("Force Lighting Off", overlay_lighting),
 	OVERLAY_FOLDER("System", overlay_system),
 };
 static struct overlay_source overlay_root = OVERLAY_FOLDER_OF(OVERLAY_TITLE, overlay_root_entries);
@@ -405,7 +468,7 @@ static struct overlay_source overlay_root = OVERLAY_FOLDER_OF(OVERLAY_TITLE, ove
 Entries of one's own, beside the built-in ones: files in the overlay folder
 of the data root (the folder with maps/ and config.toml: the Switch's
 sdmc:/switch/halo/overlay, the PS5's /data/halo/overlay, Android's
-Android/data/com.halo.decomp/files/overlay). Each folder in it is a folder of
+Android/data/ar.com.slipstreamce/files/overlay). Each folder in it is a folder of
 the overlay, and each folder in one of those a folder in that, by its name;
 one of a built-in folder's name (Cheats, in any case) adds to it. Each .toml
 file is an entry:
@@ -594,6 +657,8 @@ static boolean overlay_entry_on(
 		/* (true, or a number not 0) */
 		return !strcmp(text, "true") || atof(text) != 0.0;
 	}
+	case _overlay_state_lighting_forced:
+		return lighting_forced_off(entry->state_name) != 0;
 	}
 	return FALSE;
 }
@@ -613,13 +678,14 @@ static boolean overlay_run(
 	size_t error_size)
 {
 	error[0] = 0;
-	if (!strncmp(command, "config ", 7))
+	if (!strncmp(command, "config ", 7) || !strncmp(command, "lighting_force_off ", 19))
 	{
 		char name[128];
 		char const *value;
 		size_t length;
+		boolean forcing = command[0] == 'l';
 
-		command += 7;
+		command += forcing ? 19 : 7;
 		length = strcspn(command, " ");
 		if (length >= sizeof(name))
 			length = sizeof(name) - 1;
@@ -628,6 +694,13 @@ static boolean overlay_run(
 		value = command + length;
 		while (*value == ' ')
 			value++;
+		if (forcing)
+		{
+			if (lighting_force_off(name, !strcmp(value, "true")))
+				return TRUE;
+			snprintf(error, error_size, "not a lighting setting");
+			return FALSE;
+		}
 		return config_set_text(name, value, error, error_size) != 0;
 	}
 	if (hs_compile_and_evaluate(command))
@@ -1022,6 +1095,8 @@ static struct overlay_folder *overlay_build_folder(
 	{
 		struct overlay_entry *entry = &source->entries[index];
 
+		if (entry->source == &overlay_lighting && !lighting_menu_available())
+			continue;
 		if (entry->type == _overlay_entry_folder && entry->source && depth + 1 < MAXIMUM_OVERLAY_DEPTH)
 		{
 			char child[OVERLAY_PATH_SIZE];

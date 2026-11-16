@@ -411,7 +411,8 @@ static void flush_test_callback(void *context, void *packet, DWORD status)
 static void test_cut_overlap(void)
 {
 	static short samples[16000];
-	static float scratch[MIX_CHUNK_FRAMES * MAXIMUM_OUTPUT_CHANNELS], send[MIX_CHUNK_FRAMES];
+	/* (port: room for the 300 frames drained below, past this fork's 256-frame chunks) */
+	static float scratch[1024 * MAXIMUM_OUTPUT_CHANNELS], send[1024];
 	static float old_cut[CUT_FADE_FRAMES * MAXIMUM_OUTPUT_CHANNELS], old_send[CUT_FADE_FRAMES];
 	static float next[CUT_FADE_FRAMES * MAXIMUM_OUTPUT_CHANNELS], next_send[CUT_FADE_FRAMES];
 	unsigned long layout, channels, mode, spatial, n, frame, speaker;

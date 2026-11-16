@@ -91,23 +91,38 @@ ANDROID_DIR = Path("port/android")
 LINUX_DIR = Path("port/linux")
 LINUX_HOST_DIR = LINUX_DIR / "host"
 TOMLC17_DIR = Path("port/third_party/tomlc17")
+MONOCYPHER_DIR = Path("port/third_party/monocypher")
 # the Android host library's files the PS5's host uses as they are
 # (port/ps5/PS5.md, phase 2); the rest are replaced by port/ps5/host's
 # (and the server browser's requests to the master servers, host_https.c, on
-# posix_update.c's HTTPS as Android's)
+# posix_update.c's HTTPS as Android's; and a replay's records in the host's
+# memory, host_replay.c; and the map lists' IMPORT, host_mcc_import.c)
 SHARED_HOST_FILES = ("host_arch.c", "host_common.c", "host_loader.c", "host_thread.c", "host_watch_hash.c",
-                     "host_https.c")
+                     "host_https.c", "host_replay.c", "host_mcc_import.c",
+                     # (an MCC map's conversion on the host's threads)
+                     "host_mcc_convert.c",
+                     # (an MCC package's fingerprint on the host's threads)
+                     "host_mcc_hash.c",
+                     # (the game's map cache files kept in memory)
+                     "host_memory_files.c",
+                     # (the Steam Workshop screen's Steam client: steam_downloads.h)
+                     "steam_cm.c", "steam_crypto.c", "steam_depot.c", "steam_downloads.c", "steam_net.c",
+                     "steam_seal.c", "steam_unpack.c",
+                     # (files over a connection of their own: host_file_share.h)
+                     "host_file_share.c", "host_file_share_crypto.c")
 # and the Vulkan renderer's host half (port/ps5/PS5.md, phase 4), less
 # host_vk_driver.c (port/ps5/host/host_vk_driver_ps5.c is the console's) and
 # the probe, host_vk_probe.c
 SHARED_RENDERER_FILES = ("host_vk.c", "host_vk_data.c", "host_vk_draw.c", "host_vk_post.c", "host_vk_present.c",
                          "host_vk_hud.c", "host_vk_profile.c", "host_vk_render.c", "host_vk_shaders.c", "host_vk_texture.c",
-                         "host_vk_visibility.c")
+                         "host_vk_visibility.c", "host_vk_passes.c")
 # posix.h's helpers (port/linux/src) the game imports, as the Linux host
 # compiles them (port/ps5/PS5.md, phases 2 and 5), and the Linux updater's
 # HTTPS download, which the title's updater fetches with (phase 8:
 # port/ps5/host/host_update_ps5.c)
-POSIX_FILES = ("posix_files.c", "posix_net.c", "posix_upnp.c", "posix_dtls.c", "posix_update.c")
+POSIX_FILES = ("posix_files.c", "posix_net.c", "posix_upnp.c", "posix_dtls.c", "posix_update.c",
+               # (MCC's package previews and download staging)
+               "posix_mcc_preview.c", "posix_mcc_share.c")
 # (and posix_net.c's calls that take or give an address, which
 # host_net_ps5.c turns round between Winsock's layout and BSD's: phase 5)
 ADDRESS_WRAPS = ("posix_socket_bind", "posix_socket_connect", "posix_socket_accept", "posix_socket_sendto",
@@ -345,7 +360,9 @@ licence's text in licenses/ under its name:
 - kcp, MIT; Monocypher, CC0-1.0 or BSD-2-Clause (the network)
 - tomlc17, MIT (config.toml)
 - zlib, the zlib licence; musl's maths, MIT
-- stb_truetype and stb_vorbis, public domain or MIT
+- stb_truetype, stb_image and stb_vorbis, public domain or MIT
+- Zstandard's decoder, BSD-3-Clause; the LZMA SDK's decoder, public domain
+  (the Steam Workshop screen's downloads)
 - SMAA, MIT (anti-aliasing)
 - Overpass, SIL Open Font License 1.1 (the text); Lucide's icons, ISC
 """
@@ -397,7 +414,9 @@ RELEASE_LICENSES = (
     ("repo", "port/third_party/monocypher/LICENCE.md", "licenses/monocypher-LICENCE.md", None, "Monocypher"),
     ("repo", "port/third_party/tomlc17/LICENSE", "licenses/tomlc17-LICENSE.txt", None, "tomlc17"),
     ("repo", "port/third_party/musl-math/COPYRIGHT", "licenses/musl-math-COPYRIGHT.txt", None, "musl's maths"),
-    ("repo", "port/third_party/stb/LICENSE", "licenses/stb-LICENSE.txt", None, "stb_truetype"),
+    ("repo", "port/third_party/stb/LICENSE", "licenses/stb-LICENSE.txt", None, "stb_truetype and stb_image"),
+    ("repo", "port/third_party/zstd/LICENSE", "licenses/zstd-LICENSE.txt", None,
+     "Zstandard's decoder, the Steam Workshop screen's downloads"),
     ("repo", "port/third_party/stb_vorbis/LICENSE", "licenses/stb_vorbis-LICENSE.txt", None, "stb_vorbis"),
     ("repo", "port/third_party/smaa/LICENSE", "licenses/smaa-LICENSE.txt", None, "SMAA"),
     ("repo", "port/third_party/qrcodegen/LICENSE", "licenses/qrcodegen-LICENSE.txt", None,
@@ -708,6 +727,10 @@ def _generate(n: Writer, sln: Any, config_path: Path) -> None:
     host_sources = [*sorted((root / PORT_DIR / "host").glob("*.c")),
                     *(root / ANDROID_DIR / "host" / name for name in SHARED_HOST_FILES + SHARED_RENDERER_FILES),
                     *(root / LINUX_DIR / "src" / name for name in POSIX_FILES), root / TOMLC17_DIR / "tomlc17.c",
+                    # (the map lists' IMPORT's JSON reader: host_mcc_import.c)
+                    root / LINUX_DIR / "src" / "server_json.c",
+                    # (the file connection's X25519 and ChaCha20-Poly1305: host_file_share_crypto.c)
+                    root / MONOCYPHER_DIR / "monocypher.c",
                     guest["host_table_c"], import_stubs]
     for source in host_sources:
         obj = obj_dir / (source.name + ".o")
@@ -716,6 +739,16 @@ def _generate(n: Writer, sln: Any, config_path: Path) -> None:
             cflags += " " + shlex.quote(f'-DHALO_PS5_PINS="{pins_text()}"')
         if source.name == "host_vk_driver_ps5.c":
             cflags += " " + shlex.quote(f'-DHALO_PS5_RADV_PINS="{radv_pins_text()}"')
+        # (the Steam client's chunk unpacker: the LZMA SDK's and Zstandard's
+        # decoders, whose warnings are not ours)
+        if source.name == "steam_unpack.c":
+            cflags += " -w"
+        # (an MCC map's conversion: the guest's codecs, whose bcdec shifts
+        # signed values as the guest's -fwrapv defines)
+        if source.name == "host_mcc_convert.c":
+            cflags += " -fwrapv"
+        if source.name in ("host_file_share_crypto.c", "monocypher.c"):
+            cflags += f" -I{root / MONOCYPHER_DIR}"
         if source.name == "tomlc17.c":
             # (the SDK's math.h: its isnan's _Generic names volatile types,
             # which an lvalue never has; the warning is the header's, in a
@@ -815,10 +848,7 @@ def _generate(n: Writer, sln: Any, config_path: Path) -> None:
     n.rule(name="ps5_copy", command="mkdir -p $$(dirname $out) && cp $in $out", description="PS5 COPY $out")
     param = title / "sce_sys" / "param.json"
     icon = title / "sce_sys" / "icon0.png"
-    # The icon is made once from the Android master, and committed, as the
-    # Switch's icon.jpg is:
-    #   python3 -c "from PIL import Image; Image.open('port/assets/icon/opence-icon.png').convert('RGBA')
-    #       .resize((512, 512), Image.LANCZOS).save('port/ps5/sce_sys/icon0.png', optimize=True)"
+    # The icon is committed, as the Switch's icon.jpg is: tools/slipstream_icon.py makes them
     check_content_version(PORT_DIR / "sce_sys" / "param.json", os.environ.get("HALO_BUILD_NUMBER", "0"))
     n.build(outputs=param, rule="ps5_copy", inputs=root / PORT_DIR / "sce_sys" / "param.json")
     n.build(outputs=icon, rule="ps5_copy", inputs=root / PORT_DIR / "sce_sys" / "icon0.png")

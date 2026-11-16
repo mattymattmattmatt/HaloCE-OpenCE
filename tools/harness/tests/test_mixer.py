@@ -74,7 +74,7 @@ def generated(source=None, fault=None, scalar=False):
     code = text[text.index("#define OUTPUT_RATE"):text.index("/* ---------- output")]
     code += "\n" + text[text.index("#define STREAM_SETTER"):text.index("\n\n", text.index("#define STREAM_SETTER"))] + "\n"
     code += "\n" + "\n".join(function(text, name) for name in (
-        "packet_release", "stream_complete_head", "stream_from_interface",
+        "samples_spare", "packet_release", "stream_complete_head", "stream_from_interface",
         "stream_flush", "stream_release", "stream_process", "IDirectSoundStream_Pause"))
     code += "\n#ifdef UNDER_TEST_I3DL2_SOURCE\n" + function(text, "IDirectSoundStream_SetI3DL2Source") + "\n#endif\n"
     if fault:

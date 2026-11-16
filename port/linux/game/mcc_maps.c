@@ -50,7 +50,9 @@ static struct
 	boolean scanned;
 	boolean workshop_enabled, campaigns_enabled;
 	short count;
-	struct mcc_menu_map maps[MCC_MAPS_MAXIMUM];
+	/* (MCC_MAPS_MAXIMUM of them, allocated as the first map is listed: 1.5
+	MB the guest images have no room for as static data) */
+	struct mcc_menu_map *maps;
 } mcc_menu_catalog;
 
 typedef char mcc_display_indices_are_separate[
@@ -119,6 +121,9 @@ static void mcc_map_register(char const *name)
 
 	if (!name_length || name_length > MCC_MAP_FILENAME_MAXIMUM || mcc_menu_catalog.count == MCC_MAPS_MAXIMUM)
         return;
+	if (!mcc_menu_catalog.maps &&
+		!(mcc_menu_catalog.maps = calloc(MCC_MAPS_MAXIMUM, sizeof(*mcc_menu_catalog.maps))))
+		return;
     snprintf(candidate, sizeof(candidate), "%s%s", MCC_MAPS_LEVEL_PREFIX, name);
     if (!mcc_package_name(candidate, canonical)) return;
     name = canonical + sizeof(MCC_MAPS_LEVEL_PREFIX) - 1;
@@ -229,10 +234,15 @@ static void mcc_maps_campaign_metadata(void)
 
 static void mcc_maps_menu_metadata(void)
 {
-	static struct mcc_menu_metadata metadata[2];
+	/* (both families' for the call alone, from the heap: 0.8 MB the guest
+	images have no room for as static data; the game's malloc, which its free
+	takes - cseries.h - not calloc, the C library's, which it asserts on) */
+	struct mcc_menu_metadata *metadata = malloc(2 * sizeof(*metadata));
 	char previous[64] = "", package[64], root[1024];
 	boolean loaded[2] = { FALSE, FALSE };
 	short index;
+	if (!metadata) return;
+	memset(metadata, 0, 2 * sizeof(*metadata));
 	for (index = 0; index < mcc_menu_catalog.count; index++)
 	{
 		struct mcc_menu_map *map = &mcc_menu_catalog.maps[index];
@@ -245,7 +255,7 @@ static void mcc_maps_menu_metadata(void)
 		{
 			strcpy(previous, package);
 			loaded[0] = loaded[1] = FALSE;
-			memset(metadata, 0, sizeof(metadata));
+			memset(metadata, 0, 2 * sizeof(*metadata));
 		}
 		if (!loaded[family])
 		{
@@ -261,6 +271,7 @@ static void mcc_maps_menu_metadata(void)
 		map->name[n] = 0;
 		map->titled = TRUE;
 	}
+	free(metadata);
 }
 
 static boolean mcc_map_package_is_item(char const *package)

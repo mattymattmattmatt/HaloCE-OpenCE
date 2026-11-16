@@ -245,4 +245,25 @@ boolean map_share_pieces_hashed(
 void map_share_files_update(
 	void);
 
+/* the part of an upload's cap (percent) map uploads take now: 100 but while a
+game is being played on this machine (network.map_upload_in_game) */
+long map_share_upload_percent(void);
+
+/* the lock map sharing's connections' thread and the game's hold while they
+look at what they share (map_share.c; recursive) */
+void map_share_lock(void);
+void map_share_unlock(void);
+
+/* the host's file connection (port/android/host/host_file_share.c) as one of
+a download's sources: the host's token for this machine's download (from
+network_extensions.c's data, mcc_share.c), and whether the host wants its
+listener for Custom Edition maps */
+void map_share_file_share_token(
+	unsigned long session,
+	byte const *token,
+	unsigned long direct_address,
+	unsigned short direct_port);
+boolean map_share_file_connection_wanted(
+	void);
+
 #endif

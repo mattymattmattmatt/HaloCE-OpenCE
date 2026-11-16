@@ -932,6 +932,7 @@ symbols in this file:
 #include "saved games/saved_game_files.h"
 #include "text/unicode.h"
 #include "halo_menus.h" /* port: PC_MENU_FUNCTION_BASE */
+#include "custom_campaigns.h" /* port: port/linux/game/custom_campaigns.c */
 #include "mcc_ui.h" /* port: port/linux/game/mcc_ui.c */
 
 /* ---------- constants */
@@ -3032,9 +3033,9 @@ static boolean multiplayer_level_list_initialize(
 		definition->child_count == 3,
 		"expected 3 list items for 'multiplayer level list' widget");
 	/* port: the Xbox levels, then the Custom Edition maps in the maps
-	folders, looked for again as the list opens
+	folders, looked for again as the list opens if their names have changed
 	(port/linux/game/custom_edition_maps.c) */
-	custom_edition_maps_look_again();
+	custom_edition_maps_look_again_if_changed();
 	levels = custom_edition_maps_level_list(event_handler_functions.multiplayer_levels, level_count,
 		&level_count);
 	widget->generated_list = levels;
@@ -3444,7 +3445,10 @@ static boolean ui_widget_function_denied(
 		return FALSE;
 	if (pc_menu_tag(widget->definition_tag_index))
 		return FALSE;
-	if (function_index >= PC_MENU_FUNCTION_BASE && function_index < 0x8000)
+	/* port: (a custom campaign's own menus, whose Halo PC functions are
+	given the port's: port/linux/game/menu_tags.c, custom_campaigns.c) */
+	if (function_index >= PC_MENU_FUNCTION_BASE && function_index < 0x8000 &&
+		!(custom_campaign_has_ui() && main_menu_is_active()))
 	{
 		denied = TRUE;
 	}

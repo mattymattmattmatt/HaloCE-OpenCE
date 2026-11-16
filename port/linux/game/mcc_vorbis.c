@@ -7,7 +7,13 @@
  * (vorbis_book_decodevs_add, vorbis_book_decodev_add, vorbis_book_decodevv_add).
  */
 #include "mcc_vorbis.h"
+/* (built into the hosts too, which convert on their own threads and have no
+loading screen to keep drawn: port/android/host/host_mcc_convert.c) */
+#ifdef MCC_CONVERT_HOST
+#define mcc_loading_pulse() ((void)0)
+#else
 #include "mcc_loading.h"
+#endif
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>

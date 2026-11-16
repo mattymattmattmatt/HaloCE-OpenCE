@@ -412,7 +412,7 @@ void mcc_campaign_render(short local_player)
         if (nav->kind==MCC_NAV_FLAG) {
             struct scenario *scenario=global_scenario_get();
             if (nav->reference<0 || nav->reference>=scenario->cutscene_flags.count) continue;
-            position=((struct scenario_cutscene_flag *)scenario->cutscene_flags.address)[nav->reference].position;
+            position=((struct scenario_cutscene_flag *)TAG_BLOCK_ADDRESS(scenario->cutscene_flags))[nav->reference].position;
         } else if (nav->kind==MCC_NAV_OBJECT) {
             real radius;
             struct object_datum *object=object_try_and_get(nav->reference);
@@ -478,7 +478,7 @@ static void mcc_position_distance_evaluate(short function, long thread, boolean 
         struct scenario *scenario=global_scenario_get();
         short flag=(short)args[1];
         if (flag<0 || flag>=scenario->cutscene_flags.count) {hs_return(thread,result.bits);return;}
-        target=((struct scenario_cutscene_flag *)scenario->cutscene_flags.address)[flag].position;
+        target=((struct scenario_cutscene_flag *)TAG_BLOCK_ADDRESS(scenario->cutscene_flags))[flag].position;
     } else {
         target.x=mcc_campaign_argument(args[1]);target.y=mcc_campaign_argument(args[2]);target.z=mcc_campaign_argument(args[3]);
     }
@@ -643,9 +643,9 @@ static void mcc_impulse_predict_evaluate(short function, long thread, boolean in
     if (args[0]!=NONE) {
         sound=sound_definition_get(args[0]);
         for (range=0;range<sound->pitch_ranges.count;range++) {
-            struct sound_pitch_range *pitch=(struct sound_pitch_range *)sound->pitch_ranges.address+range;
+            struct sound_pitch_range *pitch=(struct sound_pitch_range *)TAG_BLOCK_ADDRESS(sound->pitch_ranges)+range;
             for (permutation=0;permutation<pitch->permutations.count;permutation++)
-                _sound_cache_sound_request((struct sound_permutation *)pitch->permutations.address+permutation,
+                _sound_cache_sound_request((struct sound_permutation *)TAG_BLOCK_ADDRESS(pitch->permutations)+permutation,
                     (boolean)args[1],TRUE,FALSE);
         }
     }

@@ -46,6 +46,9 @@ enum
 	DK_COMMAND_HUD_IMAGE,
 	DK_COMMAND_HUD_FORGET,
 	DK_COMMAND_BLIT,
+	DK_COMMAND_STATIC_MAKE,
+	DK_COMMAND_STATIC_FREE,
+	DK_COMMAND_PLASMA_OCCLUSION,
 };
 
 /* a surface's kind, as the host makes its image */
@@ -449,9 +452,10 @@ struct dk_command_composite
 
 The pixels the draws between a begin and an end pass go to result slot
 index (1 to DK_VISIBILITY_SLOTS - 1), which the GPU writes when it gets
-there; host_dk_visibility reads a slot's latest count. */
+there; host_dk_visibility reads a slot's latest count. Slot 0 is none, and
+the game's 4096 slots (d3d8_gl.c's VISIBILITY_TEST_SLOTS) are 1 to 4096. */
 
-#define DK_VISIBILITY_SLOTS 4096
+#define DK_VISIBILITY_SLOTS 4097
 
 struct dk_command_visibility_end
 {
@@ -475,6 +479,16 @@ struct dk_command_textures
 {
 	struct dk_command_header header;
 	struct dk_stage_texture stages[4];
+};
+
+/* the images the dynamic lighting's model variants with occlusion read in the
+vertex stage (DK_BINDING_PLASMA_TEXTURE0), until they change: sent only for
+such a draw, so that nothing else's stream or binding changes */
+struct dk_command_plasma_occlusion
+{
+	struct dk_command_header header;
+	uint32_t images[2];
+	struct dk_sampler sampler;
 };
 
 /* how an input register of the vertex shader is fed */
@@ -555,6 +569,18 @@ were - so indices the game may write again are read when the draw is made,
 not when the host or the GPU get to it */
 #define DK_INDEX_INLINE 1u
 
+/* geometry written once and kept outside the window (a model past the mods'
+budget, an index buffer of the game's own): the host copies [address, address +
+size) into GPU memory of its own, before the first draw that reads it, and draws
+reading there read the copy, until the free. In the stream, so a freed address
+made again means the new bytes for the draws after it */
+struct dk_command_static
+{
+	struct dk_command_header header;
+	uint32_t address;
+	uint32_t size;
+};
+
 struct dk_command_draw
 {
 	struct dk_command_header header;
@@ -579,5 +605,19 @@ declares them too): by a key, 1 and the bytes copied if kept */
 int host_texture_cache_get(uint64_t key, uint32_t buffer, uint32_t size);
 void host_texture_cache_put(uint64_t key, uint32_t buffer, uint32_t size);
 void host_texture_cache_clear(void);
+/* a texture to read into the cache before the game asks for it (host_texture_cache_prefetch): its key, and where its
+bytes are in a file (path, a guest address of the path's string) */
+struct host_texture_prefetch
+{
+	uint64_t key;
+	uint32_t offset;
+	uint32_t size;
+	uint32_t path;
+	uint32_t reserved;
+};
+/* reads the count textures of items (a guest address) into the cache on a thread of the host's, the map's mod
+bitmaps, so that the game's texture cache finds them there rather than reading the card in the middle of a frame;
+returns at once (the list is copied). host_texture_cache_clear stops it */
+void host_texture_cache_prefetch(uint32_t items, uint32_t count);
 
 #endif

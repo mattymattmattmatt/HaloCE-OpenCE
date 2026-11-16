@@ -74,12 +74,25 @@ def main():
         # translation from the guest's descriptor table (host_syscall.c), and
         # those and the two that take a path through its map cache files kept
         # in memory (host_memory_files.c)
+        # (and folder listings, only to be counted for the card's report)
         translated = {"hostposix_fstat", "hostposix_seek", "hostposix_truncate", "hostposix_stat",
-                      "hostposix_set_file_times"} if translate_descriptors else set()
+                      "hostposix_set_file_times", "hostposix_directory_open", "hostposix_directory_next",
+                      "hostposix_find_entry_case_insensitive", "hostposix_mcc_share_open",
+                      "hostposix_mcc_share_close"} if translate_descriptors else set()
+
+        # elsewhere (Android's host and the PS5's, whose guests' descriptors
+        # are the host's) the ones that take a descriptor or a path to a map
+        # cache file go through the map cache files kept in memory
+        # (port/android/host/host_memory_files.c)
+        memory = set() if translate_descriptors else {
+            "hostposix_fstat", "hostposix_seek", "hostposix_truncate", "hostposix_stat",
+            "hostposix_set_file_times"}
 
         def symbol(n):
             if n in translated:
                 return "host_guest_posix_" + n[len("hostposix_"):]
+            if n in memory:
+                return "host_memory_posix_" + n[len("hostposix_"):]
             # hostposix_<name> imports port/linux/src/posix.h's posix_<name>
             return "posix_" + n[len("hostposix_"):] if n.startswith("hostposix_") else n
         table += [f"extern void {symbol(n)}(void);" for n in host_names]

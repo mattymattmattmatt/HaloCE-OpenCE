@@ -212,10 +212,11 @@
 	<bitmap name="main_menu/multiplayer_type_select/mp_options">
 		<frame png="ce/shell/main_menu/multiplayer_type_select/mp_options__0.png" width="512" height="256"/>
 		<frame png="ce/shell/main_menu/multiplayer_type_select/mp_options__1.png" width="512" height="256"/>
-		<frame png="ce/shell/main_menu/multiplayer_type_select/mp_options__2.png" width="512" height="256"/>
-		<frame png="ce/shell/main_menu/multiplayer_type_select/mp_options__3.png" width="512" height="256"/>
-		<frame png="ce/shell/main_menu/multiplayer_type_select/mp_options__4.png" width="512" height="256"/>
-		<frame png="ce/shell/main_menu/multiplayer_type_select/mp_options__5.png" width="512" height="256"/>
+		<frame map="ui\shell\main_menu\multiplayer_type_select\mp_options" index="3"/>
+		<frame png="ce/shell/main_menu/multiplayer_type_select/mp_options__0.png" width="512" height="256"/>
+		<frame png="ce/shell/main_menu/multiplayer_type_select/mp_options__1.png" width="512" height="256"/>
+		<frame png="ce/port/blank__0.png" width="16" height="16"/>
+		<frame png="ce/shell/main_menu/multiplayer_type_select/mp_options__0.png" width="512" height="256"/>
 		<frame png="ce/shell/main_menu/multiplayer_type_select/mp_options__6.png" width="512" height="256"/>
 	</bitmap>
 	<bitmap name="main_menu/multiplayer_type_select/server_settings/header_server_settings">
@@ -306,12 +307,16 @@
 		<frame png="ce/shell/main_menu/settings_select/player_setup/player_profile_edit/profile_options__6.png" width="512" height="256"/>
 		<frame png="ce/shell/main_menu/settings_select/player_setup/player_profile_edit/profile_options__7.png" width="512" height="256"/>
 		<frame png="ce/shell/main_menu/settings_select/player_setup/player_profile_edit/profile_options__8.png" width="512" height="256"/>
+		<frame png="ce/shell/main_menu/settings_select/player_setup/player_profile_edit/profile_options__9.png" width="512" height="256"/>
 	</bitmap>
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/header_profile_video_settings">
 		<frame png="ce/shell/main_menu/settings_select/player_setup/player_profile_edit/video_settings/header_profile_video_settings__0.png" width="512" height="64"/>
 	</bitmap>
 	<bitmap name="main_menu/solo_level_select/header_load_level">
 		<frame png="ce/shell/main_menu/solo_level_select/header_load_level__0.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/credits/credits_logo">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/credits/credits_logo.png" width="256" height="256"/>
 	</bitmap>
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/gameplay/header_gameplay">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/gameplay/header_gameplay.png" width="512" height="64"/>
@@ -372,6 +377,15 @@
 		<frame png="ce/port/pause/pausebox_right__2.png" width="16" height="256"/>
 		<frame png="ce/port/pause/pausebox_right__3.png" width="16" height="256"/>
 		<frame png="ce/port/pause/pausebox_right__4.png" width="16" height="256"/>
+	</bitmap>
+	<bitmap name="pause/joinbox_left">
+		<frame png="ce/port/pause/pausebox_left__0.png" width="16" height="256"/>
+	</bitmap>
+	<bitmap name="pause/joinbox_center">
+		<frame png="ce/port/pause/pausebox_center__0.png" width="4" height="256"/>
+	</bitmap>
+	<bitmap name="pause/joinbox_right">
+		<frame png="ce/port/pause/pausebox_right__0.png" width="16" height="256"/>
 	</bitmap>
 	<bitmap name="pause/objectives_left">
 		<frame png="ce/port/pause/objectives_left__0.png" width="16" height="256"/>
@@ -445,6 +459,39 @@
 	</bitmap>
 	<bitmap name="hints/ps5_dpad">
 		<frame png="ce/port/hints/ps5_dpad__0.png" width="14" height="14"/>
+	</bitmap>
+	<bitmap name="hints/switch_plus">
+		<frame png="ce/port/hints/switch_plus__0.png" width="14" height="14"/>
+	</bitmap>
+	<bitmap name="hints/ps5_options">
+		<frame png="ce/port/hints/ps5_options__0.png" width="14" height="14"/>
+	</bitmap>
+	<bitmap name="main_menu/multiplayer_type_select/host/tab">
+		<frame png="ce/port/main_menu/multiplayer_type_select/host/tab__0.png" width="260" height="28"/>
+		<frame png="ce/port/main_menu/multiplayer_type_select/host/tab__1.png" width="260" height="28"/>
+	</bitmap>
+	<bitmap name="main_menu/multiplayer_type_select/host/panel">
+		<frame png="ce/port/main_menu/multiplayer_type_select/host/panel__0.png" width="260" height="292"/>
+	</bitmap>
+	<bitmap name="main_menu/multiplayer_type_select/host/row">
+		<frame png="ce/port/main_menu/multiplayer_type_select/host/row__0.png" width="240" height="26"/>
+		<frame png="ce/port/main_menu/multiplayer_type_select/host/row__1.png" width="240" height="26"/>
+		<frame png="ce/port/main_menu/multiplayer_type_select/host/row__2.png" width="240" height="26"/>
+	</bitmap>
+	<bitmap name="main_menu/multiplayer_type_select/host/entry_row">
+		<frame png="ce/port/main_menu/multiplayer_type_select/host/entry_row__0.png" width="240" height="36"/>
+		<frame png="ce/port/main_menu/multiplayer_type_select/host/entry_row__1.png" width="240" height="36"/>
+		<frame png="ce/port/main_menu/multiplayer_type_select/host/entry_row__2.png" width="240" height="36"/>
+	</bitmap>
+	<bitmap name="main_menu/multiplayer_type_select/host/pill_116">
+		<frame png="ce/port/main_menu/multiplayer_type_select/host/pill_116__0.png" width="116" height="24"/>
+		<frame png="ce/port/main_menu/multiplayer_type_select/host/pill_116__1.png" width="116" height="24"/>
+		<frame png="ce/port/main_menu/multiplayer_type_select/host/pill_116__2.png" width="116" height="24"/>
+	</bitmap>
+	<bitmap name="main_menu/multiplayer_type_select/host/pill_76">
+		<frame png="ce/port/main_menu/multiplayer_type_select/host/pill_76__0.png" width="76" height="24"/>
+		<frame png="ce/port/main_menu/multiplayer_type_select/host/pill_76__1.png" width="76" height="24"/>
+		<frame png="ce/port/main_menu/multiplayer_type_select/host/pill_76__2.png" width="76" height="24"/>
 	</bitmap>
 	<bitmap name="blank">
 		<frame png="ce/port/blank__0.png" width="4" height="4"/>

@@ -19,9 +19,25 @@ struct hs_console_state
 };
 
 static struct hs_console_state *hs_console_state;
-static byte hs_console_colors[HS_CONSOLE_SYNTAX_COUNT];
-static unsigned short hs_console_walk[HS_CONSOLE_SYNTAX_COUNT];
-static byte hs_console_edges[HS_CONSOLE_SYNTAX_COUNT];
+/* (allocated at the first use, zeroed as static data is: the guest images,
+whose code and data have to fit below 0x40000000, have no room for it as
+static data) */
+static struct hs_console_walk_tables
+{
+    byte colors[HS_CONSOLE_SYNTAX_COUNT];
+    unsigned short walk[HS_CONSOLE_SYNTAX_COUNT];
+    byte edges[HS_CONSOLE_SYNTAX_COUNT];
+} *hs_console_walk_storage;
+
+static struct hs_console_walk_tables *hs_console_walk_storage_get(void)
+{
+    if (!hs_console_walk_storage && !(hs_console_walk_storage = calloc(1, sizeof(*hs_console_walk_storage))))
+        abort();
+    return hs_console_walk_storage;
+}
+#define hs_console_colors (hs_console_walk_storage_get()->colors)
+#define hs_console_walk (hs_console_walk_storage_get()->walk)
+#define hs_console_edges (hs_console_walk_storage_get()->edges)
 
 static boolean hs_console_refuse(char const *reason)
 {

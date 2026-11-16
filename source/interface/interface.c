@@ -410,6 +410,9 @@ void interface_draw_fullscreen_overlays(
 	terminal_draw();
 	main_framerate_render();
 	render_debug_profile();
+	/* port: the host's screen, hosting from the menus, in place of the game
+	(port/linux/game/host_dashboard.c) */
+	host_dashboard_draw();
 	/* port: the overlay menu, over everything (port/linux/game/overlay_menu.c) */
 	overlay_menu_draw();
 
@@ -600,7 +603,7 @@ void interface_draw_screen(
 	/* port: a replay's playback's window is local player 0's, who has no
 	player: no HUD, nor the game type's view of a player (its line is drawn
 	over the screen, network_replay_playback_draw) */
-	if (network_replay_playing())
+	if (network_replay_viewing())
 		return;
 
 	weapon_hud_index = interface_get_weapon_hud_index(&flashlight_power);

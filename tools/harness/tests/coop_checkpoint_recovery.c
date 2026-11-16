@@ -385,6 +385,10 @@ static void distributed_client_carry_unsteered_vehicles(void) {prediction_ticks+
 static void distributed_client_send_identity(void) {prediction_ticks++;}
 static void distributed_client_send_build(void) {prediction_ticks++;}
 
+/* (this fork's ragdolls and network replays: no body is a ragdoll, no replay plays) */
+static boolean biped_ragdoll_active(long object_index){(void)object_index;return FALSE;}
+static void network_replay_playback_damage(long object_index,long owner_player_index,long owner_object_index,
+    real_point3d const *origin){(void)object_index;(void)owner_player_index;(void)owner_object_index;(void)origin;}
 #include "engine.inc"
 #include "under_test.inc"
 

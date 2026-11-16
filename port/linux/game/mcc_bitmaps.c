@@ -13,15 +13,11 @@
 #include "mcc_texture_cache.h"
 #include "../src/mcc_texture_bridge.h"
 #include "../src/port_config.h"
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
-/* Unmodified iOrange/bcdec, MIT option (see third_party/bcdec/LICENSE).
- * Revision 80859ed3b7afb1c527a2a99d70c61457bea72d0c.
- * https://github.com/iOrange/bcdec
- * Header SHA-256: 134520764d96f70a27db814173616c89ad85db95fbd3328417c7a8c77e7ca189. */
-#define BCDEC_STATIC
-#define BCDEC_IMPLEMENTATION
-#include "../../third_party/bcdec/bcdec.h"
+#include "mcc_bitmap_kernels.h"
+#include "mcc_convert.h"
 
 #define MCC_BITMAP_BASE 0x60000000u
 #define MCC_BITMAP_LIMIT 0x1FFFFFFFu
@@ -42,6 +38,9 @@ struct mcc_textures {
     struct mcc_texture *items;
     struct mcc_bitmap_clone *clones;
     uint32_t count, end, capacity, clone_count, tag_capacity, stream_end;
+    /* BC7 bitmaps kept as DXT5 (mcc_bc7_to_dxt5), and the bytes that saved */
+    uint32_t transcoded;
+    uint64_t transcode_saved;
 };
 
 static void *mcc_bitmap_tag(struct mcc_runtime *runtime,uint32_t handle,uint32_t group,uint32_t size)
@@ -264,138 +263,6 @@ static int mcc_bitmap_usages(struct mcc_runtime *runtime,struct mcc_textures *te
     return 1;
 }
 
-static int mcc_bitmap_bytes(short format)
-{
-    switch (format) {
-        case 0: case 1: case 2: case 17: return 1;
-        case 3: case 6: case 8: case 9: return 2;
-        case 10: case 11: return 4;
-        default: return 0;
-    }
-}
-
-static uint32_t mcc_pixel(unsigned char const *source,int format)
-{
-    unsigned v=source[0], a=255,r=v,g=v,b=v;
-    if (format==0) {a=v; r=g=b=255;}
-    else if (format==2) a=v;
-    else if (format==3) a=source[1];
-    else if (format==6 || format==8 || format==9) {
-        v|=(unsigned)source[1]<<8;
-        if (format==6) {r=(v>>11)*255/31; g=((v>>5)&63)*255/63; b=(v&31)*255/31;}
-        else if (format==8) {a=(v&0x8000)?255:0; r=((v>>10)&31)*255/31; g=((v>>5)&31)*255/31; b=(v&31)*255/31;}
-        else {a=(v>>12)*17; r=((v>>8)&15)*17; g=((v>>4)&15)*17; b=(v&15)*17;}
-    } else if (format==10 || format==11) {
-        b=source[0];g=source[1];r=source[2];a=format==10 ? 255 : source[3];
-    } else if (format==17) return global_vector_palette[v];
-    return b|(g<<8)|(r<<16)|(a<<24);
-}
-
-static uint32_t mcc_channels(uint32_t color,unsigned usage)
-{
-    unsigned b=color&255,g=(color>>8)&255,r=(color>>16)&255,a=color>>24;
-    if (usage==2) return a|(g<<8)|(b<<16)|(r<<24);
-    /* Native meters read fill order from blue and shape from alpha. Keep
-     * shape in green too for the renderer's existing coverage blend, so
-     * antialiased edges retain the scene instead of becoming black. */
-    if (usage==4) return a|(r<<8)|(a<<16)|(r<<24);
-    return color;
-}
-
-/* Decode one slice to BGRA. Compressed blocks remain 4x4 even for tiny mips. */
-static void mcc_bitmap_decode(unsigned char const *input,uint32_t *output,
-    unsigned width,unsigned height,short format,unsigned usage)
-{
-    unsigned x,y;
-    if (format>=14 && format!=17) {
-        unsigned step=format==14 ? 8 : 16;
-        for (y=0;y<height;y+=4) for (x=0;x<width;x+=4) {
-            unsigned char rgba[64];
-            unsigned dx,dy;
-            if (!x && !(y & 63u)) mcc_loading_pulse();
-            if (format==14) bcdec_bc1(input,rgba,16);
-            else if (format==15) bcdec_bc2(input,rgba,16);
-            else if (format==16) bcdec_bc3(input,rgba,16);
-            else bcdec_bc7(input,rgba,16);
-            input+=step;
-            for (dy=0;dy<4 && y+dy<height;dy++) for (dx=0;dx<4 && x+dx<width;dx++) {
-                unsigned char const *p=rgba+(dy*4+dx)*4;
-                uint32_t color=p[2]|((uint32_t)p[1]<<8)|((uint32_t)p[0]<<16)|((uint32_t)p[3]<<24);
-                output[(y+dy)*width+x+dx]=mcc_channels(color,usage);
-            }
-        }
-    } else {
-        unsigned step=mcc_bitmap_bytes(format);
-        for (x=0;x<width*height;x++) output[x]=mcc_channels(mcc_pixel(input+x*step,format),usage);
-    }
-}
-
-static uint32_t mcc_morton_axis(unsigned value,unsigned width,unsigned height,unsigned depth,unsigned axis)
-{
-    unsigned dimensions[3]={width,height,depth},bit,position=0,n;
-    uint32_t address=0;
-    for (bit=1;bit<width || bit<height || bit<depth;bit<<=1) {
-        for (n=0;n<3;n++) if (bit<dimensions[n]) {
-            if (n==axis && (value&bit)) address|=1u<<position;
-            position++;
-        }
-    }
-    return address;
-}
-
-/* MCC input is mip-major. Native textures have Morton-ordered uncompressed
- * texels, six face-major cube chains, and explicit row/face alignment. Pack
- * directly into an owned, zeroed buffer so allocation failure is observable. */
-static int mcc_bitmap_pack(struct bitmap_data *bitmap,unsigned char const *source,
-    uint32_t source_size,unsigned char *target,uint32_t target_size)
-{
-    static unsigned const cube_face[6]={0,2,1,3,4,5};
-    uint32_t x_address[8192],y_address[8192],z_address[512],out=0;
-    unsigned face,faces=bitmap->type==2 ? 6 : 1;
-    unsigned maximum=rasterizer_xbox_bitmap_get_max_mipmap_count(bitmap);
-    unsigned bytes=mcc_bitmap_bytes(bitmap->format);
-    /* CPU object lighting can select the final 2x2/1x1 DXT mips even though
-     * the GPU descriptor stops at 4 texels. A 2D chain has identical CPU/GPU
-     * prefix layout, so retain its complete source tail in owned storage. */
-    if (bitmap->type==0 && (bitmap->flags&2)) maximum=bitmap->mipmap_count;
-    memset(target,0,target_size);
-    for (face=0;face<faces;face++) {
-        unsigned level;
-        uint32_t input=0;
-        for (level=0;level<=maximum;level++) {
-            unsigned width=MAX(bitmap->width>>level,1),height=MAX(bitmap->height>>level,1),depth=MAX(bitmap->depth>>level,1);
-            uint32_t size=bytes ? width*height*depth*bytes : ((width+3)/4)*((height+3)/4)*depth*(bitmap->format==14 ? 8 : 16);
-            uint32_t at=input+(faces==6 ? cube_face[face] : 0)*size;
-            unsigned x,y,z;
-            if (at>source_size || size>source_size-at || out>target_size) return 0;
-            if (bitmap->flags&16) {
-                unsigned pitch=(width*bytes+63)&~63u;
-                if (pitch*height>target_size-out) return 0;
-                for (y=0;y<height;y++) memcpy(target+out+y*pitch,source+at+y*width*bytes,width*bytes);
-                out+=pitch*height;
-            } else {
-                if (size>target_size-out) return 0;
-                if (!bytes) memcpy(target+out,source+at,size);
-                else {
-                    if (width>8192 || height>8192 || depth>512) return 0;
-                    for (x=0;x<width;x++) x_address[x]=mcc_morton_axis(x,width,height,depth,0);
-                    for (y=0;y<height;y++) y_address[y]=mcc_morton_axis(y,width,height,depth,1);
-                    for (z=0;z<depth;z++) z_address[z]=mcc_morton_axis(z,width,height,depth,2);
-                    for (z=0;z<depth;z++) for (y=0;y<height;y++) for (x=0;x<width;x++) {
-                        uint32_t address=x_address[x]|y_address[y]|z_address[z];
-                        memcpy(target+out+address*bytes,source+at+((z*height+y)*width+x)*bytes,bytes);
-                    }
-                }
-                out+=size;
-            }
-            input+=size*faces;
-        }
-        out=(out+127)&~127u;
-    }
-    if (!(bitmap->flags&(2|16))) bitmap->flags|=8;
-    return out==target_size;
-}
-
 /* Recent MCC campaign lightmaps carry bit 12 in addition to the environment
  * flag. Its wider MCC meaning is not assumed here: admit only the observed
  * lightmap-group RGB565 layout with a complete, tightly packed pixel range.
@@ -431,18 +298,55 @@ static void mcc_bitmap_complete_mips(struct bitmap_data *bitmap)
     if (packed==(uint32_t)bitmap->pixels_size) bitmap->mipmap_count=(short)complete;
 }
 
-static int mcc_texture_prepare(struct mcc_runtime *runtime,struct mcc_textures *textures,struct mcc_texture *texture,
-    uint32_t stream_offset)
+/* A texture on its way: planned (its shape, sizes and stream decided, in the
+ * map's order, before anything is converted), its raw pixels read, and its
+ * pixel work (mcc_bitmap_kernels.h) done on the host's threads or here; then
+ * taken in the same order, its descriptor written as one thread converting
+ * in turn wrote it. */
+struct mcc_texture_entry {
+    uint32_t index;
+    struct mcc_texture *texture;
+    struct bitmap_data normalized;
+    struct mcc_convert_bitmap description;
+    struct mcc_convert_job request;
+    unsigned char *raw, *hardware;
+    uint32_t allocation, stream_offset, bytes;
+    uint64_t raw_size, decoded_size;
+    int job, result, non_power_two, transcode;
+};
+
+/* at most this many in hand, and this many bytes of the guest's memory
+(their raw pixels and packed ones) */
+#define MCC_TEXTURE_QUEUE 32
+#define MCC_TEXTURE_QUEUE_BYTES 0x6000000u
+
+struct mcc_texture_queue {
+    struct mcc_texture_entry entries[MCC_TEXTURE_QUEUE];
+    uint32_t first, count, bytes;
+    int host;
+    uint32_t *axes;
+};
+
+/* the texture planned and read: its entry filled. 0 where it cannot be
+converted (said, as one thread converting in turn said it) */
+static int mcc_texture_plan(struct mcc_runtime *runtime,struct mcc_textures *textures,struct mcc_texture *texture,
+    uint32_t stream_offset,struct mcc_texture_entry *planned)
 {
     struct bitmap_data *bitmap=texture->bitmap, normalized=*bitmap;
-    unsigned level,faces=bitmap->type==2 ? 6 : 1;
+    unsigned level,faces=bitmap->type==2 ? 6 : 1,maximum;
     uint64_t raw_size=0,decoded_size=0;
-    unsigned char *raw=NULL,*pixels=NULL,*hardware=NULL;
-    int convert=bitmap->format==18 || texture->channels==2 || texture->channels==4 ||
-        ((bitmap->flags&16) && bitmap->format>=14 && bitmap->format<=17);
+    unsigned char *raw=NULL;
     int bytes_per_pixel=mcc_bitmap_bytes(bitmap->format);
     int non_power_two=bitmap->type==0 && ((bitmap->width&(bitmap->width-1)) || (bitmap->height&(bitmap->height-1)));
-    uint32_t input_offset=0,output_offset=0,hardware_size,allocation;
+    /* BC7 as DXT5 (mcc_bc7_to_dxt5) where it would be drawn as it is: a 2D
+    or cube texture of whole blocks, not linear and not one whose channels
+    are moved on the CPU, which must still be decoded */
+    int transcode=bitmap->format==18 && texture->channels!=2 && texture->channels!=4 &&
+        !(bitmap->flags&16) && !non_power_two && (bitmap->type==0 || bitmap->type==2) &&
+        bitmap->width>=4 && bitmap->height>=4;
+    int convert=(bitmap->format==18 && !transcode) || texture->channels==2 || texture->channels==4 ||
+        ((bitmap->flags&16) && bitmap->format>=14 && bitmap->format<=17);
+    uint32_t hardware_size,allocation;
     if (bitmap->width<=0 || bitmap->height<=0 || bitmap->depth<=0 || bitmap->type<0 || bitmap->type>2 ||
         bitmap->width>16384 || bitmap->height>16384 || bitmap->depth>512 || bitmap->mipmap_count<0 || bitmap->mipmap_count>13 ||
         bitmap->pixels_size<=0 || (!bytes_per_pixel && (bitmap->format<14 || bitmap->format>18))) return 0;
@@ -480,6 +384,7 @@ static int mcc_texture_prepare(struct mcc_runtime *runtime,struct mcc_textures *
         normalized.format=11;
         normalized.flags&=~(2|4|8|32|0x100);
     } else normalized.flags&=~(8|0x100);
+    if (transcode) normalized.format=16;
     /* CEA bit 9 marks environment/lightmap use (Invader's public bitmap
      * schema). It is not a pixel-layout flag and has no Xbox counterpart. */
     normalized.flags&=~0x200;
@@ -509,72 +414,239 @@ static int mcc_texture_prepare(struct mcc_runtime *runtime,struct mcc_textures *
         error(_error_silent,"mcc bitmap: storage limit (used %lu, requested %lu)",textures->end,allocation);
         return 0;
     }
+    /* CPU object lighting can select the final 2x2/1x1 DXT mips even though
+     * the GPU descriptor stops at 4 texels. A 2D chain has identical CPU/GPU
+     * prefix layout, so retain its complete source tail in owned storage. */
+    maximum=rasterizer_xbox_bitmap_get_max_mipmap_count(&normalized);
+    if (normalized.type==0 && (normalized.flags&2)) maximum=normalized.mipmap_count;
     raw=malloc((size_t)raw_size);
-    if (!raw) goto out_of_memory;
+    if (!raw) {
+        error(_error_silent,"mcc bitmap: out of memory for tag %08lx (stored %lu, texture %lu bytes)",
+            texture->handle,textures->end,allocation);
+        return 0;
+    }
     if (bitmap->flags&0x100) {
         uint32_t *entry=(uint32_t *)(runtime->tag_index+(texture->resource_handle&0xFFFF)*32);
         char const *name=mcc_runtime_pointer(runtime,entry[4],256);
         char resource_name[272],group_name[272];
-        if (!name || !memchr(name,0,256)) goto failed;
+        if (!name || !memchr(name,0,256)) {free(raw);return 0;}
         snprintf(resource_name,sizeof(resource_name),"%s_%lu",name,(unsigned long)texture->resource_index);
         snprintf(group_name,sizeof(group_name),"%s__pixels",name);
         if (!mcc_resources_read(runtime,1,resource_name,bitmap->pixels_offset,(uint32_t)raw_size,raw,group_name)) {
             error(_error_silent,"mcc bitmap: external '%s' does not match the selected MCC bitmaps.map",resource_name);
-            goto failed;
+            free(raw);
+            return 0;
         }
-    } else if (!mcc_runtime_read(runtime,bitmap->pixels_offset,(uint32_t)raw_size,raw)) goto failed;
-    if (convert) {
-        pixels=malloc(allocation);
-        if (!pixels) goto out_of_memory;
-        memset(pixels,0,allocation);
-        for (level=0;level<=(unsigned)normalized.mipmap_count;level++) {
-            unsigned w=MAX(bitmap->width>>level,1),h=MAX(bitmap->height>>level,1),d=MAX(bitmap->depth>>level,1),slice;
-            unsigned source_bytes=bytes_per_pixel ? w*h*bytes_per_pixel : ((w+3)/4)*((h+3)/4)*(bitmap->format==14 ? 8 : 16);
-            for (slice=0;slice<faces*d;slice++) {
-                mcc_bitmap_decode(raw+input_offset,(uint32_t *)(pixels+output_offset),w,h,bitmap->format,texture->channels);
-                input_offset+=source_bytes;output_offset+=w*h*4;
-            }
+    } else if (!mcc_runtime_read(runtime,bitmap->pixels_offset,(uint32_t)raw_size,raw)) {free(raw);return 0;}
+    memset(planned,0,sizeof(*planned));
+    planned->texture=texture;planned->normalized=normalized;planned->raw=raw;
+    planned->allocation=allocation;planned->stream_offset=stream_offset;
+    planned->raw_size=raw_size;planned->decoded_size=decoded_size;
+    planned->non_power_two=non_power_two;planned->transcode=transcode;planned->job=-1;
+    planned->bytes=(uint32_t)raw_size+allocation;
+    /* the pixel work's description (mcc_convert_job.h) */
+    planned->description.source_width=(uint32_t)bitmap->width;
+    planned->description.source_height=(uint32_t)bitmap->height;
+    planned->description.source_depth=(uint32_t)bitmap->depth;
+    planned->description.source_type=(uint32_t)bitmap->type;
+    planned->description.source_format=(uint32_t)bitmap->format;
+    planned->description.source_flags=(uint32_t)(unsigned short)bitmap->flags;
+    planned->description.source_mipmaps=(uint32_t)bitmap->mipmap_count;
+    planned->description.packed_width=(uint32_t)normalized.width;
+    planned->description.packed_height=(uint32_t)normalized.height;
+    planned->description.packed_depth=(uint32_t)normalized.depth;
+    planned->description.packed_type=(uint32_t)normalized.type;
+    planned->description.packed_format=(uint32_t)normalized.format;
+    planned->description.packed_flags=(uint32_t)(unsigned short)normalized.flags;
+    planned->description.packed_mipmaps=(uint32_t)normalized.mipmap_count;
+    planned->description.maximum=maximum;
+    planned->description.usage=texture->channels;
+    planned->description.faces=faces;
+    planned->description.levels=(uint32_t)normalized.mipmap_count+1;
+    planned->description.transcode=(uint32_t)transcode;
+    planned->description.convert=(uint32_t)convert;
+    planned->description.raw_size=(uint32_t)raw_size;
+    planned->description.decoded_size=(uint32_t)decoded_size;
+    planned->description.target_size=normalized.type==0 && (normalized.flags&2) ? allocation : hardware_size;
+    planned->description.bytes_per_pixel=(uint32_t)bytes_per_pixel;
+    planned->description.palette=(uint32_t)(uintptr_t)global_vector_palette;
+    /* (its place in the stream and the storage, decided now: the next
+    texture's plan depends on them, not on this one's conversion) */
+    texture->size=allocation;
+    textures->end+=allocation;
+    textures->stream_end=MAX(textures->stream_end,stream_offset+allocation);
+    return 1;
+}
+
+/* the planned texture's pixel work started: on the host's threads, or done
+here and now. 0 where it could not be (said) */
+static int mcc_texture_start(struct mcc_textures *textures,struct mcc_texture_queue *queue,
+    struct mcc_texture_entry *entry)
+{
+    entry->hardware=malloc(entry->allocation);
+    if (!entry->hardware) {
+        error(_error_silent,"mcc bitmap: out of memory for tag %08lx (stored %lu, texture %lu bytes)",
+            entry->texture->handle,textures->end,entry->allocation);
+        return 0;
+    }
+    if (queue->host) {
+        entry->request.kind=MCC_CONVERT_BITMAP;
+        entry->request.input=(uint32_t)(uintptr_t)entry->raw;
+        entry->request.input_size=(uint32_t)entry->raw_size;
+        entry->request.output=(uint32_t)(uintptr_t)entry->hardware;
+        entry->request.output_size=entry->allocation;
+        entry->request.parameters[0]=(uint32_t)(uintptr_t)&entry->description;
+        entry->job=mcc_convert_submit(&entry->request);
+        if (entry->job>=0) return 1;
+    }
+    {
+        struct mcc_bitmap_work work;
+        unsigned char *decoded=NULL;
+        mcc_bitmap_work_from(&entry->description,&work);
+        if (work.convert && !(decoded=malloc(work.decoded_size ? work.decoded_size : 1))) {
+            error(_error_silent,"mcc bitmap: out of memory for tag %08lx (stored %lu, texture %lu bytes)",
+                entry->texture->handle,textures->end,entry->allocation);
+            return 0;
         }
-    } else {pixels=raw;raw=NULL;}
-    if (raw) free(raw);
-    raw=NULL;
-    hardware=malloc(allocation);
-    if (!hardware) goto out_of_memory;
-    memset(hardware,0,allocation);
-    if (!mcc_bitmap_pack(&normalized,pixels,(uint32_t)(convert ? decoded_size : raw_size),hardware,
-        normalized.type==0 && (normalized.flags&2) ? allocation : hardware_size)) goto failed;
-    free(pixels);pixels=hardware;hardware=NULL;
-    if (bitmap->mipmap_count!=normalized.mipmap_count)
-        error(_error_silent,non_power_two ? "mcc bitmap: tag %08lx retained linear base level (omitted levels %d through %d)" :
+        entry->result=mcc_bitmap_work_run(&work,entry->raw,decoded,entry->hardware,queue->axes,mcc_loading_pulse) ? 1 :
+            MCC_CONVERT_FAILED_DECODE;
+        if (decoded) free(decoded);
+    }
+    return 1;
+}
+
+static void mcc_texture_free(struct mcc_texture_entry *entry)
+{
+    mcc_convert_release(entry->job);
+    entry->job=-1;
+    if (entry->raw) free(entry->raw);
+    if (entry->hardware) free(entry->hardware);
+    entry->raw=entry->hardware=NULL;
+}
+
+/* the queue's first taken: its descriptor written. 0 where it failed (said) */
+static int mcc_texture_commit(struct mcc_textures *textures,struct mcc_texture_queue *queue)
+{
+    struct mcc_texture_entry *entry=&queue->entries[queue->first];
+    struct mcc_texture *texture=entry->texture;
+    struct bitmap_data *bitmap=texture->bitmap, *normalized=&entry->normalized;
+    int result=entry->job>=0 ? mcc_convert_finish(entry->job) : entry->result;
+    queue->first=(queue->first+1)%MCC_TEXTURE_QUEUE;
+    queue->count--;
+    queue->bytes-=entry->bytes;
+    if (result!=1) {
+        error(_error_silent,"mcc bitmaps: cannot convert texture %lu of tag %08lx; map refused",
+            (unsigned long)entry->index,texture->handle);
+        mcc_texture_free(entry);
+        return 0;
+    }
+    mcc_convert_release(entry->job);
+    entry->job=-1;
+    free(entry->raw);entry->raw=NULL;
+    if (!(normalized->flags&(2|16))) normalized->flags|=8;
+    if (entry->transcode) {
+        textures->transcoded++;
+        textures->transcode_saved+=entry->decoded_size>entry->raw_size ? entry->decoded_size-entry->raw_size : 0;
+    }
+    if (bitmap->mipmap_count!=normalized->mipmap_count)
+        error(_error_silent,entry->non_power_two ? "mcc bitmap: tag %08lx retained linear base level (omitted levels %d through %d)" :
             "mcc bitmap: tag %08lx omitted incomplete DXT1 mip tail (levels %d through %d)",
-            texture->handle,normalized.mipmap_count+1,bitmap->mipmap_count);
-    bitmap->format=normalized.format;
-    bitmap->flags=normalized.flags;
-    bitmap->mipmap_count=normalized.mipmap_count;
-    bitmap->pixels_offset=MCC_BITMAP_BASE+stream_offset;
-    bitmap->pixels_size=allocation;
+            texture->handle,normalized->mipmap_count+1,bitmap->mipmap_count);
+    bitmap->format=normalized->format;
+    bitmap->flags=normalized->flags;
+    bitmap->mipmap_count=normalized->mipmap_count;
+    bitmap->pixels_offset=MCC_BITMAP_BASE+entry->stream_offset;
+    bitmap->pixels_size=entry->allocation;
     bitmap->tag_index=texture->handle;
     bitmap->cache_block_index=NONE;
     bitmap->hardware_format=NULL;
     bitmap->base_address=NULL;
-    texture->offset=bitmap->pixels_offset;texture->size=allocation;texture->pixels=pixels;
-    textures->end+=allocation;
-    textures->stream_end=MAX(textures->stream_end,stream_offset+allocation);
+    texture->offset=bitmap->pixels_offset;texture->size=entry->allocation;texture->pixels=entry->hardware;
+    entry->hardware=NULL;
+    mcc_loading_update(MCC_LOADING_BITMAPS, entry->index + 1, textures->count);
     return 1;
-out_of_memory:
-    error(_error_silent,"mcc bitmap: out of memory for tag %08lx (stored %lu, texture %lu bytes)",
-        texture->handle,textures->end,allocation);
-failed:
-    if (raw) free(raw);
-    if (pixels) free(pixels);
-    if (hardware) free(hardware);
-    return 0;
+}
+
+/* every texture in hand let go, unconverted (the map is refused) */
+static void mcc_texture_abandon(struct mcc_texture_queue *queue)
+{
+    while (queue->count) {
+        mcc_texture_free(&queue->entries[queue->first]);
+        queue->first=(queue->first+1)%MCC_TEXTURE_QUEUE;
+        queue->count--;
+    }
+    queue->bytes=0;
+}
+
+/* every texture in hand taken; where one fails, what follows it let go */
+static int mcc_texture_drain(struct mcc_textures *textures,struct mcc_texture_queue *queue)
+{
+    while (queue->count)
+        if (!mcc_texture_commit(textures,queue)) {mcc_texture_abandon(queue);return 0;}
+    return 1;
+}
+
+/* the map's textures converted, in its order, through the queue */
+static int mcc_textures_convert(struct mcc_runtime *runtime,struct mcc_textures *textures)
+{
+    struct mcc_texture_queue *queue=malloc(sizeof(*queue));
+    uint32_t index,stream_offset=0;
+    int ok=1;
+    if (!queue) return 0;
+    memset(queue,0,sizeof(*queue));
+    queue->host=mcc_convert_available();
+    queue->axes=malloc(MCC_BITMAP_AXES*sizeof(*queue->axes));
+    if (!queue->axes) {free(queue);return 0;}
+    /* Original groups and fresh-handle clones are appended as complete runs.
+     * Each runtime handle has its own stream, including clones that share a
+     * resource handle. Only successful conversions advance its cursor. */
+    for (index=0;index<textures->count && ok;index++) {
+        struct mcc_texture_entry *entry;
+        if (!index || textures->items[index].handle!=textures->items[index-1].handle) stream_offset=0;
+        /* (room for it: the oldest taken first, as many as that needs) */
+        while (queue->count && (queue->count==MCC_TEXTURE_QUEUE || queue->bytes>MCC_TEXTURE_QUEUE_BYTES))
+            if (!(ok=mcc_texture_commit(textures,queue))) break;
+        if (!ok) break;
+        entry=&queue->entries[(queue->first+queue->count)%MCC_TEXTURE_QUEUE];
+        if (!mcc_texture_plan(runtime,textures,&textures->items[index],stream_offset,entry)) {
+            /* (what came before it first: a failure there is the one one
+            thread converting in turn would have met first) */
+            if (mcc_texture_drain(textures,queue))
+                error(_error_silent,"mcc bitmaps: cannot convert texture %lu of tag %08lx; map refused",
+                    (unsigned long)index,textures->items[index].handle);
+            ok=0;
+            break;
+        }
+        entry->index=index;
+        queue->count++;
+        queue->bytes+=entry->bytes;
+        if (!mcc_texture_start(textures,queue,entry)) {
+            queue->count--;
+            queue->bytes-=entry->bytes;
+            mcc_texture_free(entry);
+            if (mcc_texture_drain(textures,queue))
+                error(_error_silent,"mcc bitmaps: cannot convert texture %lu of tag %08lx; map refused",
+                    (unsigned long)index,textures->items[index].handle);
+            ok=0;
+            break;
+        }
+        stream_offset+=textures->items[index].size;
+        /* (whatever is done already taken) */
+        while (ok && queue->count>1 && (queue->entries[queue->first].job<0 ||
+            mcc_convert_ready(queue->entries[queue->first].job)))
+            ok=mcc_texture_commit(textures,queue);
+    }
+    if (ok) ok=mcc_texture_drain(textures,queue);
+    else mcc_texture_abandon(queue);
+    free(queue->axes);
+    free(queue);
+    return ok;
 }
 
 int mcc_bitmaps_prepare(struct mcc_runtime *runtime)
 {
     struct mcc_textures *textures;
-    uint32_t index,original_count=runtime->report.tag_count,stream_offset=0;
+    uint32_t index,original_count=runtime->report.tag_count;
     unsigned char *new_index;
     textures=malloc(sizeof(*textures));
     if (!textures) return 0;
@@ -613,19 +685,11 @@ int mcc_bitmaps_prepare(struct mcc_runtime *runtime)
     if (!mcc_bitmap_usages(runtime,textures)) {
         error(_error_silent,"mcc bitmaps: invalid bitmap reference in shader or HUD"); return 0;
     }
-    /* Original groups and fresh-handle clones are appended as complete runs.
-     * Each runtime handle has its own stream, including clones that share a
-     * resource handle. Only successful conversions advance its cursor. */
-    for (index=0;index<textures->count;index++) {
-        if (!index || textures->items[index].handle!=textures->items[index-1].handle) stream_offset=0;
-        if (!mcc_texture_prepare(runtime,textures,&textures->items[index],stream_offset)) {
-            error(_error_silent,"mcc bitmaps: cannot convert texture %lu of tag %08lx; map refused",index,textures->items[index].handle);
-            return 0;
-        }
-        stream_offset+=textures->items[index].size;
-        mcc_loading_update(MCC_LOADING_BITMAPS, index + 1, textures->count);
-    }
+    if (!mcc_textures_convert(runtime,textures)) return 0;
     error(_error_silent,"mcc bitmaps: %lu textures converted to %lu bytes",textures->count,textures->end);
+    if (textures->transcoded)
+        error(_error_silent,"mcc bitmaps: %lu BC7 bitmaps kept as DXT5, %lu KB less than as 32-bit",
+            (unsigned long)textures->transcoded,(unsigned long)(textures->transcode_saved>>10));
     return 1;
 }
 

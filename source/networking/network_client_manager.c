@@ -397,6 +397,7 @@ void network_game_client_reset_settings_staging(void); /* port: discard partial 
 #include "text/unicode.h"
 #include "map_share.h" /* port: port/linux/game/map_share.c */
 #include "custom_edition_cache.h" /* port: port/linux/game/custom_edition_cache.c */
+#include "network_extensions.h" /* port: port/linux/game/network_extensions.c */
 
 /* ---------- constants */
 
@@ -1552,6 +1553,12 @@ boolean network_game_client_add_player(
 		0x530,
 		client && (local_player_index>=0) && (local_player_index<MAXIMUM_NUMBER_OF_LOCAL_PLAYERS));
 
+	/* port: hosting from the menus, the server has no player of its own:
+	the host's controller works its screen (port/linux/game/host_dashboard.c),
+	and the pregame screen's joins (its controllers signed in) are none */
+	if (halo_server_hosting())
+		return TRUE;
+
 	/* port: not until the host's settings name the game's map, and a game
 	in progress whose map is being downloaded not until it is (map sharing:
 	port/linux/game/map_share.c); asked again each frame */
@@ -1930,6 +1937,20 @@ boolean network_game_client_remove_player(
 			of its own goes, which none is; nor has a replay's playback, which
 			plays on as the game's players leave
 			(port/linux/game/network_replay_playback.c) */
+			/* port: a split screen player of this machine who quit, the others
+			staying: their view goes, the others' filling the screen (and
+			their menus close); the unit dies at the quit (game.c) */
+			if (reason != NONE && player->machine_index == client->machine_index &&
+				network_player_index < MAXIMUM_NUMBER_OF_PLAYERS &&
+				VALID_INDEX(player->controller_index, MAXIMUM_NUMBER_OF_LOCAL_PLAYERS) &&
+				local_player_get_player_index(player->controller_index) == player_index)
+			{
+				extern void ui_widgets_port_close_for_controller(short controller_index);
+
+				local_player_set_player_index(player->controller_index, NONE);
+				ui_widgets_port_close_for_controller(player->controller_index);
+				network_event("local player #%d left, the others staying", player->controller_index);
+			}
 			if (network_player_index == MAXIMUM_NUMBER_OF_PLAYERS && !network_replay_playing() &&
 				(!halo_server_mode() || player->machine_index == client->machine_index))
 			{
@@ -2326,6 +2347,8 @@ void network_game_client_reset(
 		client);
 
 	network_game_invalidate(&client->game);
+	/* port: a host's capabilities are its game's (port/linux/game/network_extensions.c) */
+	network_extensions_client_reset();
 
 	client->machine_index = NONE;
 	client->state = _network_game_client_state_searching;

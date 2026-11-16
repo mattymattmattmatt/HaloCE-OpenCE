@@ -78,7 +78,7 @@ fprintf that cannot affect it. Every line goes to both, and each is flushed
 at once, so the file is readable the moment a line is written.
 */
 static int log_descriptor = -1;
-/* config.toml's debug.log_files: halo.log written at all */
+/* config.toml's debug.halo_log: halo.log written at all */
 static int log_files = 1;
 
 /* The log is written from the main thread, from the game thread and from the
@@ -96,9 +96,37 @@ static pthread_mutex_t log_lock = PTHREAD_MUTEX_INITIALIZER;
 /* The guest's file calls take the logger's lock around their driver calls,
  * so that only one thread is ever inside the SD card driver at a time. See
  * host.h. */
+/* port: the game thread first, over another thread's bulk transfer (the
+lobby's copy of a map into its cache file, a checkpoint's write): that one
+waits a little, before it starts and between its chunks
+(host_sd_defer_to_game), while the game thread has used the card in the last
+SD_GAME_RECENT_MS, up to SD_DEFER_MAXIMUM_MS each time, so that a menu's run
+of small reads is not each one held behind a chunk of the copy's: a gametype
+list's opening waited 60% of its 0.6 s for the card so. Small calls, any
+thread's, are not held back (the start's saved games' thread makes hundreds,
+which the menus wait for). The log's own writes take the lock directly. */
+#define SD_GAME_RECENT_MS 20
+#define SD_DEFER_MAXIMUM_MS 100
+static volatile uint64_t sd_game_last_tick;
+
+void host_sd_defer_to_game(void)
+{
+	uint64_t frequency, started;
+
+	if (host_on_game_thread() || !sd_game_last_tick)
+		return;
+	frequency = armGetSystemTickFreq();
+	started = armGetSystemTick();
+	while (armGetSystemTick() - sd_game_last_tick < frequency * SD_GAME_RECENT_MS / 1000 &&
+		armGetSystemTick() - started < frequency * SD_DEFER_MAXIMUM_MS / 1000)
+		svcSleepThread(2000000);
+}
+
 void host_sd_lock(void)
 {
 	pthread_mutex_lock(&log_lock);
+	if (host_on_game_thread())
+		sd_game_last_tick = armGetSystemTick();
 }
 
 void host_sd_unlock(void)
@@ -1176,6 +1204,7 @@ static void *game_main(void *unused)
 		if (config_sample_seconds(path, seconds, sizeof(seconds)))
 			host_debug_start_sampler(seconds);
 		host_debug_start_profiler(config_profile_hz(path), "halo_guest.elf");
+		host_sd_activity_start(config_profile_hz(path) > 0);
 		if (config_flag(path, "debug.mic_probe"))
 			host_mic_probe_start();
 		host_dk_verify_compressed = config_flag(path, "debug.texture_verify_compressed");
@@ -1189,6 +1218,9 @@ static void *game_main(void *unused)
 		host_dk_capture = config_flag(path, "debug.gpu_capture");
 		host_dk_render_thread = config_flag_or(path, "debug.render_thread", 1);
 		host_dk_frame_pacing = config_flag_or(path, "debug.frame_pacing", 1);
+		host_dk_pace_ahead = config_flag_or(path, "debug.frame_pace_ahead", 0);
+		host_logf(HOST_LOG_INFO, "deko3d: the game runs up to %d frame(s) ahead of the presents (debug.frame_pace_ahead)",
+			host_dk_pace_ahead);
 		if (!host_dk_frame_pacing)
 			host_logf(HOST_LOG_WARN, "deko3d: frames are not paced to the presents (debug.frame_pacing)");
 		if (!host_dk_render_thread)
@@ -1296,6 +1328,9 @@ int main(int argc, char *argv[])
 	/* before any thread exists: libnx places their stacks at random, and one
 	in the guest image's range keeps the image from loading (host_memory.c) */
 	host_memory_hold_image_range();
+	/* (MCC's tag window before the window's range: the window is then placed
+	past it) */
+	host_memory_hold_mcc_range();
 	host_memory_hold_window_range();
 	/* The log goes to a file on the card, as well as to the standard
 	error stream.
@@ -1372,17 +1407,20 @@ int main(int argc, char *argv[])
 	{
 		char log_path[PATH_MAX + 32];
 
-		/* (config.toml's debug.log_files false: none at all, the lines going
-		to nxlink and the console only; debug.txt is the guest's,
-		source/cseries/errors.c) */
+		/* (config.toml's debug.halo_log false: none at all, the lines going
+		to nxlink and the console only; or, in a file from before it,
+		debug.log_files false, which meant debug.txt and halo.log both.
+		debug.txt is the guest's, source/cseries/errors.c) */
 		snprintf(log_path, sizeof(log_path), "%s/config.toml", executable_root);
 		{
 			toml_result_t result = toml_parse_file_ex(log_path);
 
 			if (result.ok)
 			{
-				toml_datum_t datum = toml_seek(result.toptab, "debug.log_files");
+				toml_datum_t datum = toml_seek(result.toptab, "debug.halo_log");
 
+				if (datum.type != TOML_BOOLEAN)
+					datum = toml_seek(result.toptab, "debug.log_files");
 				log_files = !(datum.type == TOML_BOOLEAN && !datum.u.boolean);
 				toml_free(result);
 			}
@@ -1444,7 +1482,7 @@ int main(int argc, char *argv[])
 	the alternative to knowing where it stopped is guessing */
 	log_marker("marker: main() entered");
 	log_marker("marker: log file opened");
-	host_logf(HOST_LOG_INFO, "Halo for Switch starting (%s)", executable_root);
+	host_logf(HOST_LOG_INFO, "SlipstreamCE for Switch starting (%s)", executable_root);
 	/* the game image an update installed last time, before anything loads it */
 	host_update_finish();
 	host_memory_log_regions();

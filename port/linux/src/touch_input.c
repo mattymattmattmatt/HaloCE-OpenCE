@@ -10,7 +10,6 @@ finger down (host_gesture_insets).
 */
 
 #include "touch_input.h"
-#include "keyboard_prompts.h"
 #include "touch_menu.h"
 #include "port_config.h"
 #include "halo_overlay_menu.h"
@@ -153,7 +152,6 @@ void touch_input_event(unsigned int type, const SDL_TouchFingerEvent *finger)
 	switch (type)
 	{
 	case SDL_EVENT_FINGER_DOWN:
-		keyboard_prompt_touch();
 		refresh_zones(width, height);
 		touch_menu_down(&menu, finger->fingerID, x, y);
 		/* (by the events' own times, in nanoseconds) */
@@ -167,7 +165,6 @@ void touch_input_event(unsigned int type, const SDL_TouchFingerEvent *finger)
 		}
 		break;
 	case SDL_EVENT_FINGER_MOTION:
-		keyboard_prompt_touch();
 		touch_menu_move(&menu, finger->fingerID, x, y);
 		break;
 	case SDL_EVENT_FINGER_UP:
@@ -303,6 +300,11 @@ enum
 	/* a replay plays: the overlay shows its stick and the replay's own
 	buttons (touch_input_replay_targets), not the game's */
 	_touch_scene_replay = 1 << 4,
+	/* beside _touch_scene_menus, which it comes with: a cinematic is all
+	that hides the controls (not a menu, the start or the chat's keyboard),
+	and an overlay whose option says so (TouchControls.java's "Show during
+	cutscenes") shows them anyway. The web's overlay hides as before */
+	_touch_scene_cinematic = 1 << 5,
 };
 
 /* the bit of the menu fingers on the touch controls in their buttons
@@ -387,12 +389,18 @@ void touch_input_controls(XINPUT_GAMEPAD *pad, int menus)
 	int index;
 
 	/* (the controls show only in a game: not while it starts, at the main
-	menu, in a menu or during a cinematic; nor while the text chat's
+	menu, in a menu or during a cinematic (unless the overlay's option
+	shows them there: _touch_scene_cinematic); nor while the text chat's
 	on-screen keyboard is up, whose keys the fingers then tap) */
-	host_touch_scene(_touch_scene_known | touch_controls_setting() |
-		(menus || !touch_game_playing() || touch_game_cinematic_playing() || (network_chat_controller() == 0) ?
-			_touch_scene_menus : 0) |
-		(touch_game_replay_playing() ? _touch_scene_replay : 0));
+	{
+		int hidden = menus || !touch_game_playing() || (network_chat_controller() == 0);
+		int cinematic = touch_game_cinematic_playing();
+
+		host_touch_scene(_touch_scene_known | touch_controls_setting() |
+			(hidden || cinematic ? _touch_scene_menus : 0) |
+			(cinematic && !hidden ? _touch_scene_cinematic : 0) |
+			(touch_game_replay_playing() ? _touch_scene_replay : 0));
+	}
 	/* (the profile's mapping, for the buttons' names; only when it changes) */
 	touch_game_button_controls(bindings);
 	if (!bindings_known || memcmp(bindings, bindings_sent, sizeof(bindings)))
@@ -484,7 +492,6 @@ void touch_input_look(float scale, float *yaw, float *pitch, float *gyro_yaw, fl
 	float delta[4];
 
 	host_touch_look_read(delta);
-	if (delta[0] || delta[1]) keyboard_prompt_touch();
 	*yaw -= delta[0] * scale;
 	*pitch -= delta[1] * scale;
 	*gyro_yaw -= delta[2] * scale;

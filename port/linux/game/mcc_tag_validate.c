@@ -7,6 +7,21 @@
 #include "mcc_syntax.h"
 #include "mcc_object_names.h"
 #include "tag_schema.h"
+#include "halo_port_window.h"
+
+/* Where the tags are not at the base the map was written for, every address
+the validator follows is moved there in place as it is first read, before it
+is checked or followed: the tags are then this process's, as the general
+validator's VALIDATE_MOVE leaves them (tag_validate.c). An address already
+moved, or made by the loader where the tags are, is left as it is
+(halo_port_window.h's PORT_MCC_IS_LINKED). */
+#ifndef PORT_MCC_IS_LINKED
+/* (a build whose window header has no MCC tags to move: the native harness's) */
+#define PORT_MCC_IS_LINKED(address) 0
+#define PORT_MCC_MOVE(address) ((void *)(address))
+#endif
+#define MCC_MOVE(pointer) \
+    do { if (PORT_MCC_IS_LINKED(pointer)) (pointer) = PORT_MCC_MOVE(pointer); } while (0)
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -634,6 +649,7 @@ static void mcc_fields(struct mcc_validation_context *context, byte *address,
                 if (stage == 0) {
                     unsigned long bytes;
                     long maximum = field->maximum;
+                    MCC_MOVE(block->address);
                     block->definition = NULL;
                     /* The MCC table owns extended names; never truncate indices
                      * embedded in scripts, placements and saved objects. */
@@ -716,6 +732,7 @@ static void mcc_fields(struct mcc_validation_context *context, byte *address,
                         !strcmp(schema->name, "scenario") && field->name &&
                         !strcmp(field->name, "hs_syntax_data"))
                         maximum = MCC_SYNTAX_MAXIMUM_DATA_BYTES;
+                    if (field->type == _tag_schema_data) MCC_MOVE(data->address);
                     data->definition = NULL;
                     if (data->size < 0) { mcc_problem(context, 1, "negative data size"); break; }
                     if (field->type == _tag_schema_file_data) {
@@ -890,6 +907,7 @@ int mcc_tags_validate(struct mcc_runtime *runtime)
     memset(mcc_validation.claims, 0, mcc_validation.claim_bytes);
     memset(&context, 0, sizeof(context)); context.region = runtime->tags; context.length = runtime->used;
     context.handle = NONE;
+    MCC_MOVE(header->instances);
     if (header->signature != 'tags' || header->count <= 0 || header->count > 65535 ||
         ((uintptr_t)header->instances & 3) ||
         !mcc_range(runtime->tags, runtime->used, header->instances, (unsigned long)header->count * sizeof(*header->instances)) ||
@@ -908,6 +926,8 @@ int mcc_tags_validate(struct mcc_runtime *runtime)
             mcc_problem(&context, 1, "invalid tag handle or unsupported tag group"); break;
         }
         instance->parents[0] = group->parent_group_tags[0]; instance->parents[1] = group->parent_group_tags[1];
+        MCC_MOVE(instance->name);
+        MCC_MOVE(instance->root);
         if (!mcc_name_valid(&context, instance->name)) instance->name = mcc_validation_empty_name;
         if (instance->group == 'sbsp') { instance->root = NULL; continue; }
         if (!group->definition) {
@@ -965,6 +985,7 @@ int mcc_bsp_validate(struct mcc_runtime *runtime, long handle, void *address, lo
     mcc_allocations_dispose();
     for (bit = runtime->used; bit < runtime->capacity; ++bit) mcc_validation.claims[bit >> 3] &= (byte)~(1U << (bit & 7));
     memset(&context, 0, sizeof(context)); context.region = address; context.length = size; context.handle = handle;
+    MCC_MOVE(header->root);
     if (header->signature != 'sbsp' || !mcc_claim(header, sizeof(*header)) ||
         !mcc_range(address, size, header->root, schema->definition->size) || !mcc_claim(header->root, schema->definition->size)) {
         mcc_problem(&context, 1, "invalid BSP header or root"); return 0;

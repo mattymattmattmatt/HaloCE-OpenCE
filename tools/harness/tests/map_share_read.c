@@ -15,34 +15,42 @@ test_map_share_read.py takes the constants (config.inc) and the code
 #define csmemmove(destination, source, size) memmove(destination, source, size)
 
 /* the part of a connection connection_read uses */
+typedef int SOCKET;
 struct connection
 {
 	boolean used;
 	boolean hello_heard;
-	void *endpoint;
+	SOCKET socket;
 	byte *input;
 	long input_size;
 	unsigned long heard_at;
 };
 
-/* the socket: a stream of frames, given as much as is asked of it at once,
-then "would block" */
+/* the socket (xnet.c's Winsock recv): a stream of frames, given as much as is
+asked of it at once, then "would block" */
+#define WSAEWOULDBLOCK 10035
+static int last_error;
+static int WSAGetLastError(void) { return last_error; }
 static byte *stream;
 static long stream_size;
 static long stream_at;
 static long endpoint_reads;
 
-static long read_endpoint(void *endpoint, byte *buffer, long size)
+static int recv(SOCKET socket, char *buffer, int size, int flags)
 {
 	long count = stream_size - stream_at < size ? stream_size - stream_at : size;
 
-	(void)endpoint;
+	(void)socket;
+	(void)flags;
 	endpoint_reads++;
 	if (!count)
-		return _transport_result_operation_would_block;
+	{
+		last_error = WSAEWOULDBLOCK;
+		return -1;
+	}
 	memcpy(buffer, stream + stream_at, (size_t)count);
 	stream_at += count;
-	return count;
+	return (int)count;
 }
 
 static unsigned long system_milliseconds(void) { return 1; }

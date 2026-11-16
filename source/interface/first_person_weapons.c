@@ -682,7 +682,7 @@ void first_person_weapon_render_update(
 
 			/* port: hidden, too, while a replay's watched player looks
 			through a scope, as their own was */
-			if (visible && network_replay_playing() &&
+			if (visible && network_replay_viewing() &&
 				unit_get_zoom_level(first_person_weapon->unit_index)!=NONE)
 			{
 				visible= FALSE;
@@ -761,26 +761,23 @@ boolean first_person_weapon_adjust_light(
 	real_vector3d *up)
 {
 	struct weapon_datum *weapon= weapon_get(weapon_index);
-	struct unit_datum *unit= unit_get(weapon->object.parent_object_index);
-	long player_index= unit->unit.player_index;
+	/* port: the view that shows the holder's arms, as the flashlight's: in a
+	replay's playback, which has no local player, the watched player's eyes
+	(first_person_weapon_player_index), so that their weapon's lights are the
+	first-person weapon's there too */
+	short local_player_index= first_person_weapon_index_from_unit_index(weapon->object.parent_object_index);
+	struct object_marker marker;
 	boolean adjusted= FALSE;
 
-	if (player_index!=NONE)
+	if (local_player_index!=NONE &&
+		local_player_index==render.local_player_index &&
+		first_person_weapon_get(local_player_index)->visible &&
+		first_person_weapon_get_marker_by_name(weapon_index, marker_name, &marker, 1)>0)
 	{
-		struct player_datum *player= player_get(player_index);
-		short local_player_index= player->local_player_index;
-		struct object_marker marker;
-
-		if (local_player_index!=NONE &&
-			local_player_index==render.local_player_index &&
-			first_person_weapon_get(local_player_index)->visible &&
-			first_person_weapon_get_marker_by_name(weapon_index, marker_name, &marker, 1)>0)
-		{
-			*position= marker.matrix.position;
-			*forward= marker.matrix.forward;
-			*up= marker.matrix.up;
-			adjusted= TRUE;
-		}
+		*position= marker.matrix.position;
+		*forward= marker.matrix.forward;
+		*up= marker.matrix.up;
+		adjusted= TRUE;
 	}
 
 	return adjusted;
@@ -872,7 +869,7 @@ void first_person_weapons_update(
 		/* port: a replay's playback lets go of the arms of a player no longer
 		watched through their eyes (window 0's: main.c), as of a dead
 		player's */
-		if (player_index!=NONE || (local_player_index==0 && network_replay_playing()))
+		if (player_index!=NONE || (local_player_index==0 && network_replay_viewing()))
 		{
 			struct first_person_weapon *first_person_weapon= first_person_weapon_get(local_player_index);
 			long unit_index= player_index!=NONE ? player_get(player_index)->unit_index : NONE;
@@ -2467,7 +2464,7 @@ though they were local player 0; else the local player's own */
 static long first_person_weapon_player_index(
 	short local_player_index)
 {
-	if (network_replay_playing())
+	if (network_replay_viewing())
 	{
 		return local_player_index==0 && network_replay_viewing_eyes() ?
 			network_replay_watched_player() :
@@ -2483,7 +2480,7 @@ director's */
 static boolean first_person_weapon_first_person(
 	short local_player_index)
 {
-	if (network_replay_playing())
+	if (network_replay_viewing())
 	{
 		return local_player_index==0 && network_replay_viewing_eyes();
 	}

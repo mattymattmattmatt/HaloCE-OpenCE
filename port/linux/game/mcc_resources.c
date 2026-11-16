@@ -7,8 +7,10 @@
 #include "mcc_sha256.h"
 #include "mcc_package.h"
 #include "mcc_errors.h"
+#include "mcc_precache.h"
 #include "cseries.h"
 #include "errors.h"
+#include <xtl.h>
 #include "../../third_party/zlib/zlib_prefixed.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -246,36 +248,188 @@ void mcc_resources_dispose(struct mcc_runtime *runtime)
     mcc_resource_close(&resources->files[0]);mcc_resource_close(&resources->files[1]);
     free(resources);runtime->resources=NULL;
 }
+/* Each resource file's CRC, kept while its metadata is unchanged.
+ *
+ * The checksum below read every byte of a map's shared bitmaps.map and
+ * sounds.map at each load: 16.9 s of a Switch's scenario_load, before any
+ * tag was converted, for a singleplayer bitmaps.map from the card. Those
+ * files are shared by many maps and rarely change, so a file's own CRC -
+ * of its framing marker, its contents and the closing 0xff, from zero - is
+ * kept, keyed by its path and type and stamped with its size, creation and
+ * write times and attributes (as mcc_precache.c stamps a map's files), and
+ * chained onto each map's starting value with crc32_combine, which gives
+ * exactly what reading the file on from that value gives. The published
+ * checksum is unchanged.
+ *
+ * Kept in MCC_CRC_CACHE_PATH too, so the first load of a run is spared as
+ * well. A file whose write time the system does not report is never kept:
+ * a replaced file of the same size would reuse a stale CRC, and then peers
+ * with the same content would be refused. A file that changes while it is
+ * read is not kept either. */
+#define MCC_CRC_CACHE_LIMIT 16
+#define MCC_CRC_CACHE_PATH "mcc_checksums.txt"
+#define MCC_CRC_CACHE_HEADER "mcc resource checksums 1\n"
+struct mcc_crc_entry {
+    char path[128];
+    uint32_t type, crc;
+    uint64_t length;
+    struct mcc_precache_stamp stamp;
+};
+static struct mcc_crc_entry mcc_crc_cache[MCC_CRC_CACHE_LIMIT];
+static int mcc_crc_cache_count, mcc_crc_cache_read;
+
+static int mcc_crc_stamp(char const *path, struct mcc_precache_stamp *stamp)
+{
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    memset(stamp,0,sizeof(*stamp));
+    if (!path[0] || !GetFileAttributesExA(path,GetFileExInfoStandard,&data) ||
+        (!data.ftLastWriteTime.dwLowDateTime && !data.ftLastWriteTime.dwHighDateTime)) return 0;
+    stamp->present=1;
+    stamp->attributes=data.dwFileAttributes;
+    stamp->size_low=data.nFileSizeLow;
+    stamp->size_high=data.nFileSizeHigh;
+    stamp->created_low=data.ftCreationTime.dwLowDateTime;
+    stamp->created_high=data.ftCreationTime.dwHighDateTime;
+    stamp->written_low=data.ftLastWriteTime.dwLowDateTime;
+    stamp->written_high=data.ftLastWriteTime.dwHighDateTime;
+    return 1;
+}
+
+static void mcc_crc_cache_load(void)
+{
+    FILE *file;
+    char line[512];
+    if (mcc_crc_cache_read) return;
+    mcc_crc_cache_read=1;
+    file=fopen(MCC_CRC_CACHE_PATH,"r");
+    if (!file) return;
+    if (!fgets(line,sizeof(line),file) || strcmp(line,MCC_CRC_CACHE_HEADER)) { fclose(file);return; }
+    while (mcc_crc_cache_count<MCC_CRC_CACHE_LIMIT && fgets(line,sizeof(line),file)) {
+        struct mcc_crc_entry *entry=&mcc_crc_cache[mcc_crc_cache_count];
+        unsigned long v[11];
+        int used=0;
+        size_t length;
+        char *path;
+        if (sscanf(line,"%lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %n",&v[0],&v[1],&v[2],&v[3],&v[4],&v[5],
+                &v[6],&v[7],&v[8],&v[9],&v[10],&used)!=11 || !used) continue;
+        path=line+used;
+        length=strcspn(path,"\r\n");
+        /* (a line cut short by an interrupted write ends in its path: one
+        without its newline is not trusted) */
+        if (!length || length>=sizeof(entry->path) || path[length]!='\n' || (v[0]!=1 && v[0]!=2)) continue;
+        memset(entry,0,sizeof(*entry));
+        memcpy(entry->path,path,length);
+        entry->type=(uint32_t)v[0];
+        entry->crc=(uint32_t)v[1];
+        entry->length=(uint64_t)v[2]<<32|(uint32_t)v[3];
+        entry->stamp.present=1;
+        entry->stamp.attributes=(uint32_t)v[4];
+        entry->stamp.size_high=(uint32_t)v[5];
+        entry->stamp.size_low=(uint32_t)v[6];
+        entry->stamp.created_high=(uint32_t)v[7];
+        entry->stamp.created_low=(uint32_t)v[8];
+        entry->stamp.written_high=(uint32_t)v[9];
+        entry->stamp.written_low=(uint32_t)v[10];
+        mcc_crc_cache_count++;
+    }
+    fclose(file);
+}
+
+static void mcc_crc_cache_save(void)
+{
+    FILE *file=fopen(MCC_CRC_CACHE_PATH,"w");
+    int index;
+    if (!file) return;
+    fputs(MCC_CRC_CACHE_HEADER,file);
+    for (index=0;index<mcc_crc_cache_count;index++) {
+        struct mcc_crc_entry const *entry=&mcc_crc_cache[index];
+        fprintf(file,"%lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %s\n",(unsigned long)entry->type,
+            (unsigned long)entry->crc,(unsigned long)(entry->length>>32),(unsigned long)(uint32_t)entry->length,
+            (unsigned long)entry->stamp.attributes,(unsigned long)entry->stamp.size_high,
+            (unsigned long)entry->stamp.size_low,(unsigned long)entry->stamp.created_high,
+            (unsigned long)entry->stamp.created_low,(unsigned long)entry->stamp.written_high,
+            (unsigned long)entry->stamp.written_low,entry->path);
+    }
+    fclose(file);
+}
+
+static struct mcc_crc_entry *mcc_crc_cache_find(char const *path,unsigned type)
+{
+    int index;
+    for (index=0;index<mcc_crc_cache_count;index++)
+        if (mcc_crc_cache[index].type==type && !strcmp(mcc_crc_cache[index].path,path)) return &mcc_crc_cache[index];
+    return NULL;
+}
+
+static void mcc_crc_cache_store(char const *path,unsigned type,struct mcc_precache_stamp const *stamp,
+    uint32_t crc,uint64_t length)
+{
+    struct mcc_crc_entry *entry=mcc_crc_cache_find(path,type);
+    if (strlen(path)>=sizeof(entry->path)) return;
+    if (!entry) {
+        /* (full: the oldest goes) */
+        if (mcc_crc_cache_count==MCC_CRC_CACHE_LIMIT) {
+            memmove(&mcc_crc_cache[0],&mcc_crc_cache[1],(MCC_CRC_CACHE_LIMIT-1)*sizeof(mcc_crc_cache[0]));
+            mcc_crc_cache_count--;
+        }
+        entry=&mcc_crc_cache[mcc_crc_cache_count++];
+    }
+    memset(entry,0,sizeof(*entry));
+    strcpy(entry->path,path);
+    entry->type=type;
+    entry->crc=crc;
+    entry->length=length;
+    entry->stamp=*stamp;
+    mcc_crc_cache_save();
+}
+
 int mcc_resources_checksum(struct mcc_runtime *runtime,unsigned resources,uint32_t *checksum)
 {
     unsigned char buffer[32768],marker;
-    uint32_t crc;
+    uint32_t crc,file_crc;
+    uint64_t length;
     unsigned type;
     size_t bytes;
     FILE *file;
     struct mcc_resource_file *selected;
+    struct mcc_precache_stamp before,after;
+    struct mcc_crc_entry const *cached;
+    int stamped;
     if (!runtime || !checksum || (resources&~3u)) return 0;
     /* zlib chains finalized CRC values; framing and the published value stay
      * identical to the former complemented accumulator. */
     crc=runtime->report.identity.checksum;
     /* Self-contained maps neither open nor fingerprint unrelated resources. */
     if (!resources) { *checksum=runtime->report.identity.checksum ? runtime->report.identity.checksum : 1;return 1; }
+    mcc_crc_cache_load();
     for (type=1;type<=2;type++) {
         if (!(resources&(1u<<(type-1)))) continue;
         selected=mcc_resource_get(runtime,type);
         if (!selected) return 0;
+        stamped=mcc_crc_stamp(selected->path,&before);
+        cached=stamped ? mcc_crc_cache_find(selected->path,type) : NULL;
+        if (cached && !memcmp(&cached->stamp,&before,sizeof(before))) {
+            crc=(uint32_t)crc32_combine(crc,cached->crc,(z_off_t)cached->length);
+            continue;
+        }
         file=selected->stream;
         if (fseek(file,0,SEEK_SET)) return 0;
         /* Fingerprint the selected contents, not their installation location. */
         marker=(unsigned char)type;
-        crc=(uint32_t)crc32(crc,&marker,1);
+        file_crc=(uint32_t)crc32(0,&marker,1);
+        length=1;
         while ((bytes=fread(buffer,1,sizeof(buffer),file))!=0) {
-            crc=(uint32_t)crc32(crc,buffer,(uInt)bytes);
+            file_crc=(uint32_t)crc32(file_crc,buffer,(uInt)bytes);
+            length+=bytes;
             mcc_loading_pulse();
         }
         if (ferror(file)) return 0;
         marker=0xff;
-        crc=(uint32_t)crc32(crc,&marker,1);
+        file_crc=(uint32_t)crc32(file_crc,&marker,1);
+        length++;
+        crc=(uint32_t)crc32_combine(crc,file_crc,(z_off_t)length);
+        if (stamped && mcc_crc_stamp(selected->path,&after) && !memcmp(&before,&after,sizeof(before)))
+            mcc_crc_cache_store(selected->path,type,&before,file_crc,length);
     }
     *checksum=crc;
     if (!*checksum) *checksum=1; /* Zero means no comparison in native admission. */
@@ -292,6 +446,10 @@ static void mcc_fingerprint_file_header(struct mcc_sha256 *hash, unsigned type, 
     mcc_sha256_add(hash,header,sizeof(header));
 }
 
+/* the same fingerprint worked out by the host (mcc_resource_check.inl): 1, or 0
+when it cannot (the guest works it out then) */
+static int mcc_resources_host_fingerprint(struct mcc_runtime *runtime,unsigned char digest[32]);
+
 int mcc_resources_fingerprint(struct mcc_runtime *runtime,unsigned char digest[32])
 {
     struct mcc_sha256 hash;
@@ -301,6 +459,11 @@ int mcc_resources_fingerprint(struct mcc_runtime *runtime,unsigned char digest[3
     struct mcc_resource_file *resource;
     long size;
     if (!runtime || !runtime->source.read || runtime->source.size>0x7fffffffu) return 0;
+    /* (the host's: the CPU's SHA-256 on its threads, and known at once when its
+       files are unchanged since it last worked them out. In the guest, a slice
+       at a time in software, a 360 MB package's took 24 to 32 seconds of each
+       load of a network game on the Switch) */
+    if (mcc_resources_host_fingerprint(runtime,digest)) return 1;
     mcc_sha256_begin(&hash);
     mcc_sha256_add(&hash,"GulchCE MCC content v1",sizeof("GulchCE MCC content v1")-1);
     mcc_fingerprint_file_header(&hash,0,runtime->source.size);

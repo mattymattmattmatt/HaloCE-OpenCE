@@ -18,6 +18,9 @@
 #define MCC_SHARE_LEVEL_SIZE 64
 #define MCC_SHARE_CHUNK_BYTES 3072
 #define MCC_SHARE_WINDOW 16
+/* The joiner's chunk requests in flight: every host queues MCC_SHARE_WINDOW * 2
+ * (32) of a transfer and ignores more, which stalls it, so never above that. */
+#define MCC_SHARE_CLIENT_WINDOW (MCC_SHARE_WINDOW * 2)
 #define MCC_SHARE_HOST_TRANSFERS 4
 #define MCC_SHARE_HOST_MACHINES 128
 #define MCC_SHARE_MANIFEST_PAGE 16
@@ -120,6 +123,21 @@ struct mcc_share_env {
     /* Valid successful DONE, once after releasing its transfer slot. The
      * adapter may allow bounded time for the client's following AddPlayer. */
     void (*host_finished)(void *user, long machine);
+    /* Optional: a transfer the host gave up before offering it (the reply says only
+     * its result), and why, for the host's log. */
+    void (*host_refused)(void *user, long machine, char const *level, int result, char const *why);
+    /* Optional: a file's SHA-256 and size worked out elsewhere (the host's
+     * threads), not a slice a frame here. begin: a job, or -1 (hashed here);
+     * poll: 1 done, 0 not yet, -1 failed; cancel releases a job not done. */
+    /* Optional, the joiner: nonzero while the files come another way (a
+     * SlipstreamCE host's own file connection, port/android/host/host_file_share.c):
+     * no chunks asked of the host, its transfer kept alive; the files are
+     * taken with mcc_share_client_external_file (or the bytes given with
+     * mcc_share_client_external). Zero again before any came: chunks as usual. */
+    int (*transfer_elsewhere)(void *user);
+    int (*hash_begin)(void *user, char const *path);
+    int (*hash_poll)(void *user, int job, uint8_t digest[32], uint64_t *size);
+    void (*hash_cancel)(void *user, int job);
     /* joiner: the bytes free where the package will go, or 0 when that is not known */
     uint64_t (*free_bytes)(void *user);
     /* No files are written before accept. NULL retains automatic acceptance for callers
@@ -150,6 +168,15 @@ struct mcc_share_host_transfer {
     uint32_t hash_offset;
     struct mcc_sha256 hash;
     FILE *hash_stream;
+    /* hash_begin's job for the file in hand (hash_job_active: there is one),
+     * and what releases it should the transfer end first */
+    int hash_job, hash_job_active;
+    void (*hash_job_cancel)(void *user, int job);
+    void *hash_job_user;
+    /* the file being served, kept open between chunks (serve_file: its number, -1 none) */
+    FILE *serve_stream;
+    int serve_file;
+    uint32_t serve_offset;
     struct {
         uint8_t file;
         uint32_t offset, length;
@@ -206,6 +233,8 @@ struct mcc_share {
     int reuse_checked_file, reuse_file, have_pending;
     char credit[MCC_SHARE_CREDIT_SIZE];
     struct mcc_share_stage stage;
+    /* bytes of the current file another writer has written (its progress) */
+    uint32_t external_bytes;
 };
 
 /* Host admission requires sharing enabled and a validated package identity.
@@ -243,5 +272,19 @@ int mcc_share_client_busy(struct mcc_share const *share);
 int mcc_share_client_level(struct mcc_share const *share, char const *level);
 /* 0 to 100, or -1 when no download goes on */
 int mcc_share_client_percent(struct mcc_share const *share);
+/* The joiner's files' bytes from another way (env transfer_elsewhere), in
+ * order across the files from the first: staged and checked as the host's
+ * chunks are. 1 taken, 0 none wanted now, -1 the download failed. */
+int mcc_share_client_external(struct mcc_share *share, void const *data, uint32_t bytes);
+/* That way lost after some bytes came: the download fails with this. */
+void mcc_share_client_external_fail(struct mcc_share *share, char const *message);
+/* The files written in place by another writer (the host's file
+ * connection, host_file_share.c), which checks each file's size and SHA-256:
+ * the current one is whole (1, -1 if the download failed); how much of it
+ * is there so far, for the progress; and that writer gone before any file was
+ * taken (its .part files deleted, the host's chunks asked for instead). */
+int mcc_share_client_external_file(struct mcc_share *share);
+void mcc_share_client_external_progress(struct mcc_share *share, uint32_t bytes);
+void mcc_share_client_external_abort(struct mcc_share *share);
 void mcc_share_refusal_text(enum mcc_share_result result, char const *level, char *text, unsigned size);
 #endif

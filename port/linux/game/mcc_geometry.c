@@ -441,6 +441,13 @@ static int mg_material_run_compare(void const *a,void const *b) {
     return x<y ? -1 : x>y;
 }
 
+/* an address in the BSP, as the map was written for or as moved with the tags
+(halo_port_window.h), as it is in memory now */
+static uint32_t mg_bsp_address(struct mcc_runtime *r,uint32_t address) {
+    void *actual=mcc_runtime_actual(r,address);
+    return actual ? (uint32_t)(uintptr_t)actual : address;
+}
+
 int mcc_geometry_bsp_load(struct mcc_runtime *r,uint32_t handle,uint32_t offset,
     uint32_t size,void *address,void **result) {
     struct mcc_cache_bsp const *b=NULL;
@@ -455,13 +462,13 @@ int mcc_geometry_bsp_load(struct mcc_runtime *r,uint32_t handle,uint32_t offset,
     for (i=0;i<r->report.bsp_count;i++) {
         struct mcc_cache_bsp const *candidate=&r->report.bsps[i];
         if (candidate->tag_handle==handle && candidate->file_offset==offset && candidate->size==size &&
-            candidate->address==(uint32_t)(uintptr_t)address) { b=candidate; break; }
+            candidate->address==mcc_runtime_linked(r,(uint32_t)(uintptr_t)address)) { b=candidate; break; }
     }
     if (!b || !mcc_runtime_read(r,offset,size,address)) return mg_error("BSP request differs from validated reference");
-    structure=mg_bsp_pointer(address,size,b->structure_address,sizeof(*structure));
+    structure=mg_bsp_pointer(address,size,mg_bsp_address(r,b->structure_address),sizeof(*structure));
     if (!structure || structure->lightmaps.count<0 || (uint32_t)structure->lightmaps.count>size/0x20)
         return mg_error("invalid BSP lightmaps");
-    lightmaps=mg_bsp_pointer(address,size,(uint32_t)(uintptr_t)structure->lightmaps.address,
+    lightmaps=mg_bsp_pointer(address,size,mg_bsp_address(r,(uint32_t)(uintptr_t)structure->lightmaps.address),
         (uint32_t)structure->lightmaps.count*0x20);
     if (structure->lightmaps.count && !lightmaps) return mg_error("BSP lightmaps point outside BSP");
     if (structure->lightmaps.count &&
@@ -470,7 +477,7 @@ int mcc_geometry_bsp_load(struct mcc_runtime *r,uint32_t handle,uint32_t offset,
         struct tag_block const *block=&lightmaps[l].materials;
         struct structure_material *materials;
         if (block->count<0 || (uint32_t)block->count>size/sizeof(*materials)) goto fail;
-        materials=mg_bsp_pointer(address,size,(uint32_t)(uintptr_t)block->address,
+        materials=mg_bsp_pointer(address,size,mg_bsp_address(r,(uint32_t)(uintptr_t)block->address),
             (uint32_t)block->count*sizeof(*materials));
         if (block->count && !materials) goto fail;
         if (block->count) { runs[run_count].materials=materials; runs[run_count++].count=block->count; }

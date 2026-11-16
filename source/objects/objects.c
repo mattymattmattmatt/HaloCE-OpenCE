@@ -1142,6 +1142,24 @@ void objects_initialize_for_new_map(
 	return;
 }
 
+/* port: each object's header points at its block in the objects pool
+(game_state.c's game_state_image_relocate) */
+boolean objects_port_relocate(
+	struct game_state_relocation const *relocation)
+{
+	long index;
+
+	for (index = 0; index < object_header_data->maximum_count; index++)
+	{
+		struct object_header_datum *header = game_state_relocation_element(relocation, object_header_data, index);
+
+		if (header)
+			game_state_relocate(relocation, &header->datum);
+	}
+
+	return TRUE;
+}
+
 void objects_dispose_from_old_map(
 	void)
 {
@@ -4774,6 +4792,12 @@ static void object_connect_lights(
 		{
 			if (!object->object.attachment_types[i] && object->object.attachment_indices[i]!=NONE)
 			{
+				/* port: moved: its clusters may well still hold */
+				if (disconnect && reconnect)
+				{
+					light_move_with_object(object->object.attachment_indices[i]);
+					continue;
+				}
 				if (disconnect)
 				{
 					light_disconnect_from_map(object->object.attachment_indices[i]);

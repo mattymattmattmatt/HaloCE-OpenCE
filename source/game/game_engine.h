@@ -789,4 +789,16 @@ boolean game_engine_king_hill(real_point3d *points, long maximum, long *point_co
 /* port: whether a point is on the hill, as a player's middle is counted */
 boolean game_engine_king_point_on_hill(real_point3d const *position);
 
+/* port: (game_engine_oddball.c, for the Proving Grounds bots) a ball's object, NONE for none: the balls are the
+weapons weapon_is_flag says are, their owner team index the ball's; and the player holding it, NONE for none */
+long game_engine_oddball_ball(short index);
+long game_engine_oddball_carrier(short index);
+
+/* port: (game_engine_race.c, for the Proving Grounds bots) the race's type (_race_type_normal, any order, rally),
+whether a player may touch race flag flag_number next (the single rally flag in rally; the first again once all are
+touched), and the reach a touch counts within (on foot, or in a vehicle) */
+short game_engine_race_type(void);
+boolean game_engine_race_can_touch(long player_index, long flag_number);
+real game_engine_race_touch_radius(boolean in_vehicle);
+
 #endif // __GAME_ENGINE_H

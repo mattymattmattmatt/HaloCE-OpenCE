@@ -72,8 +72,8 @@ static boolean mcc_pause_borrow_art(struct mcc_pause_art *art)
     tag = tag_loaded('bitm', name);
     if (tag == NONE || !pc_menu_tag(tag)) return FALSE;
     group = tag_get('bitm', tag);
-    if (!group || !group->bitmaps.address || frame < 0 || frame >= group->bitmaps.count) return FALSE;
-    art->frames[0] = ((struct bitmap_data const *)group->bitmaps.address)[frame];
+    if (!group || !TAG_BLOCK_ADDRESS(group->bitmaps) || frame < 0 || frame >= group->bitmaps.count) return FALSE;
+    art->frames[0] = ((struct bitmap_data const *)TAG_BLOCK_ADDRESS(group->bitmaps))[frame];
     art->group.bitmaps.count = count;
     art->sequence.bitmap_count = (short)count;
     art->borrowed = TRUE;

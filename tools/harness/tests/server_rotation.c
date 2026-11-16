@@ -90,6 +90,27 @@ int posix_find_entry_case_insensitive(const char *directory, const char *name, c
 	return matched;
 }
 
+/* (posix.h's: whether a path is a folder, all custom_map_file asks) */
+enum
+{
+	_posix_file_is_directory = 1 << 0,
+};
+
+struct posix_file_information
+{
+	unsigned long flags;
+};
+
+int posix_stat(const char *path, struct posix_file_information *information)
+{
+	struct stat status;
+
+	if (stat(path, &status) != 0)
+		return -1;
+	information->flags = S_ISDIR(status.st_mode) ? _posix_file_is_directory : 0;
+	return 0;
+}
+
 #include "under_test.inc"
 
 static struct server_entry entry;
@@ -200,6 +221,7 @@ static void write_maps(void)
 	write_map("custom_maps/hugeass.map", 609, 1, 0x800, "daeh", "toof");
 	write_map("custom_maps/c_campaign.map", 609, 0, 0x800, "daeh", "toof");
 	write_map("custom_maps/xboxmap.map", 5, 1, 0x800, "daeh", "toof");
+	write_map("custom_maps/xboxcampaign.map", 5, 0, 0x800, "daeh", "toof");
 }
 
 /* server_maps_each's maps, as "name level kind;" in the order told */
@@ -255,6 +277,19 @@ int main(int argc, char **argv)
 		CHECK(rejected_with("custom_maps\\a\\b", "is not a map's name"), "a folder in custom_maps was taken");
 		CHECK(rejected_with("custom_maps\\..", "is not a map's name"), "custom_maps\\.. was taken");
 		CHECK(rejected_with("custom_maps/../maps/x", "is not a map's name"), "a path out of custom_maps was taken");
+		return 0;
+	}
+	/* an MCC map, mcc_maps\[package\]name: taken as an MCC map, its level
+	the name as given (its checks are mcc_server_resolve's:
+	tools/test_mcc_server.py) */
+	CASE("mcc-maps")
+	{
+		CHECK(playable("mcc_maps\\2906110850\\spillway:slayer"), "an MCC package's map was rejected: %s", entry.rejected);
+		CHECK(entry.map_kind == _server_map_mcc, "kind %d", entry.map_kind);
+		CHECK(!strcmp(entry.level, "mcc_maps\\2906110850\\spillway") && !strcmp(entry.map_name, "spillway"),
+			"level %s, map %s", entry.level, entry.map_name);
+		CHECK(playable("MCC_MAPS\\a10"), "a loose MCC map in capitals was rejected: %s", entry.rejected);
+		CHECK(entry.map_kind == _server_map_mcc && !strcmp(entry.map_name, "a10"), "map %s", entry.map_name);
 		return 0;
 	}
 	/* a level's path: taken as is, its last part the map's file; nothing
@@ -761,7 +796,7 @@ int main(int argc, char **argv)
 		CHECK(!resolved("nowhere") && entry.map_missing && strstr(entry.rejected, "there is no map nowhere"),
 			"a missing map: %s", entry.rejected);
 		CHECK(!resolved("custom_maps\\bloodgulch") && entry.map_missing &&
-			strstr(entry.rejected, "no Custom Edition map bloodgulch"), "an Xbox map as Custom Edition's: %s",
+			strstr(entry.rejected, "no map bloodgulch in custom_maps"), "the maps folder's map as custom_maps': %s",
 			entry.rejected);
 		CHECK(!resolved("levels\\test\\nowhere\\nowhere") && entry.map_missing, "a missing level: %s", entry.rejected);
 		CHECK(!resolved("broken") && entry.map_missing, "a file too short for a header: %s", entry.rejected);
@@ -796,6 +831,40 @@ int main(int argc, char **argv)
 		CHECK(!access(path, R_OK), "the maps were not written");
 		return 0;
 	}
+	/* a gametype in the game's saved games by its name: saved=<name>, its
+	case kept (the game's own), %XX for its other bytes; a bad escape, a
+	character outside the name's or no name rejected */
+	CASE("saved-gametypes")
+	{
+		CHECK(playable("bloodgulch:saved=My%20Slayer"), "saved=My%%20Slayer was rejected: %s", entry.rejected);
+		CHECK(!strcmp(entry.gametype, "saved=My%20Slayer"), "gametype %s", entry.gametype);
+		CHECK(playable("bloodgulch: saved=Caf%C3%A9_2 +score=5"), "an escaped name with a rule was rejected: %s",
+			entry.rejected);
+		CHECK(!strcmp(entry.gametype, "saved=Caf%C3%A9_2"), "gametype %s", entry.gametype);
+		CHECK(entry.rule_count == 1, "%d rules", (int)entry.rule_count);
+		CHECK(rejected_with("bloodgulch:saved=", "is not a gametype's name"), "saved= with no name was taken");
+		CHECK(rejected_with("bloodgulch:saved=My Slayer", "is not a gametype's name"), "a space was taken");
+		CHECK(rejected_with("bloodgulch:saved=a%2", "is not a gametype's name"), "a cut escape was taken");
+		CHECK(rejected_with("bloodgulch:saved=a%zz", "is not a gametype's name"), "a bad escape was taken");
+		CHECK(rejected_with("bloodgulch:saved=a/b", "is not a gametype's name"), "a slash was taken");
+		return 0;
+	}
+	/* a Custom Edition map in a subfolder of custom_maps (a set's folder, as
+	the menus list them) is found by its name */
+	CASE("resolve-subfolder")
+	{
+		make_root(argv[0], case_name);
+		write_maps();
+		make_folder("custom_maps/Set_One");
+		write_map("custom_maps/Set_One/inset.map", 609, 1, 0x800, "daeh", "toof");
+		CHECK(resolved("custom_maps\\inset:ctf"), "a map in a subfolder: %s", entry.rejected);
+		CHECK(entry.map_kind == _server_map_custom && !strcmp(entry.level, "custom_maps\\inset"),
+			"kind %d, level %s", entry.map_kind, entry.level);
+		CHECK(resolved("inset"), "a subfolder's map by its name alone: %s", entry.rejected);
+		CHECK(entry.map_kind == _server_map_custom, "kind %d", entry.map_kind);
+		CHECK(!resolved("custom_maps\\outset") && entry.map_missing, "a name of no file was found");
+		return 0;
+	}
 	/* a Custom Edition map whose file has capitals (cmt_Snow_Grove.map) is
 	found by the name the maps' list gives it, in lower case, in each of
 	custom_maps, paths.custom_maps and Custom Edition's own folder */
@@ -828,13 +897,16 @@ int main(int argc, char **argv)
 		return 0;
 	}
 	/* a map file of another game's version is not played as the Xbox's or
-	Custom Edition's (server_maps_each does not list it) */
+	Custom Edition's (server_maps_each does not list it); custom_maps takes an
+	Xbox multiplayer map (custom_xbox_map_level), but no other Xbox map */
 	CASE("resolve-version")
 	{
 		make_root(argv[0], case_name);
 		write_maps();
 		CHECK(!resolved("pcmap"), "a Halo PC map (version 7) in maps was taken");
-		CHECK(!resolved("custom_maps\\xboxmap"), "an Xbox map (version 5) in custom_maps was taken");
+		CHECK(resolved("custom_maps\\xboxmap"), "an Xbox multiplayer map in custom_maps: %s", entry.rejected);
+		CHECK(!resolved("custom_maps\\xboxcampaign:coop") && strstr(entry.rejected, "not a multiplayer one"),
+			"an Xbox campaign map in custom_maps: %s", entry.rejected);
 		return 0;
 	}
 	/* the multiplayer maps there are: the Xbox's of version 5, Custom

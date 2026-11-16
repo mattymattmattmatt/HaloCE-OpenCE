@@ -27,6 +27,10 @@ zlib (port/third_party/zlib).
 #include "platform.h"
 #include "port_config.h"
 #include "xgpu.h"
+#include "server_mode.h" /* port: halo_server_hosting */
+
+/* (the text chat's on-screen keyboard: its buttons are a menu's, network_chat.c) */
+unsigned char network_chat_keyboard_open(void);
 
 #include "zlib_prefixed.h"
 
@@ -150,7 +154,9 @@ int hud_hires_asset_applies(long asset, int gameplay)
 	}
 	if (!(contexts & HUD_HIRES_CONTEXT_PLACES))
 		return 1;
-	if (!gameplay)
+	/* (hosting from the menus, the host's screen is a menu, in a game too:
+	its buttons' pictures the menus', as xinput_sdl.c swaps them) */
+	if (!gameplay || halo_server_hosting() || network_chat_keyboard_open())
 	{
 #ifdef HALO_SWITCH
 		now = config_boolean("controls.nintendo_menu_buttons") ? HUD_HIRES_CONTEXT_MENUS_SWAPPED : HUD_HIRES_CONTEXT_MENUS;
@@ -535,6 +541,16 @@ static void upscale_outline(unsigned char *pixels, const unsigned char *bgra,
 	}
 }
 
+unsigned char *hud_hires_upscale_rgba(const unsigned char *bgra, unsigned long width, unsigned long height, long kind)
+{
+	unsigned char *pixels = kind == 4 ? upscale_pixels(bgra, width, height, 512) :
+		hud_hires_upscale_pixels(bgra, width, height);
+
+	if (pixels)
+		upscale_outline(pixels, bgra, width, height, kind);
+	return pixels;
+}
+
 unsigned int hud_hires_upscale_texture(const unsigned char *bgra, unsigned long width,
 	unsigned long height, long kind, unsigned long *levels)
 {
@@ -544,10 +560,9 @@ unsigned int hud_hires_upscale_texture(const unsigned char *bgra, unsigned long 
 
 	if (!xgpu_gl_ready())
 		return 0;
-	pixels = kind == 4 ? upscale_pixels(bgra, width, height, 512) : hud_hires_upscale_pixels(bgra, width, height);
+	pixels = hud_hires_upscale_rgba(bgra, width, height, kind);
 	if (!pixels)
 		return 0;
-	upscale_outline(pixels, bgra, width, height, kind);
 	*levels = 1;
 	for (largest = (width > height ? width : height) * 4; largest > 1; largest >>= 1)
 		(*levels)++;

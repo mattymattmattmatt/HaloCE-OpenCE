@@ -39,6 +39,8 @@ static short name_bottom;
 #define hud_get_font_index() 0
 #define distance3d(a, b) 1.0f
 #define hud_player_name_in_sight(index, head) TRUE
+/* (port: hud.c's once-a-tick cache of it) */
+#define hud_player_name_in_sight_this_tick(index, unit, head) TRUE
 #define font_definition_get(index) (&test_font)
 #define hud_player_name_color(ally, color) ((color)->alpha=1)
 #define draw_string_set_draw_mode(a,b,c,d,e) ((void)0)

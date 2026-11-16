@@ -19,8 +19,16 @@ cache_file_formats.c.
 /* DamnationCE's 64-bit builds keep Xbox addresses apart from pointers; in
 this build's they are the same */
 #ifndef XBOX_POINTER
+#if defined(HALO_ANDROID) || defined(HALO_MOVABLE_WINDOW)
+/* (where the tags' addresses move: the tag cache, or the window, is not
+where the map was written for, halo_port_window.h) */
+#include "halo_port_window.h"
+#define xbox_pointer(address) PORT_WINDOW_REBASE(address)
+#define XBOX_POINTER(type, address) ((type *)PORT_WINDOW_REBASE(address))
+#else
 #define xbox_pointer(address) ((void *)(address))
 #define XBOX_POINTER(type, address) ((type *)(address))
+#endif
 #define XBOX_ADDRESS(pointer) ((void *)(pointer))
 #endif
 
@@ -73,6 +81,16 @@ boolean custom_edition_cache_refuse(
 (CUSTOM_EDITION_LEVEL_NAME_PREFIX): the cache file loader then reads it from
 the Custom Edition maps folders alone, never from the game's own. */
 boolean custom_edition_level_name(
+	char const *level_name);
+
+/* Whether a level name is custom_maps\<name> of an Xbox multiplayer map (an
+Xbox cache, version 5): the game's own format, unpacked into the map cache
+as the game's maps are (cache_files_windows.c) rather than read by the Custom
+Edition loader, under its level name, never taken for the game's map of the
+name its header gives; a network game on one needs the
+custom_xbox_multiplayer_maps capability of each machine
+(network_extensions.h). */
+boolean custom_xbox_map_level(
 	char const *level_name);
 
 /* TRUE when Custom Edition maps may run (game.custom_edition) and the level
@@ -143,10 +161,13 @@ boolean custom_edition_cache_present(
 
 /* The scenario type of the Custom Edition cache at `path`: a campaign map's
 (_scenario_type_solo, played alone or as network co-op) or a multiplayer
-map's, or another; NONE if it is no Custom Edition cache. `path` is the
-file a folder's listing found (custom_edition_maps.c), opened once. */
+map's, or another; NONE if it is no Custom Edition cache (nor an Xbox
+multiplayer map: custom_xbox_map_level); *xbox_map (NULL: not asked) whether it
+is an Xbox map. `path` is the file a folder's listing found
+(custom_edition_maps.c), opened once. */
 short custom_edition_cache_file_scenario_type(
-	char const *path);
+	char const *path,
+	boolean *xbox_map);
 
 /* Loads the Custom Edition map `map_name` names into its tag cache and
 converts its tags for this build, copying its cache header to `header`
@@ -161,26 +182,6 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 boolean custom_edition_install_present(
 	void);
 
-/* The locale resource map (loc.map) of the maps folders, which holds the
-text of the Custom Edition the maps come from, in its language: opened (FALSE
-if there is none, or it is not one) until custom_edition_locale_close. */
-boolean custom_edition_locale_open(
-	void);
-void custom_edition_locale_close(
-	void);
-/* The strings of its unicode string list tag `name` (as
-"ui\\shell\\main_menu\\..."): each string's UTF-16 characters, its
-terminator included, lengths[index] of them from strings[index]. One
-block, released with free(); NULL if it holds no such list, or one that
-does not fit in its tag. */
-struct custom_edition_string_list
-{
-	long count;
-	unsigned short const **strings;
-	long *lengths;
-};
-struct custom_edition_string_list *custom_edition_locale_strings(
-	char const *name);
 boolean custom_edition_cache_tags_loaded(
 	void);
 /* Whether the structure bsp reference (of the loaded map's scenario) names

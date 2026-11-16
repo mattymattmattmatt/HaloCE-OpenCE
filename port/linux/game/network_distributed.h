@@ -331,6 +331,10 @@ void network_distributed_replay_facings(byte const *data, long size, boolean own
 machine's clock (the host's last message's) are now's again, not the
 keyframe's */
 void network_distributed_replay_restored(void);
+/* the checkpoint epoch the host's messages must carry; 0 before its boundary
+(a replay from before network version 42 has none: network_replay_playback.c
+gives it one) */
+unsigned long network_distributed_checkpoint_epoch(void);
 /* (the host) how long a message takes that client and its answer back, in
 ticks (and its jitter), as its players' input messages tell */
 real distributed_machine_round_trip_ticks(long machine_index);
@@ -574,5 +578,8 @@ unit's camera: the offset from it (world units), FALSE when they leave from
 the camera; NULL (the default) for a build whose shots always do */
 typedef boolean (*network_damage_fire_origin_source)(short local_player_index, real_vector3d *offset);
 void network_damage_set_fire_origin_source(network_damage_fire_origin_source source);
+
+/* (the host) its clients' round trips, averaged, in milliseconds; 0 for none */
+long network_distributed_host_round_trip_milliseconds(void);
 
 #endif // __NETWORK_DISTRIBUTED_H

@@ -538,7 +538,6 @@ symbols in this file:
 
 #include "cseries.h"
 #include "game_modes.h" /* port: port/linux/game/game_modes.c */
-#include "keyboard_glyphs.h" /* port: port/linux/game/keyboard_glyphs.c */
 #include "infection.h" /* port: port/linux/game/infection.c */
 #include "cseries_windows.h"
 #include "errors.h"
@@ -8202,9 +8201,13 @@ long game_engine_remap_weapon(
 	}
 
 	/* (port: and the gravity rifle, a cut weapon, as the flamethrower,
-	which the Xbox's maps have unfinished: neither is a multiplayer weapon) */
-	if (weapon_list_index == _weapon_list_flamethrower || weapon_list_index == _weapon_list_gravity_rifle)
+	which the Xbox's maps have unfinished: neither is a multiplayer weapon.
+	A Halo Custom Edition map's flamethrower is finished, and stays) */
+	if (weapon_list_index == _weapon_list_gravity_rifle ||
+		(weapon_list_index == _weapon_list_flamethrower && !custom_edition_cache_tags_loaded()))
+	{
 		weapon_list_index = _weapon_list_rocket_launcher;
+	}
 
 	/* port: a custom loadout (game_variant_options) has no weapon set */
 	if (game_variant_options_get()->loadout == _loadout_custom)
@@ -8323,14 +8326,16 @@ long game_engine_remap_weapon(
 			weapon_list_index = _weapon_list_needler;
 			break;
 
+		case _weapon_list_flamethrower:
 		case _weapon_list_rocket_launcher:
 			weapon_list_index = _weapon_list_needler;
 			break;
 		}
 		break;
 
-	/* classic: the Xbox game's weapons (the flamethrower and the gravity
-	rifle are already rocket launchers) */
+	/* classic: the Xbox game's weapons (the gravity rifle, and an Xbox map's
+	flamethrower, are already rocket launchers), and a Halo Custom Edition
+	map's flamethrower and fuel rod, among Gearbox's own maps' classic weapons */
 	case _game_engine_weapons_classic:
 		break;
 
@@ -9150,10 +9155,6 @@ static boolean internal_rasterize_score(
 			buffer,
 			format,
 			buffer_size);
-		/* port: preserve the identified hint's wording and offer its score key
-		 * to the optional keyboard prompt feature before semantic context is lost. */
-		buffer[buffer_size - 1] = 0;
-		keyboard_score_hint(player_index, buffer, buffer_size);
 		break;
 	default:
 		result = FALSE;

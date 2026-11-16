@@ -12,6 +12,8 @@ structures (config.inc) and the code (under_test.inc).
 #include "harness.h"
 
 typedef unsigned short word;
+/* (a connection's socket: xnet.c's Winsock) */
+typedef int SOCKET;
 
 #include "config.inc"
 
@@ -124,6 +126,11 @@ static char const *tag_name_strip_path(char const *name)
 #define custom_edition_map_file_path(level_name, path) (strcpy(path, "d:\\custom_maps\\hugeass.map"), 1)
 #define custom_edition_resource_map_file_path(kind, path) 0
 #define custom_edition_map_resource_maps_needed(level_name) 0UL
+/* custom_maps' Xbox multiplayer maps, and the capability their games need
+(network_extensions.h): none here */
+#define custom_xbox_map_level(level_name) 0
+#define network_extension_agreed(machine_index, key, version) 1
+#define NETWORK_CAPABILITY_CUSTOM_XBOX_MULTIPLAYER_MAPS "custom_xbox_multiplayer_maps"
 /* (map_share_files.c's: the hash's first 32 bits) */
 #define map_share_hash_version(hash) \
 	((unsigned long)(hash)[0] << 24 | (unsigned long)(hash)[1] << 16 | (unsigned long)(hash)[2] << 8 | (hash)[3])
@@ -156,7 +163,27 @@ static void connection_close(struct connection *connection, char const *reason)
 	connection->used = FALSE;
 }
 
+/* (the host's file connection, map_share.c's: none here) */
+static void fs_source_end(short state)
+{
+	map_share_globals.fs.state = state;
+}
+
+static void host_file_connection_publish(long machine_index)
+{
+	(void)machine_index;
+}
+
+static void host_file_connection_end(struct host_machine *machine)
+{
+	(void)machine;
+}
+
 #include "under_test.inc"
+
+/* (map_share.c's entries take its lock and call these) */
+#define map_share_machine_downloading map_share_machine_downloading_unlocked
+#define map_share_machine_needs_map map_share_machine_needs_map_unlocked
 
 #define ADDRESS(a, b, c, d) \
 	((unsigned long)(a) << 24 | (unsigned long)(b) << 16 | (unsigned long)(c) << 8 | (unsigned long)(d))
@@ -300,7 +327,7 @@ int main(int argc, char **argv)
 		return 0;
 	}
 	/* a hashes frame that brings none keeps nothing alive; the rest are
-	taken in order, and the file opened once they all came */
+	taken in order, and the file left to be opened once they all came */
 	CASE("hashes-frames")
 	{
 		struct download *download = &map_share_globals.download;
@@ -329,7 +356,9 @@ int main(int argc, char **argv)
 		hashes_frame(connection, 256, 45);
 		CHECK(file->hashes_received == 256, "more hashes than the file's pieces were taken");
 		hashes_frame(connection, 256, 44);
-		CHECK(file->piece_hashes && fake_opened == 1, "the whole list was not taken");
+		/* (opened by the game's thread: map_share.c's download_update, not the
+		connections' thread, which may not start the hashing thread) */
+		CHECK(file->piece_hashes && file->state == _file_opening && !fake_opened, "the whole list was not taken");
 		return 0;
 	}
 	/* a client whose progress stops is not taken for downloading once an

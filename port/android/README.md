@@ -17,57 +17,47 @@ Physical mice use the same control bindings. During play, F12 toggles mouse
 capture; captured mode hides Android's pointer and uses relative movement for
 continuous aiming, while releasing capture restores normal pointer behavior.
 
-## Importing MCC packages
+## Importing maps
 
-Quit the game, then long-press its launcher icon and choose **Import MCC maps**.
-The first-run game-data screen also has an import button. Copy a complete Halo 1
-Workshop package from your computer to a selectable folder (for example Downloads)
-or a ZIP on the phone. Select **Workshop package**, then **Choose folder** or
-**Choose ZIP**. Keep `ModInfo.json`, `CampaignInfo.json`, the mission JSON files
-and maps together. Steam is not needed on Android.
+The map lists' **IMPORT** (New Game's and the Map screen's button, or the north
+face button on either list) takes Custom Edition maps and MCC content alike.
+On Android it opens the system's file picker, which copies the files chosen
+into the import folder (`import`, in the game's data folder). The Switch and
+the PS5 have no file picker: there IMPORT opens a screen with an upload page's
+address and QR code, served by the game on the local network while the screen
+is up (`port/linux/game/map_import_page.c`).
 
-Keep the supplied PNG previews too, including `assets` when present. Folder
-and ZIP imports preserve these images and their relative metadata paths.
-MCC level panels automatically use `Images.Large`, falling back to
-`Images.Thumbnail` or the question-mark picture. The image fits inside the
-existing thumbnail box in each menu style. Supported PNGs are 8-bit RGB/RGBA,
-non-interlaced, at most 2048 by 2048 pixels and 8 MiB per file; other encodings
-keep the placeholder. See [MCC previews](../../docs/reading/mcc_level_previews.md).
+The game's host takes in what lands there (`port/android/host/host_mcc_import.c`, on a
+thread of its own, its files read natively):
 
-The importer defaults to the Workshop ID as its destination folder; an optional
-name can use letters, digits, spaces, underscores and hyphens. It checks package
-paths, metadata, campaign completeness and MCC cache headers before offering
-installation. It copies the package's maps into `mcc_maps/<package>`, retaining
-metadata subfolders and writing `workshop_id.txt`. Folder and ZIP inputs share
-the same importer. Android document URIs are read as streams through the system
-picker, with no broad storage permission.
+- a `.map`: a Custom Edition map, into `custom_maps`. An MCC map is refused on
+  its own: import its package's `.zip`.
+- a `.zip` of Custom Edition maps: its maps, and a `.txt` of a map's name, its
+  description; more than one map goes in a folder named like the `.zip`.
+- a `.zip` with MCC content, which is told apart by its files: a Halo 1 Workshop
+  package (a `ModInfo.json`; several in one `.zip` are several packages) goes to
+  `mcc_maps/<Workshop ID>`, with its JSON metadata and PNG previews; MCC's own
+  resource sets, zipped from an MCC installation so that their `halo1/maps`
+  folders are kept (`halo1/maps/bitmaps.map` for singleplayer,
+  `halo1/maps/custom_edition/bitmaps.map` and `sounds.map` for multiplayer), go
+  to `mcc_maps/_shared/singleplayer` or `multiplayer`; MCC maps with no
+  `ModInfo.json` become a package named like the `.zip`.
 
-Use the shared-resource modes separately: singleplayer requires `bitmaps.map`;
-multiplayer requires `bitmaps.map` and `sounds.map`. Select one resource set at a
-time. These are installed under `mcc_maps/_shared/singleplayer` or `multiplayer`.
-The engine performs its normal full map/resource validation when loading; an
-importer's header check does not establish full gameplay compatibility.
+Every package is checked and staged (in `mcc_staging`) before anything is
+installed: its maps' headers and names, and a campaign's metadata as the game
+reads it (hub and flashback missions are refused). Then, for each package
+already in `mcc_maps`, the game asks: **REPLACE** it, or **KEEP VERSION ON
+DISK** (B). A replacement keeps the old package until the new one is in place,
+and an import cut short is put right by the next. A Custom Edition map of a
+name already there is kept. The game says what was imported, and why anything
+was not (a toast on Android; the screen and the upload page on the consoles).
 
-An existing destination requires explicit replacement confirmation. New files
-are staged outside `mcc_maps`; a failed publish restores the old package. An
-interrupted replacement is recovered at the next import. Cancellation removes
-staged files, and installed Xbox/CE maps and game saves are preserved. Imports
-are serialized and the activity refuses to import while the game process runs.
-Limits are 4,096 files, 16 GiB total, less than 2 GiB per map, 256 KiB per JSON
-file and 64 declared campaign missions. Hub/flashback mission kinds are refused.
-
-Start the game after importing. Enable **CAMPAIGN MISSIONS** in Settings >
-Network Setup > Map Sharing > MCC Packages for mission ordering and progression;
-it is off by default. **COLLECTION FOLDERS** can group identified imported
-packages without Steam. See [MCC packages](../../docs/mcc_maps.md) for desktop
-discovery, resource rules and compatibility limits.
-
-The archived [Android importer test](https://github.com/chestahh/GulchCE/blob/1db929c5e34101a45f644436e031016b5584c7bf/tools/test_mcc_android_importer.py)
-compiles and runs the actual Java core with
-JDK 17+, including failure rollback, cancellation, malformed metadata, path
-traversal and legacy/save preservation. These checks do not exercise an Android
-document provider or establish on-device rendering compatibility. This wider
-test is not included in the focused upstream regression subset.
+Limits: 4,096 files and 16 GB a `.zip`, less than 2 GB a map, 256 KB a JSON file,
+64 campaign missions. Enable **CAMPAIGN MISSIONS** in Settings > Network Setup >
+Map Sharing > MCC Packages for mission ordering and progression; it is off by
+default. See [MCC packages](../../docs/mcc_maps.md) for resource rules and
+compatibility limits. `tools/test_mcc_import.py` runs the importer natively over
+`.map` and `.zip` files made for it.
 
 ## Requirements
 
@@ -107,9 +97,9 @@ Your own builds all have the same signature (the debug key of WSL,
 (`adb install -r`).
 
 To keep the saved games before you remove the app, enter
-`adb pull /sdcard/Android/data/com.halo.decomp/files/save/u` (the profiles).
+`adb pull /sdcard/Android/data/ar.com.slipstreamce/files/save/u` (the profiles).
 After the new install, before the first start of the app, enter
-`adb push u /sdcard/Android/data/com.halo.decomp/files/save/u`. The app reads
+`adb push u /sdcard/Android/data/ar.com.slipstreamce/files/save/u`. The app reads
 and overwrites what adb pushes. adb cannot add files to `save/u` or `save/z` once the app made them, or
 change files that the app wrote, so push before the first start. adb cannot read
 some files that the app writes (the `blam.lst` files of `save/z`), so `adb pull`
@@ -142,7 +132,7 @@ guarantee that every device makes this address available.
 
 The game needs the `maps/` folder from an Xbox disc image (`.xiso` or
 `.iso`) of any version of the game. The app extracts `maps/` from the disc
-image. The app keeps the data in `/sdcard/Android/data/com.halo.decomp/files`.
+image. The app keeps the data in `/sdcard/Android/data/ar.com.slipstreamce/files`.
 
 To install the data with the app:
 
@@ -157,17 +147,17 @@ To install the data with the app:
 To install the data from a computer:
 
 1. Start the app one time. The app makes its folders.
-2. Enter `adb push <folder>/. /sdcard/Android/data/com.halo.decomp/files/`.
+2. Enter `adb push <folder>/. /sdcard/Android/data/ar.com.slipstreamce/files/`.
 
-| Item | Location in `/sdcard/Android/data/com.halo.decomp/files` |
+| Item | Location in `/sdcard/Android/data/ar.com.slipstreamce/files` |
 | --- | --- |
 | Saved games (`z:\` and `u:\`) | `save` |
-| Mods (`docs/mods.md`) | `mods`: `adb push <mod folder> /sdcard/Android/data/com.halo.decomp/files/mods/`; the main menu's Mods orders them and turns them off |
-| Log | `debug.txt` |
+| Mods (`docs/mods.md`) | `mods`: `adb push <mod folder> /sdcard/Android/data/ar.com.slipstreamce/files/mods/`; the main menu's Mods orders them and turns them off |
+| Log | `debug.txt`, the log of the game, and `halo.log`, the log of the app (`log_files = false` and `halo_log = false` in `[debug]` turn them off) |
 | Settings | `config.toml` |
 
 To make a copy of the saved games, enter
-`adb pull /sdcard/Android/data/com.halo.decomp/files/save/u` (the profiles).
+`adb pull /sdcard/Android/data/ar.com.slipstreamce/files/save/u` (the profiles).
 An `adb pull` of the whole `save` folder stops at the `blam.lst` files of
 `save/z`, which adb cannot read.
 
@@ -293,15 +283,23 @@ Switch: open a profile, **GAMEPADS**, then **GYRO AIM**. ON aims with it all
 the time, ONLY ON ZOOM only while you are zoomed in (a scope), for fine
 aiming; OFF (the default) is the swipe and the stick only. The same screen
 sets its sensitivity and invert each way (`1` is the phone's own turn).
-These are `input.gyro_aim` and the four after it in `config.toml`. The
-gyroscope aims while the touch controls show.
+These are `input.gyro_aim` and the four after it, which each profile keeps in
+the `settings.toml` in its folder (`config.toml`'s are those of a profile that
+has not set them). The gyroscope aims while the touch controls show.
 - "Options" opens these items:
   - "General": the phone's vibration (on by default; it follows the
-    vibration setting of the game's profile), a floating move stick (off by default: the stick goes
+    vibration setting of the game's profile), "Split screen" (off by
+    default: the left half of the screen moves, with the stick where your
+    thumb lands, drawn only while it is held; the right half looks; a tap
+    on the right half fires, and a double tap held there fires as long as
+    the finger stays and still aims; the Fire buttons are hidden while it
+    is on, and the other buttons press as before), a floating move stick (off by default: the stick goes
     where your thumb lands in the lower left of the screen), the opacity of
     the controls, how many fingers tap together to open the cheat menu
     (three, the default, or four), "Held buttons don't aim" (off by
-    default: a finger that swipes from a button only holds it),
+    default: a finger that swipes from a button only holds it), "Show
+    during cutscenes" (off by default: the controls stay on screen while a
+    cutscene plays, where they otherwise hide and a tap skips it),
     "Hide or add buttons" (hide a button, add a copy of a
     button) and "Edit buttons size".
   - "Edit buttons layout": drag the controls, and the "Options" button
@@ -321,15 +319,14 @@ Removing the app's data or the app removes the layout.
 The settings are in `config.toml` in the data folder of the app. To change
 them:
 
-1. Enter `adb pull /sdcard/Android/data/com.halo.decomp/files/config.toml`.
+1. Enter `adb pull /sdcard/Android/data/ar.com.slipstreamce/files/config.toml`.
 2. Change the file.
-3. Enter `adb push config.toml /sdcard/Android/data/com.halo.decomp/files/`.
+3. Enter `adb push config.toml /sdcard/Android/data/ar.com.slipstreamce/files/`.
 
 At the first start, the game writes the file with the default values. To
 get the default values again, delete the file.
 
-The settings are the settings of Linux, without the window, the mouse and
-the paths. Refer to [port/linux/README.md](../linux/README.md#settings).
+Every setting is described in [docs/settings.md](../../docs/settings.md).
 Some video settings also apply on Android, with these notes; the first three
 have rows of their own in Video Setup:
 
@@ -356,8 +353,8 @@ These settings are only for Android:
 | `debug.memory_watch` | `true` (the default): the app notices the game's writes to textures and vertices by page protection. `false`: it compares page contents once a frame instead, which is slower. Under OpenGL ES, geometry is streamed in either mode. Refer to "Limits". |
 | `debug.profile_hz` | Refer to "Find problems". |
 | `debug.profile_run` | `true`: each start records a profile of the run into its own folder, `Download/halo_profiles/DDMMYYYY_HHMMSS` (the day and time it started), to send as it is. Refer to "Find problems". `false` (the default): none. Takes effect the next time the game starts. |
-| `display.renderer` | How the game draws: `"vulkan"` (the default; OpenGL ES if Vulkan cannot start) or `"gl"` (OpenGL ES over the phone's driver). Takes effect the next time the game starts. The line below the version number in the main menu shows the renderer that runs. VIDEO SETUP's GRAPHICS BACKEND sets it. Refer to "Graphics: OpenGL ES and Vulkan". |
-| `display.vk_driver` | The Vulkan driver of the Vulkan renderer (and of the Vulkan probe). Empty (the default): the phone's own. `"auto"`: Turnip on an Adreno, which the app downloads (refer to "Turn on Turnip"). Otherwise the file name of a driver archive in the data folder. VIDEO SETUP's VULKAN DRIVER sets `""` (STOCK) or `"auto"` (TURNIP). |
+| `display.renderer` | How the game draws: `"vulkan"` (the default; OpenGL ES if Vulkan cannot start, which sets it to `"gl"`) or `"gl"` (OpenGL ES over the phone's driver). Takes effect the next time the game starts. The line below the version number in the main menu shows the renderer that runs. VIDEO SETUP's GRAPHICS BACKEND sets it. Refer to "Graphics: OpenGL ES and Vulkan". |
+| `display.vk_driver` | The Vulkan driver of the Vulkan renderer (and of the Vulkan probe). Empty (the default): the phone's own. Otherwise the file name of a driver archive in `freedreno_drivers` in the data folder (or in the data folder itself): the Turnip build the app downloads on an Adreno (refer to "Turn on Turnip"), or one that you add. VIDEO SETUP's VULKAN DRIVER sets `""` (STOCK) or the name of an archive in `freedreno_drivers`. `"auto"`, which was the downloaded Turnip build, is the phone's own driver now: the game writes `""` over it. |
 | `debug.vk_probe` | Refer to "Find problems". |
 | `debug.vk_validation` | Refer to "Find problems". |
 | `debug.vk_present_marker` | Under the Vulkan renderer, draws a red square at the top left and a green one at the top right of the picture, so that a screenshot shows which way up it is. Default `false`. |
@@ -369,7 +366,7 @@ The game can draw in two ways:
 
 | Renderer | `display.renderer` | Driver (`display.vk_driver`) |
 | --- | --- | --- |
-| Vulkan (the default) | `"vulkan"` | `""` (the default): the phone's own Vulkan driver. `"auto"`: Turnip on an Adreno GPU (refer to "Turn on Turnip"). Or the file name of a driver archive that you add. |
+| Vulkan (the default) | `"vulkan"` | `""` (the default): the phone's own Vulkan driver. Or the file name of a driver archive: the Turnip build the app downloads on an Adreno GPU (refer to "Turn on Turnip"), or one that you add. |
 | OpenGL ES | `"gl"` | The phone's own. |
 
 If Vulkan cannot start on a phone, the game uses OpenGL ES.
@@ -380,24 +377,25 @@ If Vulkan cannot start on a phone, the game uses OpenGL ES.
    **VIDEO SETUP**.
 2. At the top of the screen:
    - **GRAPHICS BACKEND:** `VULKAN` or `OPENGL` (OpenGL ES).
-   - **VULKAN DRIVER:** `STOCK` (the phone's own driver) or `TURNIP`
-     (refer to "Turn on Turnip"). This row shows only when the backend is
-     `VULKAN`.
+   - **VULKAN DRIVER:** `STOCK` (the phone's own driver), then every driver
+     archive in `freedreno_drivers` by its file name: the Turnip build the
+     app downloads (refer to "Turn on Turnip") and any that you add. This
+     row, and **IMPORT DRIVER**, show only when the backend is `VULKAN`.
 3. Select **OK**. The menu writes `display.renderer` and
    `display.vk_driver` in `config.toml`.
 4. Close the game and start it again. The renderer and the driver change
    only when the game starts, as the note below the rows says.
 
-**DEFAULTS** sets `VULKAN` and `STOCK`. A driver archive of your own (refer
-to "Try another Turnip build") is set in `config.toml` only: with one set,
-the menu shows `STOCK`, and the archive stays set unless you choose
-another driver and select **OK**.
+**DEFAULTS** sets `VULKAN` and `STOCK`. An archive named in `config.toml`
+that is not in `freedreno_drivers` (one in the data folder itself) is not
+listed: with one set, the menu shows `STOCK`, and the archive stays set
+unless you choose another driver and select **OK**.
 
 On some phones the phone's own driver draws the game with errors: shapes
 that stretch across the screen, textures that are missing or wrong. The
 Vulkan renderer lets the game use another driver. On phones with a
 Qualcomm Adreno GPU, that is Turnip, the open-source Vulkan driver for
-Adreno from the Mesa project. Turnip is off until you turn it on.
+Adreno from the Mesa project. Turnip is off until you choose it.
 
 To see which renderer and driver run, look at the main menu: the line
 below the game's version number (`01.01.14.2342`, at the lower right) says
@@ -419,19 +417,19 @@ refer to "Make sure that it operates").
 ### Get to the settings file
 
 The settings file (`config.toml`) and the driver archives are in the data
-folder: `/sdcard/Android/data/com.halo.decomp/files`. Start the game one
+folder: `/sdcard/Android/data/ar.com.slipstreamce/files`. Start the game one
 time first; the game then writes `config.toml`.
 
 Since Android 11, most file manager apps on the phone cannot open
 `Android/data`. Use a computer:
 
 - With a USB cable: set the phone to "File transfer", and open
-  `Internal storage/Android/data/com.halo.decomp/files` on the computer.
+  `Internal storage/Android/data/ar.com.slipstreamce/files` on the computer.
   Copy `config.toml` to the computer, change it with a text editor, and
   copy it back.
-- With adb: `adb pull /sdcard/Android/data/com.halo.decomp/files/config.toml`,
+- With adb: `adb pull /sdcard/Android/data/ar.com.slipstreamce/files/config.toml`,
   change the file, then
-  `adb push config.toml /sdcard/Android/data/com.halo.decomp/files/`.
+  `adb push config.toml /sdcard/Android/data/ar.com.slipstreamce/files/`.
 
 Close the game before you change `config.toml`: the game writes the file
 when it starts and when you change a setting in its menus. Change only the
@@ -441,16 +439,18 @@ value after `=`, and keep the quotes.
 
 1. Start the app one time. On an Adreno 6xx, 7xx or 8xx, the app shows
    "Downloading the Vulkan driver" before the game starts: it downloads
-   the Turnip build for the GPU's series into the data folder
-   (approximately 2.5 to 3.5 MB, from
+   the Turnip build for the GPU's series into `freedreno_drivers` in the
+   data folder (approximately 2.5 to 3.5 MB, from
    [K11MCH1/AdrenoToolsDrivers](https://github.com/K11MCH1/AdrenoToolsDrivers/releases),
    release `v26.0.0-rc08`; the app keeps the file only if it is exactly
    the build that we chose). It does this only one time. If the download
    fails or you push "Skip", the app tries again at the next start.
    The download does not turn Turnip on.
-2. Set **VULKAN DRIVER** to `TURNIP` (refer to "Change the renderer in
-   the game"), select **OK**, close the game and start it again. Then go
-   to step 5. Or, to change `config.toml` instead, close the game.
+2. Set **VULKAN DRIVER** to the downloaded build, listed by its file name
+   without `.zip` (for example `Turnip_v26.0.0_R8`; refer to "Change the
+   renderer in the game"), select **OK**, close the game and start it
+   again. Then go to step 5. Or, to change `config.toml` instead, close
+   the game.
 3. Open `config.toml` (refer to "Get to the settings file"). Find the
    `[display]` section. It has these lines, with comments above them:
 
@@ -462,11 +462,14 @@ value after `=`, and keep the quotes.
    renderer = "vulkan"
    ```
 
-4. Change `vk_driver = ""` to:
+4. Change `vk_driver = ""` to the build's file name, for example:
 
    ```toml
-   vk_driver = "auto"
+   vk_driver = "Turnip_v26.0.0_R8.zip"
    ```
+
+   (`Turnip_v26.0.0_R8_A8xx.zip` on an Adreno 8xx: the name is the file's
+   in `freedreno_drivers`.)
 
    Make sure that `renderer = "vulkan"`. Save the file (and copy it back
    to the phone, if you changed it on a computer).
@@ -477,10 +480,10 @@ value after `=`, and keep the quotes.
    `Mesa Turnip driver v26.0.0 - R8`. If it says only `Vulkan`, Turnip is
    not on: refer to "Make sure that it operates".
 
-`"auto"` uses the build that the app downloaded for this phone (the app
-writes its name in `vk_driver_auto.txt` in the data folder). Instead of
-`"auto"`, you can write the file name of the archive, for example
-`vk_driver = "Turnip_v26.0.0_R8.zip"`.
+The app writes the name of the build it chose for this phone in
+`vk_driver_auto.txt` in the data folder. `vk_driver = "auto"`, which chose
+that build before, now means the phone's own driver: the game writes
+`vk_driver = ""` over it the next time it starts.
 
 To turn Turnip off, set **VULKAN DRIVER** to `STOCK` (or
 `vk_driver = ""` again).
@@ -502,12 +505,26 @@ To turn Turnip off, set **VULKAN DRIVER** to `STOCK` (or
    `meta.json` file and the driver library (`.so`) at its top level. Some
    of these sites also have Qualcomm's own drivers in this format; they
    load in the same way.
-2. Copy the `.zip` file into the data folder, next to `config.toml`.
-3. Set `vk_driver` to the exact file name of the archive, for example
-   `vk_driver = "Turnip_v26.0.0_R7.zip"`, and `renderer = "vulkan"`.
-4. Start the game, and look at the main menu.
+2. In **VIDEO SETUP**, with **GRAPHICS BACKEND** on `VULKAN`, select
+   **IMPORT DRIVER** and choose the `.zip` file (several at once if you
+   like). The app copies each one into the `freedreno_drivers` folder of
+   the data folder, once it has checked that it is a driver archive (a
+   `meta.json` naming a library that is in the zip, 256 MB at most); a
+   name the folder has already is left as it is. Leave Video Setup and open
+   it again to see it listed. Or copy the `.zip` file into that folder
+   yourself (`/sdcard/Android/data/ar.com.slipstreamce/files/freedreno_drivers/`;
+   the app makes the folder when it looks for its own download).
+3. In **VIDEO SETUP**, set **VULKAN DRIVER** to the archive: every `.zip`
+   in `freedreno_drivers` is listed after `STOCK`, by its file
+   name without `.zip` (a long name shows its start and end). Select
+   **OK**. Or set `vk_driver` to the exact file name of the archive, for
+   example `vk_driver = "Turnip_v26.0.0_R7.zip"`, and
+   `renderer = "vulkan"`.
+4. Start the game again, and look at the main menu.
 
-You can keep more than one archive in the folder.
+You can keep more than one archive in the folder. An archive in the data
+folder itself, next to `config.toml`, still loads when `vk_driver` names
+it, but the menu does not list it.
 
 ### Choose another renderer or driver
 
@@ -516,11 +533,15 @@ In **VIDEO SETUP**, or in `config.toml`, in the `[display]` section:
 | You want | In VIDEO SETUP | In `config.toml` |
 | --- | --- | --- |
 | Vulkan on the phone's own driver (the default) | `VULKAN`, `STOCK` | `renderer = "vulkan"` and `vk_driver = ""` |
-| Vulkan on Turnip (Adreno) | `VULKAN`, `TURNIP` | `renderer = "vulkan"` and `vk_driver = "auto"` |
-| Vulkan on a driver archive that you add | (not in the menu) | `renderer = "vulkan"` and `vk_driver = "<file name>.zip"` |
+| Vulkan on Turnip (Adreno) | `VULKAN`, the downloaded build's name (for example `Turnip_v26.0.0_R8`) | `renderer = "vulkan"` and `vk_driver = "Turnip_v26.0.0_R8.zip"` |
+| Vulkan on a driver archive that you add | `VULKAN`, the archive's name | `renderer = "vulkan"` and `vk_driver = "<file name>.zip"` |
 | OpenGL ES | `OPENGL` | `renderer = "gl"` |
 
-Either way, the change applies the next time the game starts.
+Either way, the change applies the next time the game starts. If Vulkan
+does not start (the phone's Vulkan cannot run the renderer, or the driver
+chosen cannot be loaded), the game runs on OpenGL ES and sets `renderer =
+"gl"`, so that VIDEO SETUP shows `OPENGL`; choose `VULKAN` there to try
+again at the next start.
 
 When the app is updated to the version that makes Vulkan the default, it
 changes `renderer = "gl"` in an existing `config.toml` to `"vulkan"` one
@@ -534,7 +555,7 @@ number (`01.01.14.2342`) at the lower right:
 | The main menu shows | Meaning |
 | --- | --- |
 | `Vulkan` and a driver name (for example `Mesa Turnip driver v26.0.0 - R8`) | The Vulkan renderer on that driver. |
-| `Vulkan` | The Vulkan renderer on the phone's own driver. With `vk_driver = "auto"`: the download did not finish yet, or there is no Turnip build for this GPU. With an archive's name: the name is wrong, or the file is not a driver archive. |
+| `Vulkan` | The Vulkan renderer on the phone's own driver. With an archive's name in `vk_driver`: the name is wrong, the file is not a driver archive, or the archive's driver did not load (the log says why). |
 | `OpenGL ES` | The OpenGL ES renderer. With `renderer = "vulkan"`: Vulkan could not start, and the game used OpenGL ES. The phone's Vulkan cannot run the renderer, or the archive's driver was accepted but Android loaded the phone's driver in its place. |
 
 The reasons are in the log of the app: connect the phone to a computer and
@@ -563,6 +584,10 @@ again.
 - For each renderer and driver that you tried: the line from the main menu,
   what looked wrong, and screenshots of the same scene.
 - `debug.txt` from the data folder.
+- `halo.log` from the data folder: the lines of `adb logcat -s halo`,
+  without a computer. If **Write halo.log** in the overlay's System folder
+  (`halo_log` in the `[debug]` section of `config.toml`) is off, turn it
+  on, then start the game again and play until the problem.
 - If you can use adb: the output of `adb logcat -s halo` during the run.
 - If you want to help more: set `vk_probe = "all"` in the `[debug]` section
   of `config.toml` and start the app. The app tests the Vulkan driver
@@ -908,7 +933,9 @@ and reload, address reuse and allocation failure.
 ## Find problems
 
 - Enter `adb logcat -s halo` to see the log of the port and the errors of
-  the game. `files/debug.txt` is the log of the game.
+  the game. `files/debug.txt` is the log of the game, and
+  `files/halo.log` has logcat's lines too, begun again each start
+  (`debug.halo_log`, the overlay's **Write halo.log**, from the next start).
 - If the guest code stops, the log shows the registers and the frame chain
   (`host/host_arch.c`), from a stack of the signal handler's own, so a
   stack overflow is reported too.
@@ -970,8 +997,8 @@ and reload, address reuse and allocation failure.
 - To run the probe on another Vulkan driver (Turnip, for an Adreno GPU), copy
   an adrenotools archive (a zip with a `meta.json` and the driver's library,
   for example `Turnip_v26.0.0_R8.zip` from the K11MCH1/AdrenoToolsDrivers
-  releases) into the data folder and set `display.vk_driver = "<the file's
-  name>"`. The app unpacks it into its private storage (Android loads a library
+  releases) into `freedreno_drivers` in the data folder and set
+  `display.vk_driver = "<the file's name>"`. The app unpacks it into its private storage (Android loads a library
   only from there) and opens it with libadrenotools; the report's `driver.*`
   lines say which driver is running (`driver.check` says if the archive's
   library was really loaded). An archive that does not work is logged
@@ -980,7 +1007,7 @@ and reload, address reuse and allocation failure.
 - To install a debug build beside the app from GitHub Actions (another
   signing key stops it from replacing that app), set
   `HALO_APPLICATION_ID_SUFFIX=.vk` when you run `ninja android_apk`. The
-  package is then `com.halo.decomp.vk`, with a data folder of its own, which
+  package is then `ar.com.slipstreamce.vk`, with a data folder of its own, which
   needs a copy of `maps/`.
 
 ## Limits
@@ -1027,3 +1054,27 @@ an unload summary and the first allocation failure per cache lifetime in the
 normal platform log. No test log files, per-frame reports, texture fingerprints
 or uniform readbacks run in the permanent build. The cache can still exhaust
 its limit or system memory; normal fallback handling remains available.
+
+## The package name
+
+The game's package is `ar.com.slipstreamce`; it was `com.halo.decomp`. Android
+treats the two as different apps, with nothing in common, so the move has two
+sides (`Migration.java`, `MigrationProvider.java`, `MigrationFiles.java`):
+
+- **The bridge**, the old package's last builds (`HALO_ANDROID_BRIDGE=1`), is
+  every release's `halo-android-release.zip`, the file every installed build's
+  updater asks for, so that a phone that comes back at any time reaches it. It
+  has no game (`BridgeActivity`): a notice of the rebranding, which downloads the
+  release's `slipstreamce-android-release.zip`, hands it to the installer and,
+  once it is installed, offers to open it. The player's files stay where they are
+  through the update to it, and it answers only the new package of its own
+  signing key for them.
+- **The new app**, at its first start with the old app installed, copies those
+  files (`MigrationFiles.java` says which: saves, settings, mods, maps, the touch
+  layouts) and only then offers to remove the old app. The old app's data is not
+  touched, so a failure loses nothing. Where there is no room, the game's maps are
+  left out first (the ISO makes them again), then custom maps, and the player is
+  told. `.migrated` in the data folder says it is done.
+
+Android asks the player to allow each install and each removal. Both sides need
+the same signing key: a local debug build cannot take data from a CI build.

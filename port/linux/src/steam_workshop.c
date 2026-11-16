@@ -23,12 +23,14 @@ static struct
 	int scanned;
 	int enabled;
 	int count;
-	struct steam_workshop_map maps[STEAM_WORKSHOP_MAXIMUM_MAPS];
+	/* (STEAM_WORKSHOP_MAXIMUM_MAPS of them, allocated as discovery first
+	scans: 1.2 MB the guest images have no room for as static data) */
+	struct steam_workshop_map *maps;
 } catalog;
 
 static int discovery_enabled(void)
 {
-#if defined(HALO_ANDROID) || defined(HALO_WEB)
+#if defined(HALO_ANDROID) || defined(HALO_WEB) || defined(HALO_PS5)
 	return 0;
 #else
 	return config_boolean("game.workshop_maps");
@@ -532,6 +534,11 @@ int steam_workshop_scan(void)
 	catalog.enabled = discovery_enabled();
 	if (!catalog.enabled)
 		return 0;
+	if (!catalog.maps && !(catalog.maps = calloc(STEAM_WORKSHOP_MAXIMUM_MAPS, sizeof(*catalog.maps))))
+	{
+		catalog.enabled = 0;
+		return 0;
+	}
 	paths = malloc(sizeof(*paths) * 2 * STEAM_WORKSHOP_MAXIMUM_LIBRARIES);
 	if (!paths)
 		return 0;

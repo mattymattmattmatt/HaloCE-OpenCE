@@ -186,17 +186,28 @@ struct nv2a_pixel_shader_key
 	meters' (shader_transparent_meter) */
 	unsigned char source_blend;
 	/* A CE meter draw sampling a sheet also used as ordinary artwork. (Here,
-	past the 256 bytes the Switch's shader cards keep of a key and hash,
-	port/switch/guest/dk_shaders.c: deko3d never sets it; padded to whole
-	words, which the OpenGL and Vulkan renderers hash the key by) */
+	past the 256 bytes the Switch's shader cards keep of a key: deko3d keeps
+	it in a record's spare byte and hashes it only when it is set,
+	port/switch/guest/dk_shaders.c; padded to whole words, which the OpenGL
+	and Vulkan renderers hash the key by) */
 	unsigned char ce_meter_channels;
 	/* blood over the surface (the gore mod's on vehicles: xgpu_set_blood),
 	in the padding's first byte */
 	unsigned char blood;
-	/* MCC environment lightmap pass only; part of the compiled shader key. */
+	/* The dynamic lighting's model variant (XGPU_PLASMA_MODEL_*; 0 for the
+	stock shader, whose key and hash this leaves as they were). The Vulkan
+	renderer's: under deko3d only vertex shaders have the variant. */
+	unsigned char plasma_model;
+	/* MCC's environment lightmap pass (mcc_environment_shader.h): its bump
+	attenuation in place of the dot product. deko3d keeps it in a record's
+	second spare byte, as ce_meter_channels its first */
 	unsigned char mcc_bump_attenuation;
-	unsigned char ce_meter_padding;
 };
+
+/* what a model lighting program's variant adds (plasma_model_shader.c):
+the selected lights' soft falloff, and the visibility fields too */
+#define XGPU_PLASMA_MODEL_FALLOFF 1u
+#define XGPU_PLASMA_MODEL_OCCLUSION 2u
 
 char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key);
 /* the blood the next draws are covered with: its color and how much of the
@@ -263,14 +274,22 @@ void xgpu_texture_cache_begin_frame(void);
 /* (debug.gpu_stats) a texture of this many bytes uploaded to GL (d3d8_gl.c) */
 void xgpu_statistics_texture_upload(unsigned long bytes);
 
-/* MCC-owned immutable resources never enter the guest physical texture cache. */
-BOOL xgpu_mcc_texture_get(DWORD const *resource, D3DCOLOR const *palette,
-	GLuint *texture, GLenum *target, struct xgpu_texture_description *description);
+/* MCC-owned immutable resources never enter the guest physical texture cache
+(port/linux/src/mcc_texture_bridge.c registers them): each renderer's texture
+cache makes its own copy of one from its registered pixels (xbox_textures.c,
+xbox_textures_vk.c, xbox_textures_dk.c) */
 BOOL xgpu_mcc_texture_describe(DWORD const *resource, struct xgpu_texture_description *description);
+/* (OpenGL's: xbox_textures.c) */
 BOOL xgpu_mcc_texture_upload(GLuint texture, GLenum target,
 	struct xgpu_texture_description const *description, void const *pixels,
 	unsigned long bytes, D3DCOLOR const *palette);
+/* a header no texture stage may keep once its registration goes (each renderer's device) */
 void xgpu_mcc_texture_unbind(DWORD const *resource);
+/* the renderer's copy of a registered header, let go as its registration goes */
+void xgpu_mcc_texture_forget(DWORD const *resource);
+/* the renderer's copy made now, as the map loads: FALSE where it is not (one
+there already, or a renderer that makes them at their first draw) */
+BOOL xgpu_mcc_texture_prepare(DWORD const *resource);
 
 /* ---------- render targets */
 
@@ -382,6 +401,10 @@ void xgpu_static_buffers_remove(const void *buffers, long count, unsigned long s
 /* Android: size bytes of vertices or indices from start, as above */
 void xgpu_static_range_add(const void *start, unsigned long size, int indices);
 void xgpu_static_range_remove(const void *start, int indices);
+/* Android: the map's tags are let go, and with them every range above (its
+BSP's among them, which the game lets go only later, after the next map's
+data may have been read over it) */
+void xgpu_static_forget_all(void);
 /* the visibility tests ended at an index so far, and the number (from 1) of
 the one whose count GetVisibilityTestResult last gave there, 0 for none. A
 test's count is read two or more frames after it, and never for one dropped

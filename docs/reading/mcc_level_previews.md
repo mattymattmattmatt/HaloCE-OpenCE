@@ -48,8 +48,9 @@ Virtual level names and transfer messages are unchanged; item five retains
 network protocol 44. The local-package regression tests cover both layouts,
 direct-file precedence, campaign metadata and refusal of linked nested paths.
 
-Android's folder and ZIP importer already retains PNG files and metadata
-subdirectories, while flattening the maps into the package root. Preview lookup
+The map lists' IMPORT (port/android/host/host_mcc_import.c, on every platform) retains
+a package's PNG files and metadata subdirectories, while flattening the maps
+into the package root. Preview lookup
 is case-insensitive because imports normalize destination names. Steam is not
 required. Import the complete package again if an older manual copy contains
 only the `.map` files.
@@ -159,8 +160,9 @@ malformed files, path/link escapes, metadata fallback and local precedence.
 [test_mcc_preview_menu.py](https://github.com/chestahh/GulchCE/blob/1db929c5e34101a45f644436e031016b5584c7bf/tools/test_mcc_preview_menu.py) exercises the
 real presentation against deterministic font/GPU services, checking bounds,
 cache eviction/reset, wrapping and unaffected Xbox/CE indices. The
-[Android importer tests](https://github.com/chestahh/GulchCE/blob/1db929c5e34101a45f644436e031016b5584c7bf/tools/tests/MccPackageImporterTest.java) verify
-that folder and ZIP imports retain metadata and image bytes. The full source archive
+[Android importer tests](https://github.com/chestahh/GulchCE/blob/1db929c5e34101a45f644436e031016b5584c7bf/tools/tests/MccPackageImporterTest.java) verified
+that the Android importer this fork has since replaced retained metadata and image bytes;
+`tools/test_mcc_import.py` checks the same of its replacement. The full source archive
 ran preview reader checks on Windows and Linux, including Linux
 address/undefined-behavior sanitizers. These tests are archived coverage;
 they are not part of the focused testing-based contribution. These automated checks do not replace rendered menu inspection or

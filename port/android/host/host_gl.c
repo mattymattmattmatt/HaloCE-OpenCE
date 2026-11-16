@@ -354,10 +354,10 @@ void host_gl_fence_frame(uint32_t slot)
 
 void host_gl_wait_frame(uint32_t slot)
 {
-	if (host_renderer_vulkan)
-		return;
 	GLenum status;
 
+	if (host_renderer_vulkan)
+		return;
 	if (slot >= FRAME_FENCE_SLOTS || !frame_fences[slot])
 		return;
 	/* A timeout or failed wait does not release the GPU's ownership of the

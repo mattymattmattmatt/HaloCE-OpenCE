@@ -39,8 +39,9 @@ Called from the main loop every frame (main.c).
 #include "network_coop.h"
 #include "network_map_vote.h"
 #include "server_director.h"
+#include "bots.h" /* port: port/linux/game/bots.c */
 #include "mcc_server.h"
-#include "mcc_ui_network.h"
+#include "mcc_ui_network.h" /* port: port/linux/game/mcc_ui_network.h */
 #include "server_gametypes.h"
 
 #include "../src/p2p.h" /* port: port/linux/src/p2p.c, p2p_lobby.c */
@@ -78,7 +79,7 @@ long updater_server_available_network_version(void);
 int updater_server_install_start(void);
 int updater_server_install_poll(char *error, int size);
 
-#if HALO_SERVER_BUILD
+#if HALO_HOST_BUILD
 
 enum
 {
@@ -124,7 +125,10 @@ enum
 static char const *const server_end_names[NUMBER_OF_SERVER_ENDS] =
 	{ "score", "time", "idle", "empty", "command", "next", "update", "vote" };
 
-static struct
+/* the director's state, on the heap at its first use (its rotation and its
+players' records are some 190 KB, which the guest images have not room
+for: tools/guest_image_check.py) */
+struct server_director_globals
 {
 	boolean started;
 	short state;
@@ -230,7 +234,28 @@ static struct
 	boolean map_vote_done;
 	short map_vote_count;
 	long map_vote_entries[NETWORK_MAP_VOTE_MAXIMUM_CHOICES];
-} server;
+};
+
+static struct server_director_globals *server_director_globals_pointer;
+
+static struct server_director_globals *server_director_globals(
+	void)
+{
+	if (!server_director_globals_pointer)
+	{
+		server_director_globals_pointer = (struct server_director_globals *)calloc(1,
+			sizeof(*server_director_globals_pointer));
+		if (!server_director_globals_pointer)
+		{
+			platform_log("server: out of memory for the director's %lu bytes",
+				(unsigned long)sizeof(*server_director_globals_pointer));
+			abort();
+		}
+	}
+	return server_director_globals_pointer;
+}
+
+#define server (*server_director_globals())
 
 /* ---------- the server's game */
 
@@ -260,6 +285,23 @@ static long server_player_count(
 	for (index = 0; game && index < MAXIMUM_SLOTS; index++)
 	{
 		if (network_player_is_valid(&game->players[index]))
+			count++;
+	}
+	return count;
+}
+
+/* port: the server's bots (sv_bot_add): players of machines of their own,
+on the server's (bots.h) */
+static long server_bot_count(
+	void)
+{
+	struct network_game *game = server_game();
+	long count = 0;
+	long index;
+
+	for (index = 0; game && index < MAXIMUM_SLOTS; index++)
+	{
+		if (network_player_is_valid(&game->players[index]) && bots_machine_is_bot(game->players[index].machine_index))
 			count++;
 	}
 	return count;
@@ -523,17 +565,46 @@ static void server_apply_game_settings(
 	network_game_server_port_set_cooperative_dedicated(TRUE);
 }
 
-/* the listing: internet play (network.online), public or by invite, and
-its password */
+/* the listing: internet play, public or by invite, and its password */
+/* (server_mode.h) Hosting from the menus, Host Server's Server Settings'
+LISTING (server.listing) says both, as Create Game's INTERNET and LAN do:
+its LAN keeps the server off the internet even with internet play on; a
+dedicated server goes by its config.toml's network.online and server.public */
+int server_director_online(
+	void)
+{
+	if (!config_boolean("network.online"))
+		return FALSE;
+	if (halo_server_hosting())
+		return strcmp(config_string("server.listing"), "lan") != 0;
+	return TRUE;
+}
+
+int server_director_public(
+	void)
+{
+	if (halo_server_hosting())
+		return !strcmp(config_string("server.listing"), "internet_public");
+	return config_boolean("server.public");
+}
+
+/* whether the server is listed (in everyone's server browser, once it is on
+the internet) */
+static boolean server_public(
+	void)
+{
+	return server_director_public() != 0;
+}
+
 static void server_apply_listing(
 	void)
 {
 	char const *password = config_string("server.password");
 
-	p2p_set_hosting_allowed(config_boolean("network.online"));
+	p2p_set_hosting_allowed(server_director_online());
 	p2p_set_hosting_password(password[0] ? password : NULL);
 	/* (withdrawn while a stop waits, whatever server.public says) */
-	p2p_set_hosting_public(config_boolean("server.public") && !server.drain_active);
+	p2p_set_hosting_public(server_public() && !server.drain_active);
 }
 
 void server_director_apply_settings(
@@ -587,9 +658,9 @@ static boolean server_apply_entry(
 		}
 		if (difficulty == (short)NUMBEROF(difficulties))
 			difficulty = 1;
-		if (!(entry->map_kind == _server_map_mcc ?
-			ui_widget_port_mcc_cooperative_level_choose(entry->level, difficulty) :
-			ui_widget_port_cooperative_level_choose(entry->level, difficulty)))
+		/* (an MCC campaign level as Create Game's MCC list chooses one) */
+		if (entry->map_kind == _server_map_mcc ? !ui_widget_port_mcc_cooperative_level_choose(entry->level, difficulty) :
+			!ui_widget_port_cooperative_level_choose(entry->level, difficulty))
 		{
 			server_log(_server_log_warning, "lobby", "%s cannot be played as co-op", entry->level);
 			return FALSE;
@@ -610,6 +681,11 @@ static boolean server_apply_entry(
 			return FALSE;
 		}
 		main_set_multiplayer_map_name(entry->level);
+		/* (an MCC map by its full path, as Create Game's MCC list chooses it:
+		ui_widget_port_mcc_multiplayer_map_choose, less the player's last
+		map remembered, which a server is not) */
+		if (entry->map_kind == _server_map_mcc)
+			game_engine_override_map_name(entry->level);
 		network_game_server_change_map_name(network_server, entry->level);
 		player_ui_set_game_variant(&variant);
 		player_ui_set_game_variant_options(&options);
@@ -867,28 +943,29 @@ static void server_adopt_rotation(
 	server.index = anchor;
 }
 
+static struct server_rotation *set_rotation_heap;
+#define scratch SERVER_HEAP(struct server_rotation, set_rotation_heap)
 boolean server_director_set_rotation(
 	char const *text,
 	boolean write,
 	struct server_json *rejected)
 {
-	static struct server_rotation rotation;
 	long index;
 	boolean playable;
 
-	server_read_rotation(&rotation, text);
-	playable = server_rotation_playable(&rotation) == rotation.count && rotation.count > 0 && !rotation.truncated;
+	server_read_rotation(&scratch, text);
+	playable = server_rotation_playable(&scratch) == scratch.count && scratch.count > 0 && !scratch.truncated;
 	if (rejected)
 	{
 		server_json_array_begin(rejected, "rejected");
-		for (index = 0; index < rotation.count; index++)
+		for (index = 0; index < scratch.count; index++)
 		{
-			if (rotation.entries[index].rejected[0])
+			if (scratch.entries[index].rejected[0])
 			{
 				server_json_object_begin(rejected, NULL);
 				server_json_integer(rejected, "index", index);
-				server_json_string(rejected, "entry", rotation.entries[index].text);
-				server_json_string(rejected, "reason", rotation.entries[index].rejected);
+				server_json_string(rejected, "entry", scratch.entries[index].text);
+				server_json_string(rejected, "reason", scratch.entries[index].rejected);
 				server_json_object_end(rejected);
 			}
 		}
@@ -896,18 +973,19 @@ boolean server_director_set_rotation(
 	}
 	if (!playable)
 		return FALSE;
-	server_adopt_rotation(&rotation);
+	server_adopt_rotation(&scratch);
 	if (write)
 	{
 		char joined[SERVER_ROTATION_MAXIMUM_TEXT + 1];
 
 		server_rotation_text(&server.rotation, joined, sizeof(joined));
 		if (!config_write("server.rotation", joined))
-			server_log(_server_log_warning, "server", "config.toml cannot be written: the rotation holds for this run");
+			server_log(_server_log_warning, "server", "config.toml cannot be written: the scratch holds for this run");
 	}
-	server_log(_server_log_info, "server", "the rotation now has %d entries", rotation.count);
+	server_log(_server_log_info, "server", "the scratch now has %d entries", scratch.count);
 	return TRUE;
 }
+#undef scratch
 
 /* (the web's: server_http.c) */
 int server_director_set_rotation_text(
@@ -929,10 +1007,11 @@ boolean server_director_rotation_begin(
 	return TRUE;
 }
 
+static struct server_rotation *reload_heap;
+#define scratch SERVER_HEAP(struct server_rotation, reload_heap)
 void server_director_reload(
 	void)
 {
-	static struct server_rotation rotation;
 	char before[SERVER_ROTATION_MAXIMUM_TEXT + 1];
 	char after[SERVER_ROTATION_MAXIMUM_TEXT + 1];
 	struct server_json json;
@@ -949,28 +1028,28 @@ void server_director_reload(
 	mcc_server_request_rescan();
 	/* (server.vpn_list's file, vpn_allow.txt and vpn_block.txt too) */
 	server_netlist_reload();
-	server_read_rotation(&rotation, config_string("server.rotation"));
-	server_rotation_text(&rotation, after, sizeof(after));
+	server_read_rotation(&scratch, config_string("server.rotation"));
+	server_rotation_text(&scratch, after, sizeof(after));
 	/* (the same entries, checked again: a map or gametype file added or
 	taken out since) */
-	rejections_changed = rotation.count != server.rotation.count;
-	for (index = 0; !rejections_changed && index < rotation.count; index++)
-		rejections_changed = strcmp(rotation.entries[index].rejected, server.rotation.entries[index].rejected) != 0;
+	rejections_changed = scratch.count != server.rotation.count;
+	for (index = 0; !rejections_changed && index < scratch.count; index++)
+		rejections_changed = strcmp(scratch.entries[index].rejected, server.rotation.entries[index].rejected) != 0;
 	server_json_begin(&json);
 	server_json_object_begin(&json, NULL);
 	server_json_string(&json, "event", "reloaded");
 	server_json_boolean(&json, "rotation_changed", strcmp(before, after) != 0);
 	server_json_array_begin(&json, "rejected");
-	for (index = 0; index < rotation.count; index++)
+	for (index = 0; index < scratch.count; index++)
 	{
-		if (rotation.entries[index].rejected[0])
+		if (scratch.entries[index].rejected[0])
 		{
 			server_json_object_begin(&json, NULL);
-			server_json_string(&json, "entry", rotation.entries[index].text);
-			server_json_string(&json, "reason", rotation.entries[index].rejected);
+			server_json_string(&json, "entry", scratch.entries[index].text);
+			server_json_string(&json, "reason", scratch.entries[index].rejected);
 			server_json_object_end(&json);
-			server_log(_server_log_warning, "server", "rotation entry %ld (%s) left out: %s", index + 1,
-				rotation.entries[index].text, rotation.entries[index].rejected);
+			server_log(_server_log_warning, "server", "scratch entry %ld (%s) left out: %s", index + 1,
+				scratch.entries[index].text, scratch.entries[index].rejected);
 		}
 	}
 	server_json_array_end(&json);
@@ -979,14 +1058,14 @@ void server_director_reload(
 	server_json_free(&json);
 	if (strcmp(before, after) || rejections_changed)
 	{
-		if (server_rotation_playable(&rotation))
+		if (server_rotation_playable(&scratch))
 		{
-			server_adopt_rotation(&rotation);
-			server_log(_server_log_info, "server", "reloaded: the rotation goes on after the entry played last");
+			server_adopt_rotation(&scratch);
+			server_log(_server_log_info, "server", "reloaded: the scratch goes on after the entry played last");
 		}
 		else
 		{
-			server_log(_server_log_warning, "server", "reloaded: the new rotation has nothing playable, the old one stays");
+			server_log(_server_log_warning, "server", "reloaded: the new scratch has nothing playable, the old one stays");
 		}
 	}
 	else
@@ -995,18 +1074,20 @@ void server_director_reload(
 	}
 	server_director_apply_settings();
 }
+#undef scratch
 
 /* ---------- stopping */
+
+/* (the brokers' tombstone and the masters', once a run, or once each time
+the app hosts from its menus) */
+static boolean server_withdrawn;
 
 static void server_withdraw(
 	void)
 {
-	/* (the brokers' tombstone and the masters', once) */
-	static boolean withdrawn;
-
-	if (withdrawn)
+	if (server_withdrawn)
 		return;
-	withdrawn = TRUE;
+	server_withdrawn = TRUE;
 	p2p_set_hosting_public(FALSE);
 	server_master_stop();
 }
@@ -1021,6 +1102,10 @@ void server_director_quit(
 		return;
 	server.quitting = TRUE;
 	server.exit_code = exit_code;
+	/* (hosting from the menus: the game's own client hears the host go too,
+	which is no error to show it) */
+	if (!halo_server_headless())
+		halo_server_host_set_stopping();
 	server_set_state(_server_state_stopping);
 	server_log(_server_log_info, "server", "stopping (%s)", why);
 	{
@@ -1050,7 +1135,7 @@ void server_director_quit(
 void server_fatal(
 	char const *text)
 {
-	if (!halo_server_mode())
+	if (!halo_server_headless())
 		return;
 	server_withdraw();
 	server_mode_fatal(text);
@@ -1112,7 +1197,7 @@ boolean server_director_drain_cancel(
 		return FALSE;
 	server.drain_active = FALSE;
 	server_drain_event(_server_drain_cancel, server.drain_restart, notice);
-	p2p_set_hosting_public(config_boolean("server.public"));
+	p2p_set_hosting_public(server_public());
 	server_log(_server_log_info, "server", "the stop is cancelled: listed (as server.public says) and open again");
 	return TRUE;
 }
@@ -1934,8 +2019,11 @@ static void server_playing(
 		time limit, else at its score) */
 		if (!server.end_asked)
 		{
+			/* (no machine but the server's own, and no bots: empty; bots
+			alone play on, the host watching) */
 			server.end_reason = server_players_in_game() == 0 ||
-				network_game_server_port_remote_machine_count(global_network_game_server_get(), TRUE) == 0 ?
+				(network_game_server_port_remote_machine_count(global_network_game_server_get(), TRUE) == 0 &&
+					server_bot_count() == 0) ?
 				_server_end_empty :
 				game && game->variant_options.time_limit > 0 &&
 				server.game_seconds >= 60.0f * game->variant_options.time_limit - 2.0f ? _server_end_time :
@@ -2187,6 +2275,78 @@ static void server_publish_state(
 	server_json_free(&json);
 }
 
+/* the rotation hosting from the menus plays (a playlist's), empty for
+server.rotation's */
+static char server_host_rotation[SERVER_ROTATION_MAXIMUM_TEXT + 1];
+
+/* hosting from the menus over: the game left (its machines were told:
+server_director_quit), back to the main menu (network_game_abort, as a
+player leaving), and the director as it was before it began */
+static void server_host_finished(
+	char const *why)
+{
+	server_log(_server_log_info, "server", "hosting over (%s)", why);
+	if (global_network_game_server_get() || global_network_game_client_get())
+		network_game_abort();
+	memset(&server, 0, sizeof(server));
+	server_withdrawn = FALSE;
+	server_host_rotation[0] = 0;
+	halo_server_host_end();
+}
+
+static struct server_rotation *host_check_heap;
+#define host_check SERVER_HEAP(struct server_rotation, host_check_heap)
+
+boolean server_director_host_begin(
+	char const *rotation,
+	char *reason,
+	long reason_size)
+{
+	char const *text = rotation && rotation[0] ? rotation : config_string("server.rotation");
+
+	if (reason_size > 0)
+		reason[0] = 0;
+	/* (no name yet: Server Settings asks for it first, the menus' default
+	being none: port_config.c) */
+	{
+		char const *name = config_string("server.name");
+
+		while (*name == ' ')
+			name++;
+		if (!*name)
+		{
+			snprintf(reason, (size_t)reason_size, "the server has no name yet: set it in Server Settings (START)");
+			return FALSE;
+		}
+	}
+	/* (a playlist none of whose rounds can be played: its maps missing) */
+	server_read_rotation(&host_check, text);
+	if (!server_rotation_playable(&host_check))
+	{
+		snprintf(reason, (size_t)reason_size, "%s", host_check.count && host_check.entries[0].rejected[0] ?
+			host_check.entries[0].rejected : "no round of it can be played");
+		return FALSE;
+	}
+	if (!halo_server_host_begin())
+	{
+		snprintf(reason, (size_t)reason_size, "already hosting");
+		return FALSE;
+	}
+	memset(&server, 0, sizeof(server));
+	server_withdrawn = FALSE;
+	snprintf(server_host_rotation, sizeof(server_host_rotation), "%s", text);
+	server_log(_server_log_info, "server", "hosting from the menus: %s", text);
+	return TRUE;
+}
+#undef host_check
+
+void server_director_host_stop(
+	void)
+{
+	if (halo_server_hosting())
+		server_director_quit(SERVER_EXIT_STOPPED, "the host stopped it");
+}
+
 void server_update(
 	boolean main_menu_loaded,
 	real seconds)
@@ -2203,11 +2363,14 @@ void server_update(
 		long index;
 
 		server.started = TRUE;
-		/* (nothing is drawn: nobody sees it) */
-		debug_no_drawing = TRUE;
+		/* (nothing is drawn: nobody sees it. Hosting from the menus, the
+		host's screen is: host_dashboard.c) */
+		if (halo_server_headless())
+			debug_no_drawing = TRUE;
 		for (index = 0; index < MAXIMUM_SLOTS; index++)
 			server.seen_machines[index] = NONE;
-		server_read_rotation(&server.rotation, config_string("server.rotation"));
+		server_read_rotation(&server.rotation, server_host_rotation[0] ? server_host_rotation :
+			config_string("server.rotation"));
 		server.index = server.rotation.count - 1;
 		server.current_index = NONE;
 		server.last_countdown_seconds = NONE;
@@ -2231,19 +2394,22 @@ void server_update(
 			server_json_free(&json);
 		}
 	}
-	server_signals();
-	server_console_frame();
-	while (server_console_next(line, sizeof(line), &origin))
+	if (halo_server_headless())
 	{
-		/* (a line left out, too long, comes empty) */
-		if (line[0])
-			server_run_line(line, _server_role_owner, origin);
-	}
-	server_http_main_thread();
-	if (!server.quitting)
-	{
-		server_exit_after();
-		server_auto_update(seconds);
+		server_signals();
+		server_console_frame();
+		while (server_console_next(line, sizeof(line), &origin))
+		{
+			/* (a line left out, too long, comes empty) */
+			if (line[0])
+				server_run_line(line, _server_role_owner, origin);
+		}
+		server_http_main_thread();
+		if (!server.quitting)
+		{
+			server_exit_after();
+			server_auto_update(seconds);
+		}
 	}
 
 	/* stopping: the machines given a moment to hear it, then the end */
@@ -2252,6 +2418,11 @@ void server_update(
 		server.quit_seconds += seconds;
 		if (server.quit_seconds >= QUIT_SECONDS)
 		{
+			if (!halo_server_headless())
+			{
+				server_host_finished("stopped");
+				return;
+			}
 			dispose_global_network_game_server();
 			server_log(_server_log_info, "server", "stopped (exit code %d)", server.exit_code);
 			server_mode_exit(server.exit_code);
@@ -2279,6 +2450,14 @@ void server_update(
 		if (main_menu_loaded && bink_playback_in_progress())
 		{
 			bink_playback_stop();
+			return;
+		}
+		/* (hosting from the menus, the host's game left: the error that
+		took it is the menus' to show, and the app hosts no more) */
+		if (!halo_server_headless() && server.state != _server_state_waiting &&
+			server.state != _server_state_hosting)
+		{
+			server_host_finished("the game's server stopped");
 			return;
 		}
 		if (server.state != _server_state_waiting && server.state != _server_state_hosting)
@@ -2365,7 +2544,7 @@ void server_update(
 	if (!server.ready_said && server.state == _server_state_lobby && server.entry_applied)
 	{
 		server.ready_wait += seconds;
-		if (!config_boolean("server.public") || !config_boolean("network.online") || server.invite[0] ||
+		if (!server_director_public() || !server_director_online() || server.invite[0] ||
 			server.ready_wait >= 10.0f)
 		{
 			char web[64] = "off";
@@ -2374,8 +2553,8 @@ void server_update(
 			if (config_integer("server.web_port") > 0)
 				snprintf(web, sizeof(web), "%s:%ld", config_string("server.web_bind"), config_integer("server.web_port"));
 			server_log(_server_log_info, "server", "ready (tunnel %ld/udp, web %s, listing %s)",
-				config_boolean("network.online") ? config_integer("network.tunnel_port") : 0L, web,
-				!config_boolean("network.online") ? "LAN only" : config_boolean("server.public") ? "public" : "by invite");
+				server_director_online() ? config_integer("network.tunnel_port") : 0L, web,
+				!server_director_online() ? "LAN only" : server_director_public() ? "public" : "by invite");
 		}
 	}
 	server.status_file_seconds += seconds;
@@ -2431,6 +2610,17 @@ boolean server_director_end_game(short reason, boolean skip_postgame)
 }
 
 void server_director_player_removed(long machine_index, char const *reason)
+{
+}
+
+boolean server_director_host_begin(char const *rotation, char *reason, long reason_size)
+{
+	if (reason_size > 0)
+		snprintf(reason, (size_t)reason_size, "not in this build");
+	return FALSE;
+}
+
+void server_director_host_stop(void)
 {
 }
 

@@ -16,7 +16,7 @@ typedef union { struct { real i,j,k; }; real n[3]; } real_vector3d;
 static struct unit_datum { struct { int type; } object; struct { unsigned long flags; } unit; } entity, *object=&entity;
 static struct { struct { real acceleration_scale; } object; } definition, *object_definition=&definition;
 static struct { struct damage_definition damage; } effect, *damage_effect=&effect;
-static struct { real_vector3d direction; real scale; } hit, *damage=&hit;
+static struct { real_vector3d direction; real scale; real_vector3d epicenter; } hit, *damage=&hit;
 static int object_index, loaded=1, calls;
 static real_vector3d received;
 static int mcc_cache_tags_loaded(void) { return loaded; }
@@ -28,6 +28,9 @@ static void scale_vector3d(real_vector3d const *v, real s, real_vector3d *out) {
     out->i=v->i*s; out->j=v->j*s; out->k=v->k*s;
 }
 static void capture(int index, real_vector3d const *v) { received=*v; ++calls; }
+/* (this fork's ragdolls take no push here: the biped's own acceleration is the one checked) */
+static int biped_ragdoll_accelerate(int index, real_vector3d const *epicenter, real_vector3d const *v)
+{ (void)index; (void)epicenter; (void)v; return 0; }
 #define projectile_accelerate capture
 #define biped_accelerate capture
 #define vehicle_accelerate capture

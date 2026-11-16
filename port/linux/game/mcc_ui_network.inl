@@ -47,6 +47,12 @@ boolean mcc_ui_network_defer_map(struct network_game_server *server, char const 
      * may legitimately arrive before the local pregame UI. */
     if (server == mcc_campaign_ui_server && strcmp(name, mcc_campaign_ui_map))
         mcc_campaign_ui_server = NULL;
+    /* The same map chosen again while its validation runs (a dedicated
+     * server's director puts its rotation's map back once a second while
+     * the lobby still shows the stock placeholder) keeps that validation:
+     * restarting it each time never let a large package finish. */
+    if (server == mcc_pending_map_server && !strcmp(name, mcc_pending_map) &&
+        mcc_validation_request(name, NULL, NULL) == 0) return TRUE;
     /* Fast host setup can choose MCC while its loopback client is joining.
      * Leave the temporary lobby usable until that admission completes;
      * synchronous package checks must not occupy its five-second window. */

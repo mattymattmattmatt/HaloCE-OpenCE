@@ -40,7 +40,14 @@ int posix_mcc_preview_read(const char *root, const char *relative, void *buffer,
 {
     char part[128]; const char *cursor = relative;
     int result = 0;
-#ifdef _WIN32
+#if defined(__SWITCH__)
+    /* (the Switch's libc has no openat or fdopendir: the folders by their
+    paths, which is safe there, as the SD card's file system has no links) */
+    char path[2048];
+    int descriptor = -1;
+    struct stat status;
+    size_t used = 0;
+#elif defined(_WIN32)
     HANDLE handle = INVALID_HANDLE_VALUE, parent;
     char path[2048], canonical_root[2048], canonical_file[2048];
     DWORD size, got, length, attributes;
@@ -52,7 +59,11 @@ int posix_mcc_preview_read(const char *root, const char *relative, void *buffer,
     size_t used = 0;
 #endif
     if (!root || !relative || !*relative || !buffer || !capacity || capacity > 8*1024*1024) return 0;
-#ifdef _WIN32
+#if defined(__SWITCH__)
+    if (strlen(root) >= sizeof(path)) return 0;
+    strcpy(path, root);
+    if (stat(path, &status) || !S_ISDIR(status.st_mode)) return 0;
+#elif defined(_WIN32)
     parent = CreateFileA(root, FILE_READ_ATTRIBUTES, FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
         NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
     if (parent == INVALID_HANDLE_VALUE) return 0;
@@ -74,7 +85,22 @@ int posix_mcc_preview_read(const char *root, const char *relative, void *buffer,
         if (!component(part)) goto done;
         cursor += n;
         if (*cursor && !*++cursor) goto done;
-#ifdef _WIN32
+#if defined(__SWITCH__)
+        {
+            DIR *entries; struct dirent *entry; char found[256]; int matches = 0;
+            entries = opendir(path);
+            if (!entries) goto done;
+            while ((entry = readdir(entries)) != NULL) if (!strcasecmp(part, entry->d_name)) {
+                if (strlen(entry->d_name) < sizeof(found)) { strcpy(found, entry->d_name); matches++; }
+            }
+            closedir(entries);
+            if (matches != 1) goto done;
+            used = strlen(path);
+            if (used + strlen(found) + 2 > sizeof(path)) goto done;
+            path[used++] = '/'; strcpy(path + used, found);
+            if (stat(path, &status) || (*cursor ? !S_ISDIR(status.st_mode) : !S_ISREG(status.st_mode))) goto done;
+        }
+#elif defined(_WIN32)
         used = strlen(path);
         if (used + n + 2 > sizeof(path)) goto done;
         path[used++] = '\\'; memcpy(path+used, part, n+1);
@@ -107,7 +133,18 @@ int posix_mcc_preview_read(const char *root, const char *relative, void *buffer,
         if (*cursor) { close(directory); directory = descriptor; descriptor = -1; }
 #endif
     }
-#ifdef _WIN32
+#if defined(__SWITCH__)
+    if (stat(path,&status) || !S_ISREG(status.st_mode) || status.st_size <= 0 || status.st_size > capacity) goto done;
+    descriptor = open(path, O_RDONLY);
+    if (descriptor < 0) goto done;
+    used = 0;
+    while (used < (size_t)status.st_size) {
+        ssize_t got = read(descriptor,(char *)buffer+used,(size_t)status.st_size-used);
+        if (got <= 0) goto done;
+        used += (size_t)got;
+    }
+    result = (int)used;
+#elif defined(_WIN32)
     if (GetFileType(handle) != FILE_TYPE_DISK || !GetFileSizeEx(handle,&bytes) || bytes.QuadPart <= 0 || bytes.QuadPart > capacity) goto done;
     size = GetFinalPathNameByHandleA(handle, canonical_file, sizeof(canonical_file), FILE_NAME_NORMALIZED);
     if (!size || size >= sizeof(canonical_file) || _strnicmp(canonical_root,canonical_file,length)) goto done;
@@ -124,7 +161,9 @@ int posix_mcc_preview_read(const char *root, const char *relative, void *buffer,
     result = (int)used;
 #endif
 done:
-#ifdef _WIN32
+#if defined(__SWITCH__)
+    if (descriptor >= 0) close(descriptor);
+#elif defined(_WIN32)
     if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle);
 #else
     if (descriptor >= 0) close(descriptor);

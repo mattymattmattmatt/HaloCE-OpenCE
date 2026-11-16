@@ -12,11 +12,11 @@ VEHICLE_EDIT = "main_menu/settings_select/multiplayer_setup/vehicle_options_edit
 
 
 def strings(name):
-    """a list's strings: (text, its index in the PC version's list or None)"""
+    """a list's strings' texts"""
     menus = ElementTree.fromstring(read("port/assets/menus/ce/strings.xml").encode("latin-1"))
     for strings in menus.iter("strings"):
         if strings.get("name") == name:
-            return [(string.get("text"), string.get("map")) for string in strings.iter("string")]
+            return [string.get("text") for string in strings.iter("string")]
     raise LookupError(name)
 
 
@@ -25,7 +25,7 @@ def preset(name):
 
 
 def test_vehicle_sets_are_the_codes():
-    sets = [text for text, _ in strings(f"{VEHICLE_EDIT}/var_vehicle_set")]
+    sets = strings(f"{VEHICLE_EDIT}/var_vehicle_set")
     assert len(sets) == preset("VEHICLE_PRESET_CUSTOM") + 1
     assert sets[preset("VEHICLE_PRESET_PC")] == "PC"
     assert sets[preset("VEHICLE_PRESET_CUSTOM")] == "CUSTOM"
@@ -41,7 +41,7 @@ def test_each_value_has_its_help():
     rows.insert(1, f"{VEHICLE_EDIT}/var_vehicle_riding")
     values = sum(len(riding) if row.endswith('/var_vehicle_riding') else len(strings(row)) for row in rows) + \
         6 * len(strings(f"{VEHICLE_EDIT}/var_vehicle_options"))
-    helps = [text for text, _ in strings(f"{VEHICLE_EDIT}/cap_vehicle_options")]
+    helps = strings(f"{VEHICLE_EDIT}/cap_vehicle_options")
     assert len(helps) == values
     assert "Halo PC" in helps[7 + 2 + 2 + preset("VEHICLE_PRESET_PC")]
     assert helps[7 + 2 + 2 + preset("VEHICLE_PRESET_CUSTOM")].startswith("Customize")
@@ -50,14 +50,14 @@ def test_each_value_has_its_help():
 
 def test_strings_xml_has_port_settings_inserts():
     """what tools/ce_menus.py writes from port_settings.STRING_INSERTS, so
-    that making strings.xml again keeps them"""
+    that making strings.xml again keeps them: each insert where it goes,
+    taken out again last first"""
     for name in (f"{VEHICLE_EDIT}/var_vehicle_set", f"{VEHICLE_EDIT}/cap_vehicle_options",
                  f"{VEHICLE_EDIT}/vehicle_options_labels"):
         shown = strings(name)
-        made = [text for text, original in shown if original is not None]
-        for at, texts in port_settings.STRING_INSERTS[name]:
-            made = made[:at] + texts + made[at:]
-        assert made == [text for text, _ in shown], name
+        for at, texts in reversed(port_settings.STRING_INSERTS[name]):
+            assert shown[at:at + len(texts)] == texts, name
+            shown = shown[:at] + shown[at + len(texts):]
 
 
 def test_vehicle_riding_committed_patch():
@@ -71,4 +71,4 @@ def test_vehicle_riding_committed_patch():
     assert riding.attrib == {'widget': VEHICLE_EDIT + '/op_vehicle_riding', 'x': '54', 'y': '100'}
     patch = port_settings.WIDGET_PATCHES[VEHICLE_EDIT + '/vehicle_options_menu']['insert_before']
     assert ElementTree.fromstring(patch[VEHICLE_EDIT + '/op_team'][0]).attrib == riding.attrib
-    assert strings(VEHICLE_EDIT + '/vehicle_options_labels')[9] == ('VEHICLE RIDING:', None)
+    assert strings(VEHICLE_EDIT + '/vehicle_options_labels')[9] == 'VEHICLE RIDING:'

@@ -76,6 +76,8 @@ void validation_free(void *p) {
     abort(); /* Detect mixing the engine allocator with CRT calloc. */
 }
 ''')
+    # (tag_validate.c's window header: the window where the game is linked for, nothing to move)
+    (directory / "halo_port_window.h").write_text("#pragma once\n#define PORT_WINDOW_REBASE(address) ((void *)(address))\n")
     target = (["--target=i686-pc-windows-msvc", "-fuse-ld=lld", "-D_CRT_SECURE_NO_WARNINGS"]
               if sys.platform == "win32" else ["-m32"])
     command = [compiler, *target, "-std=gnu99", "-O1", "-g", "-Wall", "-Wextra", "-Werror",

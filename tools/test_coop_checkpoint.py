@@ -6,7 +6,7 @@ import pytest
 
 from harness import function, mutated
 from test_coop_checkpoint_recovery import define_value
-from test_hud_button_style import run_c
+from c_runner import run_c
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -223,6 +223,8 @@ static int objects_client_checkpoint_pending[3];
 static long objects_host_told_count=3,objects_host_resting_cursor=2;
 static int objects_host_state_moving[3]={1,1,1};
 static long objects_host_rest_times[3]={99,99,99};
+/* (this fork's replay recorder's object states, network_objects.c) */
+static unsigned long objects_recorder_states[3]={5,5,5};
 static struct {long checksum,weapons_checksum,time,carried_time,ammunition_time;} objects_host_inventories[3];
 static struct {int count;} objects_host_viewers={2};
 static struct {long time;} objects_host_machines[2]={{99},{88}};

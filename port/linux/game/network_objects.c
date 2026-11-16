@@ -1888,9 +1888,17 @@ see its shots less) */
 static void distributed_host_send_inventories(
 	void)
 {
-	static struct distributed_inventory inventories[MAXIMUM_TRACKED_OBJECTS];
-	static byte kinds[MAXIMUM_TRACKED_OBJECTS];
-	static real_point3d origins[MAXIMUM_TRACKED_OBJECTS];
+	/* (on the heap at the first use: at some 600 KB they do not fit in the
+	guest images, whose code and data have to fit in their 64 MB) */
+	static struct
+	{
+		struct distributed_inventory inventories[MAXIMUM_TRACKED_OBJECTS];
+		byte kinds[MAXIMUM_TRACKED_OBJECTS];
+		real_point3d origins[MAXIMUM_TRACKED_OBJECTS];
+	} *gathered;
+	struct distributed_inventory *inventories;
+	byte *kinds;
+	real_point3d *origins;
 	struct distributed_inventory_message message;
 	short limit = MIN(MAXIMUM_ENTRIES_PER_MESSAGE, DATAGRAM_ENTRIES(struct distributed_inventory));
 	long inventory_count = 0;
@@ -1898,6 +1906,11 @@ static void distributed_host_send_inventories(
 	struct object_iterator iterator;
 	short machine_number;
 
+	if (!gathered && !(gathered = calloc(1, sizeof(*gathered))))
+		abort();
+	inventories = gathered->inventories;
+	kinds = gathered->kinds;
+	origins = gathered->origins;
 	object_iterator_new(&iterator, _object_mask_unit, 0);
 	while (object_iterator_next(&iterator) && inventory_count < MAXIMUM_TRACKED_OBJECTS)
 	{

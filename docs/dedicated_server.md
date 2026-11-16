@@ -195,7 +195,10 @@ the game's console commands of those names.
 | `sv_masters`, `sv_publisher` | viewer | The master servers and how each answered; the publisher key's id and public key (never its seed) |
 | `say <text>` (`sv_say`) | moderator | A notice on every machine's screen |
 | `tell <player> <text>` | moderator | A notice on one player's machine |
-| `kick <player>` (`sv_kick`) | moderator | Drops the player's machine; it may join again. A player still in the game whose machine has gone is taken out (a ban of one is refused: there is nothing to ban) |
+| `kick <player>` (`sv_kick`) | moderator | Drops the player's machine; it may join again. A player still in the game whose machine has gone is taken out (a ban of one is refused: there is nothing to ban); a bot is dropped, as `sv_bot_drop` drops it |
+| `sv_bots` | viewer | The bots: each one's number, name, team, kind (`birchwood`, `provinggrounds`) and skill level (`default`: `bots.skill`'s) |
+| `sv_bot_add [<count>] [birchwood\|provinggrounds] [<level>\|default\|random\|normal[:<level>]] [red\|blue\|auto]` | admin | Adds bots, in the lobby or a game of Slayer, CTF, King of the Hill, Oddball or Race (Oddball and Race bots play as Proving Grounds, whatever the kind). The words come in any order: how many (1 to 63; as many as there is room for), their kind (`bots.kind`'s without one), their level (`recruit` to `legendary`; `default`, `bots.skill`'s), `random` (each any level) or `normal` (each about the level, a level's spread: a normal distribution; `bots.skill`'s level without one), their team in a team game (`auto`, the smaller one, by default). A server's bots are its owner's: `bots.count` adds none; they join each new lobby again as they were (their kind, level and team) until `sv_bot_drop` drops them, and sit out a game type bots do not play. In a server the server browser lists, a bot's name starts with `BOT-` (`BOT-Johnson`), and the listing's players and room count real players alone (the most less the bots) |
+| `sv_bot_drop <bot\|all>` | admin | Drops a bot (its number from `sv_bots`, or its name), or every bot |
 | `ban <player> [<duration>] [<reason>]` (`sv_ban`) | moderator (a day at most), admin | Drops the player's machine and bans its address and hardware id, for the duration (else for ever). A moderator must give a duration of a day or less: a ban for ever, or longer, is refused |
 | `unban <number\|address\|hardware id>` (`sv_unban`) | admin | Takes a ban out of `bans.txt`; the machine may join again at once, by the LAN or the internet |
 | `sv_ban_address <address\|hardware id\|discord:<id>> [<duration>] [<reason>]` | admin | Bans an IPv4 address (`a.b.c.d`), a hardware id (up to 32 hex digits) or a verified Discord account (`discord:` and its id, below), its machine here or not: its line in `bans.txt` as `ban` writes it (the other part `none`), so that `sv_bans`, `unban` and `GET /api/bans` see it, and a machine present of that address or hardware id is dropped as `ban` drops it (`player_left`'s reason `banned`). Answers `ban <n> added` (`n`: its number in `sv_bans`) |
@@ -319,7 +322,7 @@ in either case, and is kept as the table spells it:
 | `network.votekick_percent` | 1 to 100 |
 | `network.votekick_minutes` | 0 to 60 |
 | `network.votekick_ban_minutes` | 1 to 1440 |
-| `network.map_share_upload` | 16 to 20480 |
+| `network.map_share_upload` | 16 to 256000 |
 | `network.coop_friendly_fire` | `off`, `on`, `shields_only`, `explosives_only` |
 | `network.coop_team_wipe` | `auto`, `revert`, `respawn` (`auto`: a public server, `server.public` with internet play, only respawns the team) |
 | `network.shield_effects` | `stock`, `glow`, `light_show`, `overshield`, `glow_overshield`, `light_show_overshield`, `players` |
@@ -892,8 +895,10 @@ entries. `config.toml` keeps a string setting of up to 4096 characters, so
 a rotation that long is saved whole and read back after a restart.
 
 - The map is a multiplayer map's name (`bloodgulch`: the Xbox's
-  `maps/<name>.map`, else a Custom Edition map of `custom_maps`),
-  `custom_maps\<name>` (a Custom Edition map; `/` is taken for `\`), or a
+  `maps/<name>.map`, else a map of `custom_maps`),
+  `custom_maps\<name>` (a Custom Edition map, or an Xbox multiplayer map,
+  whose game needs every machine to have the `custom_xbox_multiplayer_maps`
+  capability: `docs/network_extensions.md`; `/` is taken for `\`), or a
   level's path (`levels\test\bloodgulch\bloodgulch`). A campaign level is
   played as co-op only: `<level>:coop`, at `server.coop_difficulty`.
 - The gametype (`slayer` when there is none) is a built-in's name
@@ -906,8 +911,9 @@ a rotation that long is saved whole and read back after a restart.
   `iron_ctf`, `teamrace`, `teamoddball`), an OpenCE gametype's (`swat`,
   `infection`, `gun_game`, `hardcore`, `hardcore_ctf`, `hardcore_oddball`,
   `hardcore_king`), a gametype file's name (`gametypes/<name>.toml`), or
-  `file=<name>` (a gametype a player's game saved, below). A gametype's
-  name is letters, digits, `_`, `-` and `.`, in any case.
+  `file=<name>` (a gametype a player's game saved, below), or
+  `saved=<name>` (a gametype in this machine's own saved games, below). A
+  gametype's name is letters, digits, `_`, `-` and `.`, in any case.
 - A rule is a gametype rule's name or its short name (`score`, `time`,
   `weapons`, `ff`...; `GET /api/gametypes`'s schema lists them), with a
   value it takes; a rule of another game engine than the gametype's is
@@ -973,9 +979,26 @@ Each rule goes in its table (the schema's `table`): `[universal]`,
 beside `config.toml` if there is one, else the data root's, and writes the
 web page's files to it.
 
+`team_vehicles` gives both teams their vehicles: the gametype's vehicle set
+(`gametype`), every one the map places (`pc`), the counts (`custom`, with
+`warthogs`, `ghosts`...), or one of the vehicle options' sets by its name
+(`default`, `none`, `warthogs`, `ghosts`, `scorpions`, `rocket_warthogs`,
+`banshees`, `gun_turrets`). `blue_team_vehicles` and `blue_warthogs`,
+`blue_ghosts`... give blue its own, over those, whatever their order.
+`force_team_spawns` spawns each team on its own side in any team game.
+Host Server's Round Options (the Playlist Builder's screen after a round's
+gametype) writes these rules for the options a round changes.
+
 A gametype a player's game saved is played with `file=<name>`: copy the
 saved gametype, as `<name>.gametype`, into the same `gametypes` folder
 (beside `config.toml` if there is one, else the data root's).
+
+A gametype made in the game's Edit Gametypes on the machine that hosts is
+played with `saved=<name>`, its name as the game shows it, looked up each
+time the round is played (so its later changes are played too). A byte of
+the name's UTF-8 that is not a letter, digit, `_`, `-` or `.` is written
+`%XX` (`saved=My%20Slayer` for "My Slayer"). Host Server's Playlist
+Builder writes these for the CUSTOM gametypes it lists.
 
 `vehicle_riding` under `[universal]` is a boolean: `true` lets players
 standing on a moving vehicle ride along with it; no rule means off.

@@ -19,7 +19,6 @@
 #include "mcc_cache.h"
 #include "mcc_hud_draw.h"
 #include "hud_button_layout.h"
-#include "controller_glyphs.h"
 #include <string.h>
 
 long halo_screen_width(void);
@@ -117,13 +116,21 @@ static short mcc_hud_button_index(struct icon_hud_element_definition const *icon
     short i;
     struct icon_hud_element_definition const *buttons;
     if (!hud_globals) return NONE;
-    buttons=hud_globals->messaging.button_icons.address;
+    buttons=TAG_BLOCK_ADDRESS(hud_globals->messaging.button_icons);
     if (!buttons) return NONE;
     for (i=0;i<18 && i<hud_globals->messaging.button_icons.count;i++)
         if (icon==buttons+i) return i<6 ? i :
             config_boolean("display.high_res_hud") ? hud_button_control_slot(i,
                 icon->frame_rate>0 ? game_time_get()/icon->frame_rate : 0) : NONE;
     return NONE;
+}
+
+/* the High-Res HUD's button style, as hud_hires_tags.c reads it: 0 classic,
+1 gems, 2 the menus' gems (this fork has no per-controller glyph styles) */
+static short mcc_hud_button_style(void)
+{
+    char const *style=config_string("display.hud_button_style");
+    return (!strcmp(style,"dark_gems") || !strcmp(style,"menu_gems")) ? 2 : !strcmp(style,"gems");
 }
 
 static struct bitmap_data const *mcc_hud_button_bitmap(short index)
@@ -142,7 +149,7 @@ static struct bitmap_data const *mcc_hud_button_bitmap(short index)
     short style;
     if (index<0 || index>=14 || (index>=6 && !config_boolean("display.high_res_hud"))) return NULL;
     /* Keep the established MCC low-res path; the style belongs to High-Res HUD. */
-    style=config_boolean("display.high_res_hud") ? controller_glyph_style() : 2;
+    style=config_boolean("display.high_res_hud") ? mcc_hud_button_style() : 2;
     if (style>=3) style=0;
     if (style!=mcc_buttons_style) {
         mcc_hud_glyphs_dispose();
@@ -271,16 +278,6 @@ boolean mcc_hud_icon_draw(long bitmap_group_index, struct bitmap_data const *bit
     if (!menu) {
         short button_index;
         struct bitmap_data const *button;
-        /* MCC identifies its own entries; authored pickup/weapon icons retain
-         * their map artwork. The optional glyph service owns only new styles. */
-        if (config_boolean("display.high_res_hud") && hud_globals &&
-            hud_globals->messaging.button_icons.address) {
-            short entry;
-            struct icon_hud_element_definition const *buttons=hud_globals->messaging.button_icons.address;
-            for (entry=0;entry<18 && entry<hud_globals->messaging.button_icons.count;entry++)
-                if (icon==buttons+entry && controller_glyph_draw_with_release(controller_glyph_style(),entry,icon,cursor,color,xgpu_mcc_texture_unbind))
-                    return TRUE;
-        }
         button_index=mcc_hud_button_index(icon);
         button=mcc_hud_button_bitmap(button_index);
         if (button) {

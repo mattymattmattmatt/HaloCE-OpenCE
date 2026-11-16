@@ -97,7 +97,14 @@ static void our_response(int direction, float *left, float *right, struct hrtf_p
 	memset(impulse, 0, sizeof(impulse));
 	memset(output, 0, sizeof(output));
 	impulse[0] = 1.0f;
-	hrtf_process(stream, impulse, output, FRAMES, FRAMES, &parameters, 1.0f, 0.0f, 1.0f);
+	/* (port: a mix's chunk at a time, as the mixer gives it: hrtf_process's
+	lines hold MIX_CHUNK_FRAMES, which this fork has at 256) */
+	for (n = 0; n < FRAMES; n += MIX_CHUNK_FRAMES)
+	{
+		unsigned long chunk = FRAMES - n < MIX_CHUNK_FRAMES ? FRAMES - n : MIX_CHUNK_FRAMES;
+
+		hrtf_process(stream, impulse + n, output + n * 2, chunk, chunk, &parameters, 1.0f, 0.0f, 1.0f);
+	}
 	for (n = 0; n < FRAMES; n++)
 	{
 		left[n] = output[n * 2];

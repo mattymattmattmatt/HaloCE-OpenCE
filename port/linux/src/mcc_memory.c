@@ -6,8 +6,94 @@
 #include <errno.h>
 #include <string.h>
 
-#ifdef HALO_ANDROID
+/* (Android's host holds the window from before the Java runtime can take it:
+port/android/host/host_mcc_memory.c; the Switch's from the start of main,
+before a thread's local storage can land in it: port/switch/host/
+host_memory.c. The PS5's guest maps it itself, as xbox_memory.c does Custom
+Edition's tag cache) */
+#if defined(HALO_ANDROID) && !defined(HALO_PS5)
+#define MCC_MEMORY_ANDROID_HOST 1
 #include "guest_host.h"
+#endif
+
+/* How far a loaded MCC map's tags are from the base they were written for,
+and that base, while they are elsewhere (halo_port_window.h's
+PORT_MCC_IS_LINKED; port/linux/game/mcc_cache.c sets them); 0 otherwise */
+unsigned long platform_mcc_shift;
+unsigned long platform_mcc_linked_base;
+
+#ifndef HALO_WEB
+/* the tags' memory when their base was taken (mcc_memory_reserve_elsewhere),
+and whether the host's (given back to it) */
+static void *mcc_elsewhere;
+static int mcc_elsewhere_host;
+
+static int mcc_ranges_cross(uint64_t first, uint64_t first_bytes, uint64_t second, uint64_t second_bytes)
+{
+    return first < second + second_bytes && second < first + first_bytes;
+}
+
+/* 64 MB of the guest's memory for an MCC map's tags where their base is taken:
+clear of every range the game data is linked for - the map's own, Custom
+Edition's tag cache's and the window's - so that an address already moved
+is never taken for one still to move (halo_port_window.h). NULL if there is
+none. As custom_edition_tag_cache_elsewhere (xbox_memory.c) does. */
+void *mcc_memory_reserve_elsewhere(uint32_t linked, uint32_t size)
+{
+    void *refused[8];
+    int refused_count = 0, index;
+    void *found = NULL;
+    if (mcc_elsewhere || size != 0x04000000u) {
+        errno = EBUSY;
+        return NULL;
+    }
+#ifdef MCC_MEMORY_ANDROID_HOST
+    /* (the Switch's host hands it out of the guest's pools, asked for at no
+    address: the guest's own mmap of 64 MB is given the window's reserved
+    range there, port/switch/host/host_memory.c. Android's host declines,
+    and the guest's mmap places it) */
+    {
+        long long result = host_mcc_memory_reserve(0, size);
+        if (result > 0) {
+            uint64_t address = (uint64_t)result;
+            if (!mcc_ranges_cross(address, size, linked, 0x04000000u) &&
+                !mcc_ranges_cross(address, size, 0x40440000u, 0x01700000u) &&
+                !mcc_ranges_cross(address, size, 0x80000000u, 0x08000000u)) {
+                mcc_elsewhere = (void *)(uintptr_t)address;
+                mcc_elsewhere_host = 1;
+                return mcc_elsewhere;
+            }
+            host_mcc_memory_release((unsigned int)address, size);
+        }
+    }
+#endif
+    while (!found && refused_count < (int)(sizeof(refused) / sizeof(refused[0]))) {
+        void *result = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        uint64_t address = (uint64_t)(uintptr_t)result;
+        if (result == MAP_FAILED) break;
+        if (mcc_ranges_cross(address, size, linked, 0x04000000u) ||
+            mcc_ranges_cross(address, size, 0x40440000u, 0x01700000u) ||
+            mcc_ranges_cross(address, size, 0x80000000u, 0x08000000u) ||
+            address + size > UINT64_C(0x100000000)) {
+            /* (kept until another is found, so that the next is elsewhere) */
+            refused[refused_count++] = result;
+            continue;
+        }
+        found = result;
+    }
+    for (index = 0; index < refused_count; index++) munmap(refused[index], size);
+    if (found) mcc_elsewhere = found;
+    else errno = ENOMEM;
+    return found;
+}
+#else
+void *mcc_memory_reserve_elsewhere(uint32_t linked, uint32_t size)
+{
+    (void)linked;
+    (void)size;
+    errno = ENOSYS;
+    return NULL;
+}
 #endif
 
 #ifdef HALO_WEB
@@ -68,7 +154,7 @@ static void mcc_window_dispose(void)
 
 void *mcc_memory_reserve(uint32_t address, uint32_t size)
 {
-#ifdef HALO_ANDROID
+#ifdef MCC_MEMORY_ANDROID_HOST
     long long result = host_mcc_memory_reserve(address, size);
     if (result < 0) {
         errno = (int)-result;
@@ -140,7 +226,19 @@ void *mcc_memory_reserve(uint32_t address, uint32_t size)
 
 void mcc_memory_release(void *allocation, uint32_t size)
 {
-#ifdef HALO_ANDROID
+#ifndef HALO_WEB
+    if (allocation && allocation == mcc_elsewhere) {
+#ifdef MCC_MEMORY_ANDROID_HOST
+        if (mcc_elsewhere_host) host_mcc_memory_release((unsigned int)(uintptr_t)allocation, size);
+        else
+#endif
+        munmap(allocation, size);
+        mcc_elsewhere = NULL;
+        mcc_elsewhere_host = 0;
+        return;
+    }
+#endif
+#ifdef MCC_MEMORY_ANDROID_HOST
     if (allocation) {
         int error = host_mcc_memory_release((unsigned int)(uintptr_t)allocation, size);
         if (error)

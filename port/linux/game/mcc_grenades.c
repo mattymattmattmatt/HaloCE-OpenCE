@@ -1,6 +1,7 @@
 /* MCC adds two grenade/ability slots without changing the native unit or
  * save-game layout. Every extra count belongs to a full salted object ID. */
 #include "cseries.h"
+#include "tag_files/tag_groups.h"
 #include "errors.h"
 #include "mcc_cache.h"
 #include "mcc_grenades.h"
@@ -21,9 +22,21 @@
 #include "units/units.h"
 #include "units/unit_definitions.h"
 #include <string.h>
+#include <stdlib.h>
 
 struct mcc_grenade_inventory {long handle;unsigned char counts[2];};
-static struct mcc_grenade_inventory mcc_grenade_inventories[MAXIMUM_OBJECTS_PER_MAP];
+/* (allocated at the first use, zeroed as static data is: the guest images,
+whose code and data have to fit below 0x40000000, have no room for it as
+static data) */
+static struct mcc_grenade_table { struct mcc_grenade_inventory inventories[MAXIMUM_OBJECTS_PER_MAP]; } *mcc_grenade_storage;
+
+static struct mcc_grenade_table *mcc_grenade_storage_get(void)
+{
+    if (!mcc_grenade_storage && !(mcc_grenade_storage = calloc(1, sizeof(*mcc_grenade_storage))))
+        abort();
+    return mcc_grenade_storage;
+}
+#define mcc_grenade_inventories (mcc_grenade_storage_get()->inventories)
 static long mcc_grenade_flash_time[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
 
 boolean network_game_distributed_client(void);
@@ -42,7 +55,7 @@ short mcc_grenades_type_count(void)
 static struct game_globals_grenade *mcc_grenade_definition(short type)
 {
     if (type<0 || type>=mcc_grenades_type_count()) return NULL;
-    return (struct game_globals_grenade *)scenario_get_game_globals()->grenades.address+type;
+    return (struct game_globals_grenade *)TAG_BLOCK_ADDRESS(scenario_get_game_globals()->grenades)+type;
 }
 
 static struct mcc_grenade_inventory *mcc_grenade_inventory(long unit,int create)

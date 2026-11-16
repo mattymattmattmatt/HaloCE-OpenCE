@@ -9,6 +9,10 @@ static unsigned long status[8],completed[8];
 #define mixer_lock 0
 #define pthread_mutex_lock(...) ((void)lock_depth++)
 #define pthread_mutex_unlock(...) ((void)lock_depth--)
+/* (port: this fork's mixer, which takes the lock between voices, and the
+ * game's taking of it counted for the mixer to let it in) */
+#define pthread_mutex_trylock(...) (lock_depth++,0)
+#define mixer_lock_take() pthread_mutex_lock(&mixer_lock)
 #define channel_get(i) (&dsound_globals.channels[i])
 #define sound_cache_sound_hardware_unlock(...) ((void)unlocks++)
 #define interrupt_time_error(...) CHECK(FALSE,"invalid completion")

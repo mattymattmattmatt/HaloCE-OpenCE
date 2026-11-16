@@ -144,6 +144,7 @@ symbols in this file:
 #include "cache_file_formats.h" /* port: CUSTOM_EDITION_TAG_CACHE_BYTES */
 #include "map_share.h" /* port: port/linux/game/map_share.c */
 #include "mcc_share.h" /* port: port/linux/game/mcc_share.c */
+#include "custom_campaigns.h" /* port: port/linux/game/custom_campaigns.c */
 #ifdef HALO_ANDROID
 /* port: geometry the map holds and does not write, drawn on Android from
 GL buffers of its own (port/linux/src/d3d8_gl.c) */
@@ -151,6 +152,7 @@ void xgpu_static_buffers_add(const void *buffers, long count, unsigned long stri
 void xgpu_static_buffers_remove(const void *buffers, long count, unsigned long stride, int indices);
 void xgpu_static_range_add(const void *start, unsigned long size, int indices);
 void xgpu_static_range_remove(const void *start, int indices);
+void xgpu_static_forget_all(void);
 #endif
 
 /* ---------- constants */
@@ -658,6 +660,31 @@ char const *cache_files_map_directory(
 	return map_directory;
 }
 
+/* port: tag_loaded's recent answers, found ones and NONE alike. Each of its
+walks compares the name with every loaded tag of the group, and the menus,
+the HUD and the widgets' event routing ask by name each frame (a sixtieth of
+the game thread's time on a phone, 48 bots). An answer holds until the
+loaded tags change: their table is made, replaced or let go
+(tag_loaded_forget), which also covers the menus' tags added to a copy of it.
+A name too long for an entry is looked up as before. */
+#define TAG_LOADED_MEMO_SIZE 256
+#define TAG_LOADED_MEMO_NAME_SIZE 96
+
+static struct
+{
+	unsigned long serial;
+	long group_tag;
+	long result;
+	char name[TAG_LOADED_MEMO_NAME_SIZE];
+} tag_loaded_memo[TAG_LOADED_MEMO_SIZE];
+static unsigned long tag_loaded_serial = 1;
+
+static void tag_loaded_forget(
+	void)
+{
+	tag_loaded_serial++;
+}
+
 void scenario_tags_unload(
 	void)
 {
@@ -675,6 +702,13 @@ void scenario_tags_unload(
 		extern void mods_tags_unloaded(void);
 
 		mods_tags_unloaded();
+	}
+	/* port: the menus' Spartan goes, before the menus' table it extends
+	(port/linux/game/menu_chief.c) */
+	{
+		extern void menu_chief_tags_unloaded(void);
+
+		menu_chief_tags_unloaded();
 	}
 	/* port: MCC's appended pause table unwinds before the native menu table. */
 	mcc_pause_runtime_unload();
@@ -710,9 +744,15 @@ void scenario_tags_unload(
 #endif
 		tags_header_deregister_vertex_and_index_buffers(cache_file_globals.tag_header);
 	}
+#ifdef HALO_ANDROID
+	/* port: every static range goes with the tags (a Custom Edition map's too), the BSP's among them, which is let go
+	only later (xgpu.h) */
+	xgpu_static_forget_all();
+#endif
 	cache_file_globals.tags_loaded = FALSE;
 	global_tag_instances = NULL;
 	global_tag_count = 0;
+	tag_loaded_forget();
 
 	return;
 }
@@ -732,6 +772,7 @@ void cache_files_set_tag_instances(
 {
 	global_tag_instances = instances;
 	global_tag_count = count;
+	tag_loaded_forget();
 }
 
 void tag_files_open(
@@ -775,6 +816,26 @@ long tag_loaded(
 	0x7FFF, and the walk never ended) */
 	long absolute_index;
 	long result = NONE;
+	/* port: the memo's entry for the group and the name, case aside */
+	unsigned long hash = 2166136261UL ^ (unsigned long)group_tag;
+	long length;
+	boolean memo;
+
+	for (length = 0; name[length] && length < TAG_LOADED_MEMO_NAME_SIZE; length++)
+	{
+		unsigned char character = (unsigned char)name[length];
+
+		hash = (hash ^ (character >= 'A' && character <= 'Z' ? character + ('a' - 'A') : character)) * 16777619UL;
+	}
+	memo = length < TAG_LOADED_MEMO_NAME_SIZE;
+	hash %= TAG_LOADED_MEMO_SIZE;
+	if (memo &&
+		tag_loaded_memo[hash].serial == tag_loaded_serial &&
+		tag_loaded_memo[hash].group_tag == group_tag &&
+		!_stricmp(name, tag_loaded_memo[hash].name))
+	{
+		return tag_loaded_memo[hash].result;
+	}
 
 	if (cache_file_globals.tags_loaded)
 	{
@@ -794,6 +855,13 @@ long tag_loaded(
 				break;
 			}
 		}
+	}
+	if (memo)
+	{
+		tag_loaded_memo[hash].group_tag = group_tag;
+		tag_loaded_memo[hash].result = result;
+		csmemcpy(tag_loaded_memo[hash].name, name, length + 1);
+		tag_loaded_memo[hash].serial = tag_loaded_serial;
 	}
 
 	return result;
@@ -1069,6 +1137,18 @@ map's build, empty if unread. The multiplayer menus check the loaded map's
 (ui.map's) build; this checks a multiplayer map's own, which may be of
 another build: the object and damage messages name definitions by tag
 index, which differs between builds */
+/* port: the answers, by map, for the run: asked at every update of a
+lobby's game settings, each an open of the map on the card, which waited
+for the card behind the lobby's copy of the map (precaching) */
+#define MAP_PLAYS_KEPT 16
+static struct
+{
+	char name[64];
+	char build[0x20];
+	boolean result;
+} map_plays_kept[MAP_PLAYS_KEPT];
+static short map_plays_next;
+
 boolean cache_files_map_plays_multiplayer(
 	char const *map_name,
 	char build[0x20])
@@ -1077,6 +1157,8 @@ boolean cache_files_map_plays_multiplayer(
 	char path[256];
 	HANDLE file;
 	boolean result = TRUE;
+	boolean read = FALSE;
+	short index;
 
 	build[0] = 0;
 	if (!map_name || !map_name[0])
@@ -1089,7 +1171,17 @@ boolean cache_files_map_plays_multiplayer(
 	header's build is Halo PC's, not one to check */
 	if (custom_edition_level_name(map_name))
 		return TRUE;
-	snprintf(path, sizeof(path), "%s%s.map", cache_files_map_directory(), tag_name_strip_path(map_name));
+	for (index = 0; index < MAP_PLAYS_KEPT; index++)
+	{
+		if (map_plays_kept[index].name[0] && !csstrcasecmp(map_plays_kept[index].name, map_name))
+		{
+			csmemcpy(build, map_plays_kept[index].build, 0x20);
+			return map_plays_kept[index].result;
+		}
+	}
+	/* port: (a mounted custom campaign's map of the name: custom_campaigns.c) */
+	if (!custom_campaign_map_path(map_name, FALSE, path))
+		snprintf(path, sizeof(path), "%s%s.map", cache_files_map_directory(), tag_name_strip_path(map_name));
 	file = CreateFileA(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
 	if (file != INVALID_HANDLE_VALUE)
 	{
@@ -1102,8 +1194,17 @@ boolean cache_files_map_plays_multiplayer(
 			csstrncpy(build, header.build, 0x20);
 			build[0x1F] = 0;
 			result = cache_files_build_region(header.build) != NULL;
+			read = TRUE;
 		}
 		CloseHandle(file);
+	}
+	/* (kept only once read: a map not there yet is asked of the card again) */
+	if (read && csstrlen(map_name) < sizeof(map_plays_kept[0].name))
+	{
+		csstrcpy(map_plays_kept[map_plays_next].name, map_name);
+		csmemcpy(map_plays_kept[map_plays_next].build, build, 0x20);
+		map_plays_kept[map_plays_next].result = result;
+		map_plays_next = (short)((map_plays_next + 1) % MAP_PLAYS_KEPT);
 	}
 
 	return result;
@@ -1206,7 +1307,9 @@ boolean cache_files_map_present(
 
 		if (cache_files_precache_map_loaded(map_name))
 			return TRUE;
-		snprintf(path, sizeof(path), "%s%s.map", cache_files_map_directory(), name);
+		/* port: (a mounted custom campaign's map of the name: custom_campaigns.c) */
+		if (!custom_campaign_map_path(map_name, FALSE, path))
+			snprintf(path, sizeof(path), "%s%s.map", cache_files_map_directory(), name);
 		file = CreateFileA(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
 		if (file != INVALID_HANDLE_VALUE)
 		{
@@ -1353,7 +1456,7 @@ long scenario_tags_load(
 	own maps are (port/linux/game/custom_edition_cache.c). It has no Xbox
 	vertex or index buffers. It is never the game's own map of that file
 	name: a Custom Edition map that cannot load is not played at all. */
-	if (custom_edition_level_name(scenario_name))
+	if (custom_edition_level_name(scenario_name) && !custom_xbox_map_level(scenario_name))
 	{
 		/* port: a protected map's structure bsp names the groups of tags
 		whose own are scrambled (port/linux/game/tag_validate.c) */
@@ -1363,8 +1466,15 @@ long scenario_tags_load(
 			&cache_file_globals.header);
 		if (cache_file_globals.tag_header)
 		{
+#if defined(HALO_ANDROID) || defined(HALO_MOVABLE_WINDOW)
+			/* (its tag directory names its tags' data and names as it was
+			written for, 0x40440000: moved to where its tag cache is, as
+			this build's maps' are to the window's, halo_port_window.h) */
+			cache_file_rebase_tag_data(cache_file_globals.tag_header);
+#endif
 			global_tag_instances = cache_file_globals.tag_header->tag_instances;
 			global_tag_count = cache_file_globals.tag_header->tag_count;
+			tag_loaded_forget();
 			cache_file_globals.tags_loaded = TRUE;
 			/* (the menus' tags, as for this build's maps below) */
 			{
@@ -1390,7 +1500,11 @@ long scenario_tags_load(
 
 		return result;
 	}
-	if (cache_file_open(stripped_scenario_name, &cache_file_globals.header))
+	/* port: an Xbox map of custom_maps (custom_maps\<name>) is in the cache
+	file its level name was copied into, never that of the game's map its
+	header names (cache_files_windows.c) */
+	if (cache_file_open(custom_xbox_map_level(scenario_name) ? scenario_name : stripped_scenario_name,
+		&cache_file_globals.header))
 	{
 		tag_cache_base_address = physical_memory_get_tag_cache_base_address();
 		if (cache_file_header_verify(&cache_file_globals.header, scenario_name, TRUE))
@@ -1477,6 +1591,7 @@ long scenario_tags_load(
 					's'));
 			global_tag_instances = cache_file_globals.tag_header->tag_instances;
 			global_tag_count = cache_file_globals.tag_header->tag_count;
+			tag_loaded_forget();
 			tags_header_register_vertex_and_index_buffers(cache_file_globals.tag_header);
 #ifdef HALO_ANDROID
 			/* port: (an Xbox map's model vertices and indices, in its tags
@@ -1508,6 +1623,12 @@ long scenario_tags_load(
 				extern void menu_tags_loaded(char const *map_name);
 
 				menu_tags_loaded(cache_file_globals.header.name);
+			}
+			/* port: the menus' Spartan, from another map (port/linux/game/menu_chief.c) */
+			{
+				extern void menu_chief_tags_loaded(char const *map_name);
+
+				menu_chief_tags_loaded(cache_file_globals.header.name);
 			}
 			/* port: the bitmaps the high-res HUD stands for (port/linux/game/hud_hires_tags.c) */
 			{

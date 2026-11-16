@@ -470,7 +470,6 @@ static void render_state_text(
 /* port: original Xbox high-resolution glyphs, port/linux/game/hud_hires_tags.c */
 boolean hud_hires_button_draw(struct icon_hud_element_definition const *icon,
 	rectangle2d *cursor, pixel32 color);
-#include "keyboard_glyphs.h" /* port: optional semantic keyboard prompts; custom icons stay native */
 struct bitmap_data const *hud_hires_sprite_bitmap(struct bitmap_data const *bitmap, short sequence_index);
 
 static void render_state_bitmap(
@@ -609,6 +608,35 @@ void hud_messaging_initialize_for_new_map(
 	hud_msg_def = &hud_globals->messaging;
 	csmemset(hud_messaging_globals, 0, sizeof(*hud_messaging_globals));
 	return;
+}
+
+/* port: the help message, the objective and each state message are the
+map's tag data, and so is a state message's icon where its bit in
+is_text_flags is clear (game_state.c's game_state_image_relocate). An icon
+left from a text message is an address as well, or nothing: only moved if
+it is one */
+boolean hud_messaging_port_relocate(
+	struct game_state_relocation const *relocation)
+{
+	struct hud_messaging_globals_definition *globals = game_state_relocation_pointer(relocation, hud_messaging_globals);
+	long datum_index;
+
+	for (datum_index = 0; datum_index < NUMBER_OF_HUD_MESSAGING_DATUMS; datum_index++)
+	{
+		struct hud_state_message_runtime_definition *state = &globals->message_data[datum_index].state_message;
+		long info_index;
+
+		for (info_index = 0; info_index < NUMBEROF(state->info); info_index++)
+		{
+			if (!(state->is_text_flags & FLAG(info_index)))
+				game_state_relocate(relocation, &state->info[info_index].icon);
+		}
+		game_state_relocate(relocation, &state->state_message);
+	}
+	game_state_relocate(relocation, &globals->help_message);
+	game_state_relocate(relocation, &globals->objective.message);
+
+	return TRUE;
 }
 
 void hud_messaging_dispose_from_old_map(
@@ -1020,15 +1048,9 @@ void hud_render_timer(
 		}
 	}
 
-	if (time_code_time != NONE)
-	{
-		long stop_time = time_code_stop_time;
-
-		if (stop_time == NONE)
-			stop_time = game_time_get();
-		sprintf(temporary, "%d", stop_time - time_code_time);
-		render_debug_string(TRUE, temporary);
-	}
+	/* port: time_code_show's counter isn't drawn. c20's and d40's last
+	cutscenes turn it on and nothing turns it off: a tool for timing cutscenes,
+	it stayed at the top left, over the HUD, until the game was closed */
 
 	return;
 }
@@ -1602,10 +1624,6 @@ void hud_messaging_update(
 					case _hud_message_type_icon:
 						{
 							short icon_index = NONE;
-							/* port: resolve keyboard actions before controller translation loses
-							 * their meaning. The feature declines unsupported/custom icons. */
-							if (keyboard_hud_prompt(local_player_index, element->data, &line_cursor, pixel_color))
-								break;
 
 							if (element->data > _icon_right_stick)
 							{
