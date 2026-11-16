@@ -114,6 +114,8 @@ symbols in this file:
 
 /* ---------- headers */
 
+#include "mcc_hud_draw.h" /* port: port/linux/game/mcc_hud_draw.c */
+#include "mcc_cache.h" /* port: preserve MCC-authored gameplay icons */
 #include "cseries/cseries.h"
 
 #include "cseries/errors.h"
@@ -541,8 +543,8 @@ static void render_state_bitmap(
 	draws a button by its place among the HUD globals' button icons: before
 	the map's own picture of it is looked for, which a Custom Edition map's
 	message icons (13 sequences to the Xbox's 24) may not have, so that the
-	button was not drawn */
-	if (hud_hires_button_draw(icon, cursor_bounds, color))
+	button was not drawn. An MCC map's own buttons are drawn as its HUD's are */
+	if (!mcc_cache_tags_loaded() && hud_hires_button_draw(icon, cursor_bounds, color))
 		return;
 	if (icon->frame_rate)
 		frame_index = game_time_get() / icon->frame_rate;
@@ -555,6 +557,11 @@ static void render_state_bitmap(
 	if (bitmap && _texture_cache_bitmap_get_hardware_format(
 		(struct bitmap_data *)bitmap, FALSE, TRUE))
 	{
+		if (mcc_hud_icon_draw(bitmap_group_index, bitmap, clip, cursor_bounds, color, icon, FALSE))
+			return;
+		/* port: retain MCC icon ownership before the high-resolution fallback. */
+		if (mcc_cache_tags_loaded() && hud_hires_button_draw(icon, cursor_bounds, color))
+			return;
 		bitmap = hud_hires_sprite_bitmap(bitmap, icon->sequence_index);
 		scale = local_player_count() > 1 ? 0.75f : 1.0f;
 		point.x = (short)(icon->offset.x * scale + cursor_bounds->x0);
@@ -601,6 +608,35 @@ void hud_messaging_initialize_for_new_map(
 	hud_msg_def = &hud_globals->messaging;
 	csmemset(hud_messaging_globals, 0, sizeof(*hud_messaging_globals));
 	return;
+}
+
+/* port: the help message, the objective and each state message are the
+map's tag data, and so is a state message's icon where its bit in
+is_text_flags is clear (game_state.c's game_state_image_relocate). An icon
+left from a text message is an address as well, or nothing: only moved if
+it is one */
+boolean hud_messaging_port_relocate(
+	struct game_state_relocation const *relocation)
+{
+	struct hud_messaging_globals_definition *globals = game_state_relocation_pointer(relocation, hud_messaging_globals);
+	long datum_index;
+
+	for (datum_index = 0; datum_index < NUMBER_OF_HUD_MESSAGING_DATUMS; datum_index++)
+	{
+		struct hud_state_message_runtime_definition *state = &globals->message_data[datum_index].state_message;
+		long info_index;
+
+		for (info_index = 0; info_index < NUMBEROF(state->info); info_index++)
+		{
+			if (!(state->is_text_flags & FLAG(info_index)))
+				game_state_relocate(relocation, &state->info[info_index].icon);
+		}
+		game_state_relocate(relocation, &state->state_message);
+	}
+	game_state_relocate(relocation, &globals->help_message);
+	game_state_relocate(relocation, &globals->objective.message);
+
+	return TRUE;
 }
 
 void hud_messaging_dispose_from_old_map(
@@ -1012,15 +1048,9 @@ void hud_render_timer(
 		}
 	}
 
-	if (time_code_time != NONE)
-	{
-		long stop_time = time_code_stop_time;
-
-		if (stop_time == NONE)
-			stop_time = game_time_get();
-		sprintf(temporary, "%d", stop_time - time_code_time);
-		render_debug_string(TRUE, temporary);
-	}
+	/* port: time_code_show's counter isn't drawn. c20's and d40's last
+	cutscenes turn it on and nothing turns it off: a tool for timing cutscenes,
+	it stayed at the top left, over the HUD, until the game was closed */
 
 	return;
 }

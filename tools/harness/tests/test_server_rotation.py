@@ -3,6 +3,7 @@
 maps found on disk from small cache file headers the test writes."""
 
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -11,12 +12,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, mutated, read, run  # noqa: E402
 
 CASES = [
-    "names", "custom-maps", "paths", "gametypes", "rules", "whitespace-comments", "quotes", "long", "ui",
+    "names", "custom-maps", "mcc-maps", "paths", "gametypes", "rules", "whitespace-comments", "quotes", "long", "ui",
     "rotation-separators", "rotation-limits", "round-trip", "rule-find", "rule-values", "check-kind", "map-header",
     "resolve", "maps-each",
     "long-map-level",
     "rotation-cut-entry",
     "resolve-version",
+    "resolve-case",
+    "riding-rule",
+    "riding-coop-entry",
+    "saved-gametypes",
+    "resolve-subfolder",
 ]
 
 # a fault in server_rotation.c and the case that must catch it
@@ -28,8 +34,11 @@ NEGATIVE_CONTROLS = {
     "long-map-cut": (("if (map_length >= sizeof(entry->map))", "if (map_length > sizeof(entry->map))"), "long"),
     "long-gametype-cut": (("gametype_length >= sizeof(entry->gametype)", "gametype_length > sizeof(entry->gametype)"),
                           "gametypes"),
-    "file-names-unchecked": (('!plain_name(!strncmp(gametype, "file=", 5) ? gametype + 5 : gametype)',
-                              '!plain_name(gametype)'), "gametypes"),
+    "file-names-unchecked": (('plain_name(!strncmp(gametype, "file=", 5) ? gametype + 5 : gametype)',
+                              'plain_name(gametype)'), "gametypes"),
+    "saved-names-unchecked": (('? saved_name(gametype + 6) :', '? 1 :'), "saved-gametypes"),
+    "saved-case-lost": (('if (strncmp(gametype, "saved=", 6))\n\t\t{', 'if (1)\n\t\t{'), "saved-gametypes"),
+    "subfolders-unsearched": (("found = map_file(nested, name, path, size);", "found = 0;"), "resolve-subfolder"),
     "ui-played": (('if (!strcmp(entry->map_name, "ui"))', "if (0)"), "ui"),
     "rule-twice-counted": (("&& strcmp(entry->rules[existing].key, definition->key);", ";"), "rules"),
     "rule-untrimmed": (("while (key_end > rule && is_space(key_end[-1]))", "while (0)"), "rules"),
@@ -52,17 +61,28 @@ NEGATIVE_CONTROLS = {
     "missing-unflagged": (("entry->map_name, entry->map_name, entry->map_name);\n\t\tentry->map_missing = 1;",
                            "entry->map_name, entry->map_name, entry->map_name);"), "resolve"),
     "campaign-listed": (("type != 1 ||", ""), "maps-each"),
+    "riding-alias-dropped": (('RULE_BOOLEAN("vehicle_riding", "riding",', 'RULE_BOOLEAN("vehicle_riding", NULL,'),
+                             "riding-rule"),
+    "custom-maps-case-sensitive": (("posix_find_entry_case_insensitive(folder, file_name, on_disk, sizeof(on_disk))",
+                                    "0"), "resolve-case"),
 }
+# (controls a case-insensitive file system cannot see: it finds Mixed_Case.map by any spelling)
+CASE_CONTROLS = {"custom-maps-case-sensitive"}
 
 
 def generated(fault=None):
     code = read("port/linux/src/server_rotation.c")
+    code = code.replace('#include "../game/mcc_server.h"', '#include "mcc_server.h"')
     if fault:
         code = mutated(code, *fault)
     # (the platform's headers: the test's stubs stand for what the file calls)
     stub = "/* (the test's stubs) */\n"
     return (("server_rotation.h", read("port/linux/src/server_rotation.h")), ("platform.h", stub),
-            ("port_config.h", stub), ("posix.h", stub), ("under_test.inc", code))
+            ("port_config.h", stub), ("posix.h", stub),
+            ("mcc_server.h", "/* MCC resolution is exercised by test_mcc_server.py. */\n"
+             "static void mcc_server_resolve(struct server_entry *entry) {(void)entry;}\n"
+             "static int mcc_server_maps_each(void (*each)(void *, const char *, const char *, const char *),"
+             "void *context) {(void)each; (void)context; return 0;}\n"), ("under_test.inc", code))
 
 
 @pytest.mark.parametrize("case", CASES)
@@ -71,8 +91,16 @@ def test_case(case):
     assert status == 0, output
 
 
+def case_insensitive_files():
+    with tempfile.TemporaryDirectory() as folder:
+        Path(folder, "Case").touch()
+        return Path(folder, "case").exists()
+
+
 @pytest.mark.parametrize("control", NEGATIVE_CONTROLS)
 def test_negative_control(control):
+    if control in CASE_CONTROLS and case_insensitive_files():
+        pytest.skip("this file system finds a file in any case")
     fault, case = NEGATIVE_CONTROLS[control]
     status, output = run(build("server_rotation", generated(fault)), case)
     assert status == CHECK_FAILED, f"server_rotation.c with a fault ({control}) passed '{case}': the test cannot see it"

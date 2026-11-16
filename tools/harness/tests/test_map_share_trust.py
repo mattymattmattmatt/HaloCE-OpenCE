@@ -50,8 +50,8 @@ NEGATIVE_CONTROLS = {
 }
 
 FUNCTIONS = ("get_long", "elapsed", "address_internet", "address_private", "source_address_allowed", "hashes_source",
-             "frame_hashes", "host_machine_valid", "host_machine_downloading", "map_share_machine_downloading",
-             "map_share_machine_needs_map", "level_name_copy", "host_offer", "host_request", "host_asked",
+             "frame_hashes", "host_machine_valid", "host_machine_downloading", "map_share_machine_downloading_unlocked",
+             "map_share_machine_needs_map_unlocked", "level_name_copy", "host_offer", "host_request", "host_asked",
              "host_update", "host_progress")
 
 
@@ -68,9 +68,10 @@ def generated(fault=None, faulty_function=None):
     for member in ("OFFER_TIMEOUT", "_offer_ok", "_offer_in_progress_bit", "_progress_downloading",
                    "_file_awaiting_hashes"):
         config += enum_with(source, member) + "\n"
+    config += enum_with(source, "MAXIMUM_FS_PIECES") + "\n"
     for name in ("distributed_map_share_request", "distributed_map_share_offer", "distributed_map_share_offer_file",
                  "distributed_map_share_progress", "download_file", "source", "download", "request", "serving",
-                 "connection", "host_machine", "map_share_globals"):
+                 "connection", "host_machine", "fs_source", "map_share_globals"):
         config += structure(source, name) + "\n"
     text = ""
     for name in FUNCTIONS:

@@ -578,6 +578,7 @@ int host_sdl_gl_swap_window(uint32_t window)
 
 	/* (the datagrams the game held this frame go: host_net.c) */
 	host_net_frame_end();
+	host_sd_activity_frame(); /* (with the profiler on: host_syscall.c) */
 	if (!object)
 		return 0;
 	if ((void *)object == (void *)&standin_window)
@@ -645,6 +646,21 @@ static int translate(const SDL_Event *event, struct host_event *result)
 	case SDL_CONTROLLERBUTTONDOWN:
 	case SDL_CONTROLLERBUTTONUP:
 		return 0;
+	/* (the touchscreen, handheld: SDL2's fingers, 0 to 1 of the screen as
+	SDL3's are) */
+	case SDL_FINGERDOWN:
+	case SDL_FINGERMOTION:
+	case SDL_FINGERUP:
+		result->kind = event->type == SDL_FINGERDOWN ? _host_event_finger_down :
+			event->type == SDL_FINGERMOTION ? _host_event_finger_motion : _host_event_finger_up;
+		result->touch_id = (uint64_t)event->tfinger.touchId;
+		result->finger_id = (uint64_t)event->tfinger.fingerId;
+		result->x = event->tfinger.x;
+		result->y = event->tfinger.y;
+		result->dx = event->tfinger.dx;
+		result->dy = event->tfinger.dy;
+		result->pressure = event->tfinger.pressure;
+		return 1;
 	case SDL_WINDOWEVENT:
 		if (event->window.event == SDL_WINDOWEVENT_FOCUS_GAINED)
 		{
@@ -1488,11 +1504,39 @@ int host_sdl_open_url(const char *url)
 	return 0;
 }
 
-/* (the Theater's EXPORT REPLAYS is the Android app's folder picker: the
+/* (the Theater's EXPORT and IMPORT are the Android app's pickers: the
 Switch's replays are on the card, port/linux/game/menu_functions.c) */
 void host_android_export_replays(const char *folder)
 {
 	(void)folder;
+}
+
+void host_android_import_replays(const char *folder)
+{
+	(void)folder;
+}
+
+/* (and the Mods screen's IMPORT, Video Setup's IMPORT DRIVER, and the map
+lists' IMPORT) */
+void host_android_import_mods(const char *folder)
+{
+	(void)folder;
+}
+
+void host_android_import_vk_drivers(const char *folder)
+{
+	(void)folder;
+}
+
+void host_android_import_maps(const char *folder)
+{
+	(void)folder;
+}
+
+/* (Settings > Gameplay > GAME FILES is Android's alone) */
+void host_android_move_game_files(const char *where)
+{
+	(void)where;
 }
 
 void host_touch_read(int32_t *state)

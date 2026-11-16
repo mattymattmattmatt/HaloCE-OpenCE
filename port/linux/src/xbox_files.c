@@ -29,6 +29,8 @@ seconds.
 #include "posix.h"
 #include "port_config.h"
 #include "server_mode.h"
+#include "steam_workshop.h"
+#include "mcc_local_package.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -133,7 +135,7 @@ const char *platform_data_root(void)
 #if !defined(HALO_ANDROID) && !defined(HALO_WEB)
 			/* (a dedicated server asks nobody: it says what is missing and
 			stops, server_mode.c) */
-			if (!has_maps(root) && executable_directory[0] && !halo_server_mode() &&
+			if (!has_maps(root) && executable_directory[0] && !halo_server_headless() &&
 				platform_offer_game_data(executable_directory) &&
 				has_maps(executable_directory))
 			{
@@ -255,24 +257,50 @@ static BOOL same_name(const char *first, const char *second)
 	return !*first && !*second;
 }
 
-/* d:\'s maps and custom_maps folders, if game.maps.path or
-game.custom_maps.path moves them (the path's first name, which is matched
-whatever its case): the folder, else NULL */
-static const char *moved_folder(const char *name)
+/* the folder holding mcc_maps: game.mcc.path's (Android's GAME FILES moves
+it with the maps: GameFiles.java), else the data root. mcc_staging stays in
+the data root (a package published from it to another storage is copied:
+posix_mcc_share_publish). Read once. */
+const char *platform_mcc_root(void)
 {
-	static char maps[MAX_PATH], custom_maps[MAX_PATH];
+	static char root[MAX_PATH];
 	static int read;
 
 	if (!read)
 	{
 		read = 1;
+		configured_folder("game.mcc.path", root, sizeof(root));
+		if (!root[0])
+			snprintf(root, sizeof(root), "%s", platform_data_root());
+	}
+	return root;
+}
+
+/* d:\'s maps, custom_maps and mcc_maps folders, if game.maps.path,
+game.custom_maps.path or game.mcc.path moves them (the path's first name,
+which is matched whatever its case): the folder, else NULL */
+static const char *moved_folder(const char *name)
+{
+	static char maps[MAX_PATH], custom_maps[MAX_PATH], mcc_maps[MAX_PATH];
+	static int read;
+
+	if (!read)
+	{
+		char mcc[MAX_PATH];
+
+		read = 1;
 		configured_folder("game.maps.path", maps, sizeof(maps));
 		configured_folder("game.custom_maps.path", custom_maps, sizeof(custom_maps));
+		configured_folder("game.mcc.path", mcc, sizeof(mcc));
+		if (mcc[0])
+			snprintf(mcc_maps, sizeof(mcc_maps), "%s/mcc_maps", mcc);
 	}
 	if (maps[0] && same_name(name, "maps"))
 		return maps;
 	if (custom_maps[0] && same_name(name, "custom_maps"))
 		return custom_maps;
+	if (mcc_maps[0] && same_name(name, "mcc_maps"))
+		return mcc_maps;
 	return NULL;
 }
 
@@ -293,6 +321,54 @@ static BOOL names_match(const char *a, const char *b, unsigned long length)
 	return TRUE;
 }
 
+/* mcc_maps\<Workshop item id>\... where the data root has no such package folder: the item's maps folder in the
+player's Steam library (steam_workshop.h). The rest of the path after the id in rest */
+static int translate_workshop(const char *cursor, char *resolved, unsigned long size, const char **rest)
+{
+	char id[STEAM_WORKSHOP_ID_SIZE], package[1024], data_folder[1100], local_name[256];
+	unsigned long length = 0;
+
+	while (*cursor == '\\' || *cursor == '/')
+		cursor++;
+	/* MCC-owned local layout resolution is independent of Steam discovery. */
+	if (mcc_local_package_path(cursor, platform_mcc_root(), resolved, size))
+	{
+		*rest = cursor + strlen(cursor);
+		return 1;
+	}
+	if (!names_match(cursor, "mcc_maps", 8) || (cursor[8] != '\\' && cursor[8] != '/'))
+		return 0;
+	cursor += 9;
+	/* MCC-owned resource discovery also serves the virtual fopen path. */
+	if (steam_workshop_resource_path(cursor, platform_mcc_root(), resolved, size))
+	{
+		*rest = cursor + strlen(cursor);
+		return 1;
+	}
+	while (cursor[length] >= '0' && cursor[length] <= '9' && length + 1 < sizeof(id))
+	{
+		id[length] = cursor[length];
+		length++;
+	}
+	id[length] = 0;
+	if (!length || (cursor[length] && cursor[length] != '\\' && cursor[length] != '/'))
+		return 0;
+	/* a package folder of that name in the data root wins */
+	if (posix_find_entry_case_insensitive(platform_mcc_root(), "mcc_maps", local_name, sizeof(local_name)))
+	{
+		snprintf(data_folder, sizeof(data_folder), "%s/%s", platform_mcc_root(), local_name);
+		if (posix_find_entry_case_insensitive(data_folder, id, local_name, sizeof(local_name)))
+			return 0;
+	}
+	if (!steam_workshop_package_folder(id, package, sizeof(package)) ||
+		strlen(package) >= size)
+		return 0;
+	snprintf(resolved, size, "%s", package);
+	trim_separators(resolved);
+	*rest = cursor + length;
+	return 1;
+}
+
 /* the data root's files and folders kept elsewhere when the settings say
 (paths.logs, paths.custom_maps): a read-only data root, a dedicated
 server's maps mounted so. The rest of the path after them in rest */
@@ -305,6 +381,8 @@ static int translate_elsewhere(const char *cursor, char *resolved, unsigned long
 
 	while (*cursor == '\\' || *cursor == '/')
 		cursor++;
+	if (translate_workshop(cursor, resolved, size, rest))
+		return 1;
 	for (index = 0; logs_folder[0] && index < sizeof(logs) / sizeof(logs[0]); index++)
 	{
 		if (names_match(cursor, logs[index], strlen(logs[index]) + 1))
@@ -354,14 +432,27 @@ void platform_translate_path(const char *xbox_path, char *host_path, unsigned lo
 		}
 		else if (drive != 'd')
 		{
+			/* (port: looked for once a run, not at every path: each file
+			of the saved games' took a stat of its drive's folder, 199 of
+			z's in five seconds of the Switch's start) */
+			static unsigned char drive_ready[26];
 			struct posix_file_information information;
 
 			snprintf(resolved, sizeof(resolved), "%s/%c", platform_save_root(), drive);
 			/* every Xbox drive always exists; create its directory on first use */
-			if (posix_stat(resolved, &information) != 0)
-				posix_make_directory(resolved);
+			if (drive >= 'a' && drive <= 'z' && !drive_ready[drive - 'a'])
+			{
+				if (posix_stat(resolved, &information) != 0)
+					posix_make_directory(resolved);
+				drive_ready[drive - 'a'] = 1;
+			}
 		}
 		cursor += 2;
+	}
+	else
+	{
+		/* (a path without a drive, as the package resources are named) */
+		translate_workshop(cursor, resolved, sizeof(resolved), &cursor);
 	}
 
 	while (*cursor)
@@ -401,7 +492,10 @@ void platform_translate_path(const char *xbox_path, char *host_path, unsigned lo
 
 			snprintf(on_disk, sizeof(on_disk), "%s", component);
 			snprintf(exact, sizeof(exact), "%s/%s", resolved, component);
-			if (posix_stat(exact, &information) != 0 && FILE_SYSTEM_HAS_CASE)
+			/* (port: where case does not count, the stat answered nothing
+			and cost one for each folder of every path: 1,355 of them in
+			five seconds of the Switch's start) */
+			if (FILE_SYSTEM_HAS_CASE && posix_stat(exact, &information) != 0)
 				posix_find_entry_case_insensitive(resolved, component, on_disk, sizeof(on_disk));
 		}
 		length = strlen(resolved);
@@ -553,13 +647,12 @@ static struct platform_file *file_from_handle(HANDLE handle)
 }
 
 /* The game is about to write a new map over one of its map cache files
-(source/cache/cache_files_windows.c). The Switch's host keeps those files in
-memory (port/switch/host/host_memory_files.c): the file is emptied and given
-its size back, so the old map's memory goes before the new map's is taken.
-A file on a disk is written over as it is. */
+(source/cache/cache_files_windows.c). The hosts keep those files in memory
+(port/android/host/host_memory_files.c, on the Switch, Android and the PS5):
+the file is emptied and given its size back, so the old map's memory goes
+before the new map's is taken. */
 void platform_file_discard(HANDLE handle)
 {
-#ifdef HALO_SWITCH
 	struct platform_file *file = file_from_handle(handle);
 	struct posix_file_information information;
 
@@ -568,9 +661,6 @@ void platform_file_discard(HANDLE handle)
 		posix_truncate(file->descriptor, 0, 0);
 		posix_truncate(file->descriptor, information.size_low, information.size_high);
 	}
-#else
-	(void)handle;
-#endif
 }
 
 HANDLE WINAPI CreateFileA(LPCSTR file_name, DWORD desired_access, DWORD share_mode,

@@ -47,6 +47,17 @@ int platform_rename_host(const char *old_path, const char *new_path)
 	return rename(old_path, new_path);
 }
 
+/* (msvc_crt.c's: a file made 0666; Windows has no such modes) */
+void platform_share_file(FILE *file)
+{
+	(void)file;
+}
+
+void platform_share_path(const char *path)
+{
+	(void)path;
+}
+
 FILE *halo_windows_freopen(const char *path, const char *mode, FILE *stream)
 {
 	char host_path[1024];

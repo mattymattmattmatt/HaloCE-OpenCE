@@ -46,6 +46,8 @@ int touch_game_respawn_waiting(void);
 int touch_game_playing(void);
 int touch_game_replay_playing(void);
 void touch_game_button_controls(int *controls);
+/* ... and its skip button during a cinematic (port/linux/game/touch_cinematic.c) */
+int touch_cinematic_tap(float x, float y);
 
 /* the gamepad's buttons (input.h), which the touch controls are named by */
 #define TOUCH_BUTTONS 16
@@ -234,24 +236,31 @@ int touch_input_chat_taps(float *x, float *y)
 void touch_input_gamepad(XINPUT_GAMEPAD *pad)
 {
 	/* outside the menus the touchscreen only skips a cinematic that can be
-	skipped: a tap there presses A */
+	skipped (or votes to, in network co-op): a tap there presses A, on its
+	skip button where one shows (touch_cinematic_tap) */
 	if (!menu_active)
 	{
 		struct touch_menu_output output;
+		int width = 0, height = 0;
+		float x = 0.0f, y = 0.0f;
 
 		menu_setup();
 		touch_menu_read(&menu, &output);
+		/* (the tap's place, 0 to 1 of the window) */
+		if (output.clicks)
+		{
+			platform_video_drawable_size(&width, &height);
+			x = width > 0 ? output.click_x / (float)width : 0.0f;
+			y = height > 0 ? output.click_y / (float)height : 0.0f;
+		}
 		/* (or, while the text chat's on-screen keyboard is up, its keys) */
 		if (output.clicks && (network_chat_controller() == 0))
 		{
-			int width = 0, height = 0;
-
-			platform_video_drawable_size(&width, &height);
 			chat_taps += output.clicks;
-			chat_tap_x = width > 0 ? output.click_x / (float)width : 0.0f;
-			chat_tap_y = height > 0 ? output.click_y / (float)height : 0.0f;
+			chat_tap_x = x;
+			chat_tap_y = y;
 		}
-		else if (output.clicks && touch_game_cinematic_skippable())
+		else if (output.clicks && touch_game_cinematic_skippable() && touch_cinematic_tap(x, y))
 		{
 			skip_polls = TOUCH_PRESS_POLLS;
 			platform_log("touch: A pressed to skip a cinematic");
@@ -291,6 +300,11 @@ enum
 	/* a replay plays: the overlay shows its stick and the replay's own
 	buttons (touch_input_replay_targets), not the game's */
 	_touch_scene_replay = 1 << 4,
+	/* beside _touch_scene_menus, which it comes with: a cinematic is all
+	that hides the controls (not a menu, the start or the chat's keyboard),
+	and an overlay whose option says so (TouchControls.java's "Show during
+	cutscenes") shows them anyway. The web's overlay hides as before */
+	_touch_scene_cinematic = 1 << 5,
 };
 
 /* the bit of the menu fingers on the touch controls in their buttons
@@ -375,12 +389,18 @@ void touch_input_controls(XINPUT_GAMEPAD *pad, int menus)
 	int index;
 
 	/* (the controls show only in a game: not while it starts, at the main
-	menu, in a menu or during a cinematic; nor while the text chat's
+	menu, in a menu or during a cinematic (unless the overlay's option
+	shows them there: _touch_scene_cinematic); nor while the text chat's
 	on-screen keyboard is up, whose keys the fingers then tap) */
-	host_touch_scene(_touch_scene_known | touch_controls_setting() |
-		(menus || !touch_game_playing() || touch_game_cinematic_playing() || (network_chat_controller() == 0) ?
-			_touch_scene_menus : 0) |
-		(touch_game_replay_playing() ? _touch_scene_replay : 0));
+	{
+		int hidden = menus || !touch_game_playing() || (network_chat_controller() == 0);
+		int cinematic = touch_game_cinematic_playing();
+
+		host_touch_scene(_touch_scene_known | touch_controls_setting() |
+			(hidden || cinematic ? _touch_scene_menus : 0) |
+			(cinematic && !hidden ? _touch_scene_cinematic : 0) |
+			(touch_game_replay_playing() ? _touch_scene_replay : 0));
+	}
 	/* (the profile's mapping, for the buttons' names; only when it changes) */
 	touch_game_button_controls(bindings);
 	if (!bindings_known || memcmp(bindings, bindings_sent, sizeof(bindings)))

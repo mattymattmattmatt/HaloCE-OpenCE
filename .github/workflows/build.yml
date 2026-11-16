@@ -15,8 +15,11 @@ name: Build
 # - Windows, whose minutes cost twice Linux's, builds only Windows;
 # - artifacts are kept for three days.
 #
-# A successful build of main is also published as a GitHub release, the
-# newest marked latest, so that
+# A release is made by pushing a tag v<number> (git tag v94 && git push
+# origin v94) to a commit of main: the builds of that commit are published as
+# the GitHub release build-<number>, "Build <number>" (or the commit's subject,
+# "Build <number>: <title>", for a release with a title), its notes the
+# commit's message, marked latest, so that
 # https://github.com/<repository>/releases/latest/download/<file> always
 # gives the latest build; the last five are kept. Its web build is then the
 # site on GitHub Pages (https://halocombatevolved.com/, port/web/README.md).
@@ -54,12 +57,12 @@ jobs:
     # 32-bit glibc is for the tests.
     runs-on: ubuntu-24.04
     container: archlinux:latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - name: Install the toolchain
         run: |
           printf '\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n' >> /etc/pacman.conf
-          pacman -Syu --noconfirm --needed git zstd python python-pytest python-pillow python-numpy python-scipy ninja ccache \
+          pacman -Syu --noconfirm --needed git zstd python python-pytest python-pytest-xdist python-pillow python-numpy python-scipy ninja ccache \
             clang lld gcc lib32-glibc lib32-gcc-libs cmake pkgconf wayland
 
       - uses: actions/checkout@v4
@@ -91,11 +94,21 @@ jobs:
 
       - name: Test
         run: |
-          python -m pytest -q tools/test_linux_port.py tools/test_android_asm_convert.py tools/test_android_mirror_uploads.py tools/test_android_static_geometry.py tools/test_android_render_policy.py tools/test_android_ce_texture_cache.py tools/test_host_watch_hash.py tools/test_touch_menu.py tools/harness tools/test_profile.py tools/stagekit/tests tools/test_net_compare.py tools/test_server_sim.py tools/test_egg.py tools/test_deploy_gametypes.py
+          python -m pytest -q tools/test_loading_widescreen.py tools/test_loading_chant.py
+          python -m pytest -q tools/test_linux_port.py tools/test_android_asm_convert.py tools/test_android_mirror_uploads.py tools/test_android_frame_fences.py tools/test_android_static_geometry.py tools/test_android_render_policy.py tools/test_android_ce_texture_cache.py tools/test_host_watch_hash.py tools/test_host_units.py tools/test_check_host_imports.py tools/test_host_syscall.py tools/test_touch_menu.py tools/test_network_extensions.py tools/test_profile.py tools/stagekit/tests tools/test_net_compare.py tools/test_server_sim.py tools/test_egg.py tools/test_deploy_gametypes.py
+          # the harness's cases are independent (each builds in its own folder): across the runner's cores
+          python -m pytest -q -n auto tools/harness
           # the dedicated server: --version, and --server without maps refused (exit code 2); its cases with
           # clients need the retail maps, and are skipped
           python -m pytest -q tools/test_dedicated_server.py
           python tools/test_light_storage.py
+          python -m pytest -q \
+            tools/test_mcc_local_package.py tools/test_mcc_server.py tools/test_mcc_share_menu.py tools/test_mcc_resource_selection.py tools/test_mcc_identity_candidates.py \
+            tools/test_mcc_cache_format.py tools/test_mcc_projectiles.py tools/test_mcc_tag_validation.py \
+            tools/test_mcc_share.py tools/test_mcc_share_rules.py tools/test_mcc_share_stage.py \
+            tools/test_mcc_share_storage.py tools/test_mcc_share_metadata.py tools/test_mcc_load_network.py \
+            tools/test_checkpoint_epoch.py tools/test_coop_checkpoint.py tools/test_coop_checkpoint_recovery.py \
+            tools/test_mcc_checkpoint.py tools/test_mcc_import.py tools/test_mcc_publish_across.py tools/test_steam_client.py tools/test_host_mcc_hash.py
           python -m pytest -q tools/test_hud_corrections.py
 
       - name: Compile cache
@@ -117,6 +130,11 @@ jobs:
     # The runner image has the Android SDK and NDK, a JDK and CMake.
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    env:
+      # the APK's version code (port/android/app/build.gradle): it grows
+      # every run, so each release signed with the permanent key installs
+      # over the one before
+      HALO_ANDROID_VERSION_CODE: ${{ github.run_number }}
     steps:
       - name: Install the toolchain
         run: |
@@ -186,10 +204,23 @@ jobs:
       - name: Compile cache
         run: ccache --show-stats
 
+      # (the bridge from the old package name, the file every installed build's updater asks for: Migration.java)
       - uses: actions/upload-artifact@v4
         with:
           name: halo-android-debug
           path: dist/halo-android-debug
+          retention-days: 3
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: slipstreamce-android-debug
+          path: dist/slipstreamce-android-debug
+          retention-days: 3
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: slipstreamce-android-release
+          path: dist/slipstreamce-android-release
           retention-days: 3
 
       - uses: actions/upload-artifact@v4
@@ -240,6 +271,13 @@ jobs:
 
       - name: Release
         run: python tools/ci_build.py windows release
+
+      - name: Test MCC model geometry
+        shell: pwsh
+        run: |
+          python -m pip install pytest
+          python -m pytest -q tools/test_mcc_geometry.py tools/test_mcc_projectiles.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Test light storage
         run: python tools/test_light_storage.py
@@ -333,6 +371,8 @@ jobs:
           NODE_PATH="$RUNNER_TEMP/playwright/node_modules" node port/web/tests/rooms.mjs dist/halo-web-release
           # (the native builds' WebRTC, port/linux/src/p2p_webrtc.c, with both)
           NODE_PATH="$RUNNER_TEMP/playwright/node_modules" node port/web/tests/webrtc_native.mjs chromium firefox
+          source ~/emsdk/emsdk_env.sh
+          NODE_PATH="$RUNNER_TEMP/playwright/node_modules" node port/web/tests/mcc_storage.mjs chromium firefox
 
       - name: Compile cache
         run: ccache --show-stats
@@ -567,7 +607,9 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          pattern: halo-*
+          # (slipstreamce-android-* is the game itself, which the bridge in
+          # halo-android-* downloads: without it, Android players are stuck)
+          pattern: "{halo,slipstreamce}-*"
           path: artifacts
 
       - name: Package
@@ -575,7 +617,26 @@ jobs:
           mkdir release
           for build in artifacts/*/; do
             name="$(basename "$build")"
-            (cd "$build" && zip -qr "$GITHUB_WORKSPACE/release/$name.zip" .)
+            # the Switch's and the PS5's stored, not deflated: their updaters
+            # (port/switch/host/host_update.c, in every build installed so
+            # far, and port/ps5/host/host_update_ps5.c) unpack stored entries
+            # only (the slipstreamce- names are the ones their updaters look
+            # for first, for when the zips take them)
+            case "$name" in
+              halo-switch*|halo-ps5*|halo-gore-ps5*|slipstreamce-switch*|slipstreamce-ps5*) level=-0 ;;
+              *) level= ;;
+            esac
+            (cd "$build" && zip $level -qr "$GITHUB_WORKSPACE/release/$name.zip" .)
+          done
+          # (what the updaters ask for: a release without one strands its
+          # players, so it is not published)
+          for required in halo-android slipstreamce-android; do
+            for flavor in release debug; do
+              if [ ! -f "release/$required-$flavor.zip" ]; then
+                echo "::error::the release has no $required-$flavor.zip"
+                exit 1
+              fi
+            done
           done
           python3 tools/ci_build.py sums release
           ls -l release
@@ -602,15 +663,20 @@ jobs:
           COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          tag="build-$GITHUB_RUN_NUMBER"
-          subject="$(printf '%s' "${MESSAGE:-manual run}" | head -n 1)"
-          # (the network version, which a dedicated server's server.auto_update
-          # reads: a new one is started once the game being played is over)
-          network_version="$(sed -n 's/^#define HALO_PORT_NETWORK_VERSION \([0-9]*\).*/\1/p' port/linux/include/halo_port_limits.h)"
-          printf '%s\n\nCommit: %s\nBuild: %s\nNetwork version: %s\n\nThe release builds are for playing; the debug builds stop at the first failed assertion and log it.\n' \
-            "$subject" "$COMMIT_URL" "$RUN_URL" "$network_version" > notes.md
-          gh release create "$tag" release/* --target "$GITHUB_SHA" --latest \
-            --title "Build $GITHUB_RUN_NUMBER (${GITHUB_SHA:0:7})" --notes-file notes.md
+          tag="build-$NUMBER"
+          # the title: the commit's subject where it is "Build <number>: <title>"
+          # (a release with a title of its own), else "Build <number>"
+          subject="$(git log -1 --format=%s "$GITHUB_SHA")"
+          case "$subject" in
+            "Build $NUMBER: "*) title="$subject" ;;
+            *) title="Build $NUMBER" ;;
+          esac
+          # the notes: the tagged commit's whole message, then where it came from
+          git log -1 --format=%B "$GITHUB_SHA" > notes.md
+          printf '\nCommit: %s\nBuild: %s\n\nThe release builds are for playing; the debug builds stop at the first failed assertion and log it.\n' \
+            "$COMMIT_URL" "$RUN_URL" >> notes.md
+          gh release create "$tag" release/*.zip --target "$GITHUB_SHA" --latest \
+            --title "$title (${GITHUB_SHA:0:7})" --notes-file notes.md
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       # The Windows builds' executables and PDBs to Sentry, which turns the

@@ -28,10 +28,14 @@ host's Vulkan backend (port/android/host/host_vk.c).
 #include "sdl_platform.h"
 #include "halo_ui_pointer.h"
 #include "port_config.h"
+#include "mcc_environment_shader.h"
 #include "vk_commands.h"
 #include "vk_shaders.h"
+#include "plasma_model_shader.h"
+#include "plasma_occlusion.h"
 #include "vk_device.h"
 #include "hud_hires.h"
+#include "loading_widescreen.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -257,49 +261,307 @@ void halo_hdr_calibration_show(int pattern, int paper_white, int peak_brightness
 	(void)peak_brightness;
 }
 
-/* the OpenGL renderer's static geometry (d3d8_gl.c's static buffers): here
-the game's vertices and indices are read where they are, as before */
+/* ---------- static geometry
+
+The game's geometry written once as a map loads and never after, as d3d8_gl.c's static buffers take it (on Android's
+OpenGL renderer they are part of its geometry fixes): the vertex and index buffers rasterizer_vertex_buffer_new and
+rasterizer_triangle_buffer_new make (Custom Edition and mod models, a Custom Edition map's BSP), one each
+(xgpu_static_buffer_add), and an Xbox map's model geometry in its tags and its BSP's in the BSP, from the first buffer
+to the end of the tags or the BSP (xgpu_static_buffers_add). A range is copied to the host the first time a draw reads
+it (host_vk_static_make), and draws inside it name that copy instead of putting their bytes; it is let go when the game
+releases or unloads it (VK_COMMAND_STATIC_FREE), and every range when the map's tags are let go (xgpu_static_forget_all).
+debug.vk_static_geometry false puts every draw's bytes as before; debug.vk_static_check keeps a copy of each range and
+every 60 frames logs one whose bytes changed since, where, and whether draws read there (they would read it stale). */
+
+uint32_t host_vk_static_make(uint32_t address, uint32_t size);
+
+struct static_range
+{
+	unsigned long start;
+	unsigned long size;
+	/* the host's copy (VK_DATA_STATIC and its own), 0 until a draw reads it; failed: the host could not, and draws put
+	their bytes, as before */
+	uint32_t id;
+	BOOL failed;
+	/* (debug.vk_static_check) its bytes when copied, whether a change was said, and the span draws have read */
+	unsigned char *copy;
+	BOOL changed_said;
+	unsigned long read_low, read_high;
+};
+
+/* sorted by start, one list of vertices (0) and one of indices (1); the ranges of a list are separate memory */
+static struct static_range_list
+{
+	struct static_range *entries;
+	unsigned long count;
+	unsigned long capacity;
+} static_lists[2];
+
+static int static_check_on(void)
+{
+	static int read, on;
+
+	if (!read)
+	{
+		read = 1;
+		on = config_boolean("debug.vk_static_check") != 0;
+		if (on)
+			platform_log("vk: static geometry is checked every 60 frames (debug.vk_static_check)");
+	}
+	return on;
+}
+
+/* the first entry of the list whose start is above address */
+static unsigned long static_upper(const struct static_range_list *list, unsigned long address)
+{
+	unsigned long low = 0, high = list->count;
+
+	while (low < high)
+	{
+		unsigned long middle = (low + high) / 2;
+
+		if (list->entries[middle].start <= address)
+			low = middle + 1;
+		else
+			high = middle;
+	}
+	return low;
+}
+
+/* a resource's bytes in memory: vertex buffers carry a physical address, index buffers a virtual one
+(d3d8_resources.c) */
+static unsigned long static_resource_start(const void *resource, BOOL indices)
+{
+	DWORD data = ((const DWORD *)resource)[1];
+
+	if (!data)
+		return 0;
+	return indices ? (unsigned long)data : (unsigned long)PLATFORM_PHYSICAL_TO_VIRTUAL(data);
+}
+
+static void static_forget(struct static_range_list *list, unsigned long start)
+{
+	unsigned long index = static_upper(list, start);
+	struct static_range *entry;
+
+	if (!index || list->entries[index - 1].start != start)
+		return;
+	entry = &list->entries[index - 1];
+	free(entry->copy);
+	if (entry->id)
+	{
+		struct vk_command_static_free *command = vk_stream_command(VK_COMMAND_STATIC_FREE, sizeof(*command));
+
+		command->id = entry->id;
+	}
+	memmove(entry, entry + 1, (list->count - index) * sizeof(*entry));
+	list->count--;
+}
+
+static void static_note(struct static_range_list *list, unsigned long start, unsigned long size)
+{
+	unsigned long index;
+	struct static_range *entry;
+
+	if (!start || !size)
+		return;
+	static_forget(list, start);
+	index = static_upper(list, start);
+	/* (a bsp's vertices and lightmap vertices both run to its end: the one that starts lower covers the other) */
+	if (index && list->entries[index - 1].start + list->entries[index - 1].size == start + size)
+		return;
+	if (index < list->count && list->entries[index].start + list->entries[index].size == start + size)
+		static_forget(list, list->entries[index].start);
+	/* (one it overlaps is of memory read over since: let go. d3d8_gl.c leaves the new range to stream instead, and the
+	old one stays listed, stale) */
+	while (index && list->entries[index - 1].start + list->entries[index - 1].size > start)
+	{
+		static_forget(list, list->entries[index - 1].start);
+		index = static_upper(list, start);
+	}
+	while (index < list->count && start + size > list->entries[index].start)
+		static_forget(list, list->entries[index].start);
+	if (list->count == list->capacity)
+	{
+		unsigned long capacity = list->capacity ? list->capacity * 2 : 256;
+		struct static_range *entries = realloc(list->entries, capacity * sizeof(*entries));
+
+		if (!entries)
+			return;
+		list->entries = entries;
+		list->capacity = capacity;
+	}
+	memmove(&list->entries[index + 1], &list->entries[index], (list->count - index) * sizeof(*entry));
+	list->count++;
+	entry = &list->entries[index];
+	memset(entry, 0, sizeof(*entry));
+	entry->start = start;
+	entry->size = size;
+}
+
+/* [address, address + size) inside one static range of the kind asked for: the ref of the host's copy at its place in
+it, the range copied now if no draw has read it yet. FALSE (the draw puts the bytes) where it is in none, or the copy
+could not be made, or its place is not aligned as a vertex buffer's or an index buffer's offset is safely read at */
+static BOOL static_ref(const void *address, unsigned long size, BOOL indices, struct vk_data_ref *ref)
+{
+	static int read, on;
+	struct static_range_list *list = &static_lists[indices != 0];
+	unsigned long at = (unsigned long)address;
+	unsigned long index = static_upper(list, at);
+	struct static_range *entry;
+
+	/* (debug.vk_static_geometry false: every draw puts its bytes, as before) */
+	if (!read)
+	{
+		read = 1;
+		on = config_boolean("debug.vk_static_geometry") != 0;
+		if (!on)
+			platform_log("vk: static geometry is put at each draw (debug.vk_static_geometry false)");
+	}
+	if (!on || !index || !size)
+		return FALSE;
+	entry = &list->entries[index - 1];
+	if (at - entry->start > entry->size || size > entry->size - (at - entry->start) ||
+		((at - entry->start) & (indices ? 1 : 3)) || (entry->start & 3))
+	{
+		return FALSE;
+	}
+	if (!entry->id)
+	{
+		if (entry->failed)
+			return FALSE;
+		entry->id = host_vk_static_make((uint32_t)entry->start, (uint32_t)entry->size);
+		if (!entry->id)
+		{
+			entry->failed = TRUE;
+			return FALSE;
+		}
+		if (static_check_on())
+		{
+			entry->copy = malloc(entry->size);
+			if (entry->copy)
+				memcpy(entry->copy, (const void *)entry->start, entry->size);
+			entry->read_low = entry->size;
+		}
+	}
+	if (entry->copy)
+	{
+		if (at - entry->start < entry->read_low)
+			entry->read_low = at - entry->start;
+		if (at - entry->start + size > entry->read_high)
+			entry->read_high = at - entry->start + size;
+	}
+	ref->id = entry->id;
+	ref->offset = (uint32_t)(at - entry->start);
+	return TRUE;
+}
+
+/* debug.vk_static_check: every copied range hashed again (at Present, every 60 frames), and one whose bytes changed
+since it was copied said once: its draws would read the copy, stale */
+static void static_check(void)
+{
+	int kind;
+	unsigned long index;
+
+	if (!static_check_on())
+		return;
+	for (kind = 0; kind < 2; kind++)
+	{
+		for (index = 0; index < static_lists[kind].count; index++)
+		{
+			struct static_range *entry = &static_lists[kind].entries[index];
+			const unsigned char *now = (const unsigned char *)entry->start;
+			unsigned long at, first = 0, last = 0, bytes = 0, spans = 0, read = 0;
+
+			if (!entry->copy || entry->changed_said || !memcmp(entry->copy, now, entry->size))
+				continue;
+			for (at = 0; at < entry->size; at++)
+			{
+				if (entry->copy[at] == now[at])
+					continue;
+				if (!bytes || at > last + 1)
+					spans++;
+				if (!bytes)
+					first = at;
+				last = at;
+				bytes++;
+				if (at >= entry->read_low && at < entry->read_high)
+					read++;
+			}
+			entry->changed_said = TRUE;
+			platform_log("vk: STATIC CHANGED: the %s range at 0x%08lx, %lu bytes: %lu bytes changed in %lu spans, from %lu "
+				"to %lu; draws have read %lu to %lu, %lu of the changed bytes in it", kind ? "index" : "vertex",
+				entry->start, entry->size, bytes, spans, first, last, entry->read_low, entry->read_high, read);
+		}
+	}
+}
+
 void xgpu_static_buffer_add(const void *resource, unsigned long size, int indices)
 {
-	(void)resource;
-	(void)size;
-	(void)indices;
+	if (resource)
+		static_note(&static_lists[indices != 0], static_resource_start(resource, indices != 0), size);
 }
 
 void xgpu_static_buffer_remove(const void *resource, int indices)
 {
-	(void)resource;
-	(void)indices;
+	if (resource)
+		static_forget(&static_lists[indices != 0], static_resource_start(resource, indices != 0));
+}
+
+/* the lowest data of count resources, stride bytes apart; 0 without */
+static unsigned long static_resources_first(const void *buffers, long count, unsigned long stride, BOOL indices)
+{
+	unsigned long first = 0;
+	long index;
+
+	for (index = 0; buffers && index < count; index++)
+	{
+		unsigned long start = static_resource_start((const unsigned char *)buffers + index * stride, indices);
+
+		if (start && (!first || start < first))
+			first = start;
+	}
+	return first;
 }
 
 void xgpu_static_buffers_add(const void *buffers, long count, unsigned long stride, int indices, const void *end)
 {
-	(void)buffers;
-	(void)count;
-	(void)stride;
-	(void)indices;
-	(void)end;
+	unsigned long first = static_resources_first(buffers, count, stride, indices != 0);
+
+	if (first && (unsigned long)end > first)
+		static_note(&static_lists[indices != 0], first, (unsigned long)end - first);
 }
 
 void xgpu_static_buffers_remove(const void *buffers, long count, unsigned long stride, int indices)
 {
-	(void)buffers;
-	(void)count;
-	(void)stride;
-	(void)indices;
+	unsigned long first = static_resources_first(buffers, count, stride, indices != 0);
+
+	if (first)
+		static_forget(&static_lists[indices != 0], first);
 }
 
 void xgpu_static_range_add(const void *start, unsigned long size, int indices)
 {
-	(void)start;
-	(void)size;
-	(void)indices;
+	static_note(&static_lists[indices != 0], (unsigned long)start, size);
 }
 
 void xgpu_static_range_remove(const void *start, int indices)
 {
-	(void)start;
-	(void)indices;
+	static_forget(&static_lists[indices != 0], (unsigned long)start);
+}
+
+/* the map's tags are let go: every range with them. The game lets its BSP's go only later, after the next map's tags
+(the menu's) may have been read over it, and a draw inside the stale range would read its copy (debug.vk_static_check
+found the BSP's ranges rewritten while still listed) */
+void xgpu_static_forget_all(void)
+{
+	int kind;
+
+	for (kind = 0; kind < 2; kind++)
+	{
+		while (static_lists[kind].count)
+			static_forget(&static_lists[kind], static_lists[kind].entries[static_lists[kind].count - 1].start);
+	}
 }
 
 /* display.shadow_resolution: the size the shadow maps are drawn at, as in
@@ -481,6 +743,8 @@ struct vertex_shader_object
 	struct nv2a_vertex_lighting lighting;
 	/* a shader lit for each pixel failed to compile: lit as the vertex shader lights it from then on */
 	BOOL lighting_failed;
+	/* the dynamic lighting's model variant failed to compile: this program draws as stock from then on */
+	BOOL plasma_failed;
 	/* the fixed-function pipeline's (fixed_function_program): its GLSL is nv2a_vk_fixed_function_glsl's */
 	BOOL fixed_function;
 };
@@ -526,9 +790,15 @@ struct vk_device
 	float attributes[XGPU_VERTEX_ATTRIBUTE_COUNT][4];
 	BOOL immediate_active;
 	D3DPRIMITIVETYPE immediate_type;
+	/* Begin's vertices: only the registers set since Begin, a column each (immediate_registers, in the order they were
+	first set); the others keep their value through the batch and are read from a binding of stride 0 */
 	float *immediate_vertices;
 	unsigned long immediate_count;
+	/* (in floats) */
 	unsigned long immediate_capacity;
+	unsigned long immediate_mask;
+	unsigned immediate_columns;
+	unsigned char immediate_registers[XGPU_VERTEX_ATTRIBUTE_COUNT];
 
 	BOOL visibility_test_active;
 	/* the platform layer made a window (not debug.null_renderer): there is something to draw into */
@@ -693,15 +963,25 @@ void host_vk_shader_compile(uint32_t stage, uint64_t hash, uint32_t glsl, uint32
 uint32_t host_vk_shader_find(uint32_t stage, uint64_t hash, uint32_t status_out);
 uint32_t host_vk_shader_make(uint32_t stage, uint64_t hash);
 
-#define STREAM_SIZE (4 * 1024 * 1024)
+/* 4 MB x 3 was 12 MB of guest BSS. The AArch64 guest image must end by
+0x40000000 (64 MB from HALO_GUEST_IMAGE_BASE): gore plus this merge did not
+fit. 1.5 MB still flushes mid-frame when a stream fills (vk_stream_command). */
+#define STREAM_SIZE (1536 * 1024)
 
-static uint32_t stream[STREAM_SIZE / 4];
+/* the streams, written in turn: the host may still be running the one handed over last (VK_COMMAND_STREAMS) */
+static uint32_t streams[VK_COMMAND_STREAMS][STREAM_SIZE / 4];
+static unsigned stream_index;
+static uint32_t *stream = streams[0];
 static unsigned long stream_used;
 
 static void stream_flush(void)
 {
 	if (stream_used)
+	{
 		host_vk_submit((unsigned int)(uintptr_t)stream, (unsigned int)stream_used);
+		stream_index = (stream_index + 1) % VK_COMMAND_STREAMS;
+		stream = streams[stream_index];
+	}
 	stream_used = 0;
 }
 
@@ -1684,6 +1964,16 @@ static void front_buffer_take(void)
 	if (width > back_buffer.pixel_width)
 		width = back_buffer.pixel_width;
 	left = (back_buffer.pixel_width - width) / 2;
+	/* The widescreen loading screen (display.widescreen_loading) draws the
+	effect across the whole width: all of it is captured back into the
+	feedback texture, as d3d8_gl.c's front_buffer_take does. Its centre alone,
+	drawn again across the width, stretched each frame's trail sideways by
+	the screen's width over 640, and the picture smeared. */
+	if (loading_widescreen_active())
+	{
+		left = 0;
+		width = back_buffer.pixel_width;
+	}
 	command = stream_command(VK_COMMAND_BLIT, sizeof(*command));
 	command->source = back_buffer;
 	command->destination = front;
@@ -1818,13 +2108,21 @@ char const *d3d8_renderer_description(void)
 
 The draws between Begin and End are the test's: the host counts the samples they pass (an occlusion query, host_vk_visibility.c)
 and keeps the count, in the game's pixels, for the slot End names. The result is asked for through an import that never waits (the
-latest count of the slot: from this test, or from an earlier one while the GPU is behind), as d3d8_gl.c's query buffer path gives. */
+latest count of the slot: from this test, or from an earlier one while the GPU is behind), as d3d8_gl.c's query buffer path gives.
+
+Each End is numbered at its slot (xgpu_visibility_tests_ended), dropped tests too, and the host keeps with a slot's count the number
+of the test it is from, in the same word, so that the count and its number are read together: a lens flare's slot is read only once
+a count of one of the flare's own tests has come (xgpu_visibility_test_counted, rasterizer_lights.c). */
 
 #define VISIBILITY_TEST_SLOTS 4096
 
-uint32_t host_vk_visibility(uint32_t index);
+/* the slot's latest count (the low 32 bits) and the low 32 bits of the number of the test it is from (the high, 0 for none) */
+uint64_t host_vk_visibility(uint32_t index);
 
 static BOOL visibility_pending[VISIBILITY_TEST_SLOTS];
+/* the tests ended at each slot, and the number of the one whose count GetVisibilityTestResult last gave there (0: none) */
+static ULONGLONG visibility_ended[VISIBILITY_TEST_SLOTS];
+static ULONGLONG visibility_counted[VISIBILITY_TEST_SLOTS];
 
 void WINAPI D3DDevice_BeginVisibilityTest(void)
 {
@@ -1844,6 +2142,7 @@ HRESULT WINAPI D3DDevice_EndVisibilityTest(DWORD index)
 	index %= VISIBILITY_TEST_SLOTS;
 	command = stream_command(VK_COMMAND_VISIBILITY_END, sizeof(*command));
 	command->index = (uint32_t)index;
+	command->test = (uint32_t)++visibility_ended[index];
 	/* the target's pixels to a game pixel: the count is of the game's pixels (visibility_unscaled in d3d8_gl.c), which the game
 	divides by its own test's area (lens flares, rasterizer_lights.c), a split-screen window's or the screen's alike */
 	/* (multisampled, the host counts samples) */
@@ -1863,8 +2162,16 @@ HRESULT WINAPI D3DDevice_GetVisibilityTestResult(DWORD index, UINT *result, ULON
 			*result = 0;
 		return S_OK;
 	}
-	if (result)
-		*result = host_vk_visibility((uint32_t)index);
+	{
+		uint64_t latest = host_vk_visibility((uint32_t)index);
+		uint32_t test = (uint32_t)(latest >> 32);
+
+		if (result)
+			*result = (UINT)(uint32_t)latest;
+		/* (the number in full: the latest ended less how far behind it the count's is) */
+		if (test)
+			visibility_counted[index] = visibility_ended[index] - (uint32_t)((uint32_t)visibility_ended[index] - test);
+	}
 	return S_OK;
 }
 
@@ -1879,6 +2186,17 @@ void xgpu_set_blood(float red, float green, float blue, float amount)
 	(void)green;
 	(void)blue;
 	(void)amount;
+}
+
+/* (xgpu.h) */
+unsigned long long xgpu_visibility_tests_ended(unsigned long index)
+{
+	return visibility_ended[index % VISIBILITY_TEST_SLOTS];
+}
+
+unsigned long long xgpu_visibility_test_counted(unsigned long index)
+{
+	return visibility_counted[index % VISIBILITY_TEST_SLOTS];
 }
 
 /* ---------- render and texture stage state */
@@ -1989,6 +2307,18 @@ void WINAPI D3DDevice_SetTexture(DWORD stage, D3DBaseTexture *texture)
 {
 	if (stage < D3DTSS_MAXSTAGES)
 		device.textures[stage] = texture;
+}
+
+/* a registered MCC header no stage may keep once its registration goes: the
+next draw would ask the texture cache for an image that is gone (as
+d3d8_gl.c's; port/linux/src/mcc_texture_bridge.c) */
+void xgpu_mcc_texture_unbind(DWORD const *resource)
+{
+	unsigned long stage;
+
+	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
+		if ((DWORD const *)device.textures[stage] == resource)
+			device.textures[stage] = NULL;
 }
 
 void WINAPI D3DDevice_SetPalette(DWORD stage, D3DPalette *palette)
@@ -2327,44 +2657,11 @@ static unsigned long stage_texture_mode(int stage)
 }
 
 /* what bind_textures in d3d8_gl.c decides for the key: a stage with no texture, or in modes 0, 0x04 and 0x05, has no
-sampler (mode 0x11 a 2D one); otherwise the sampler is the texture's own type, and stage 0's coverage_alpha is whether
-its bitmap has a high-res meter (hud_hires.h) whose green is its coverage. The cache there finds the override when it
-uploads the pixels; here it is asked the same way, without the GL texture (the texture's own decoding failing, which
-d3d8_gl.c would see, is not seen) */
-/* hud_hires_override_find's answer for stage 0's texture, kept until the pixels at its address are written or a setting
-changes: it checks the bitmap's pixels (a CRC of the whole of its first level), and every textured draw asks (on the Fold
-8 at the Halo level's falls, 10% of the game thread's work; 99% of the asks are answered again) */
-#define OVERRIDE_MEMO_SLOTS 1024
-
-static struct
-{
-	unsigned long address, width, height, level0_size;
-	unsigned long generation, settings;
-	long override;
-} override_memo[OVERRIDE_MEMO_SLOTS];
-
-static long override_find_kept(unsigned long address, unsigned long width, unsigned long height,
-	unsigned long level0_size)
-{
-	/* (every bit of the address mixed in: bitmaps lie at round addresses in the texture cache's blocks, which a slot of
-	address bits alone put in a few slots, each pushing the other out, so that every draw checked its bitmap anyway) */
-	unsigned long slot = (unsigned long)(((uint32_t)address * 2654435761u) >> 22) % OVERRIDE_MEMO_SLOTS;
-	unsigned long generation = memory_watch_generation(address, level0_size);
-
-	if (override_memo[slot].address == address && override_memo[slot].width == width &&
-		override_memo[slot].height == height && override_memo[slot].level0_size == level0_size &&
-		override_memo[slot].generation == generation && override_memo[slot].settings == config_changes())
-		return override_memo[slot].override;
-	override_memo[slot].override = hud_hires_override_find(address, width, height, level0_size);
-	override_memo[slot].address = address;
-	override_memo[slot].width = width;
-	override_memo[slot].height = height;
-	override_memo[slot].level0_size = level0_size;
-	override_memo[slot].generation = generation;
-	override_memo[slot].settings = config_changes();
-	return override_memo[slot].override;
-}
-
+sampler (mode 0x11 a 2D one); otherwise the sampler is the texture's own type. Stage 0's high-res HUD flags are those of
+what the cache draws for its texture (vk_texture_get, which finds the override when the pixels come, not at every
+draw): coverage_alpha, a high-res meter whose green is its coverage; point_threshold, one whose red holds its segments'
+thresholds (hud_hires.h); and ce_meter_channels, a Custom Edition meter drawn from a sheet other art shares (both
+nv2a_psh_vk.c's) */
 static void key_textures(struct nv2a_pixel_shader_key *key)
 {
 	int stage;
@@ -2374,7 +2671,6 @@ static void key_textures(struct nv2a_pixel_shader_key *key)
 		D3DBaseTexture *texture = device.textures[stage];
 		unsigned long mode = stage_texture_mode(stage);
 		struct xgpu_texture_description description;
-		BOOL palettized;
 
 		if (!texture || !texture->Data || mode == 0 || mode == 0x04 || mode == 0x05 || mode == 0x11)
 		{
@@ -2394,14 +2690,19 @@ static void key_textures(struct nv2a_pixel_shader_key *key)
 		xgpu_texture_describe(texture->Format, texture->Size, &description);
 		if (stage == 0)
 		{
-			palettized = ((texture->Format & D3DFORMAT_FORMAT_MASK) >> D3DFORMAT_FORMAT_SHIFT) == 0x0b;
-			if (!palettized && !description.cube_map && description.depth == 1)
-			{
-				long override = override_find_kept((unsigned long)PLATFORM_PHYSICAL_TO_VIRTUAL(texture->Data),
-					description.width, description.height, description.levels > 1 ?
-					xgpu_texture_level_offset(&description, 1) : xgpu_texture_face_size(&description));
+			/* (what the cache draws for it, as bind_textures in d3d8_gl.c reads it: textures_make's lookup of it
+			after this one is the recent lookup's) */
+			const D3DCOLOR *palette = device.palettes[0] && device.palettes[0]->Data ?
+				(const D3DCOLOR *)PLATFORM_PHYSICAL_TO_VIRTUAL(device.palettes[0]->Data) : NULL;
+			struct xgpu_texture_description drawn;
+			int kind;
 
-				key->coverage_alpha = override >= 0 && hud_hires_override_coverage(override) != 0;
+			memset(&drawn, 0, sizeof(drawn));
+			if (vk_texture_get((const DWORD *)texture, palette, &kind, &drawn))
+			{
+				key->coverage_alpha = drawn.hires_coverage != FALSE;
+				key->point_threshold = drawn.hires_point_threshold != FALSE;
+				key->ce_meter_channels = drawn.ce_meter_channels != FALSE;
 			}
 		}
 		key->sampler_type[stage] = description.cube_map ? _xgpu_sampler_cube :
@@ -2421,6 +2722,8 @@ static void pixel_key_make(struct nv2a_pixel_shader_key *key)
 	key->combiner_state[D3DRS_PSFINALCOMBINERCONSTANT0] = 0;
 	key->combiner_state[D3DRS_PSFINALCOMBINERCONSTANT1] = 0;
 	key->texture_modes = D3D__RenderState[D3DRS_PSTEXTUREMODES];
+	/* (MCC's environment lightmap pass: mcc_environment_shader.h) */
+	key->mcc_bump_attenuation = (unsigned char)mcc_environment_shader_active();
 	if (texture_clip[2] != 0.0f)
 		key->texture_modes |= NV2A_PIXEL_KEY_CLIP | ((unsigned long)texture_clip_stage << NV2A_PIXEL_KEY_CLIP_STAGE_SHIFT) |
 			(texture_clip_3d ? NV2A_PIXEL_KEY_CLIP_3D : 0);
@@ -2436,6 +2739,7 @@ static void pixel_key_make(struct nv2a_pixel_shader_key *key)
 	key->coverage_alpha = key->coverage_alpha && D3D__RenderState[D3DRS_ALPHABLENDENABLE] &&
 		D3D__RenderState[D3DRS_SRCBLEND] == D3DBLEND_CONSTANTCOLOR &&
 		D3D__RenderState[D3DRS_DESTBLEND] == D3DBLEND_SRCALPHA;
+	key->point_threshold = key->point_threshold && key->coverage_alpha;
 	key->alpha_test_function = D3D__RenderState[D3DRS_ALPHATESTENABLE] ? D3D__RenderState[D3DRS_ALPHAFUNC] : 0;
 	/* multisampled (the targets are bound first: draw_make), an alpha-tested draw that is not blended covers samples in
 	proportion to how far alpha is past the reference, so that cut-out edges (foliage, grates) are smoothed too */
@@ -2573,7 +2877,7 @@ static void dump_vertex_shader(const char *folder, const struct vertex_shader_ob
 	dump_vertex_count++;
 	snprintf(what, sizeof(what), "vertex shader %lu, %lu instructions, packed mask %lx", program->id,
 		program->instruction_count, mask);
-	text = nv2a_vk_vertex_shader_to_glsl((const uint32_t *)program->instructions, program->instruction_count, mask, NULL);
+	text = nv2a_vk_vertex_shader_to_glsl((const uint32_t *)program->instructions, program->instruction_count, mask, NULL, 0);
 	snprintf(name, sizeof(name), "vs_%lu_%lx.vert", program->id, mask);
 	dump_text(folder, name, text, what);
 	free(text);
@@ -2651,9 +2955,11 @@ static struct shader_entry *shader_entries[2][SHADER_BUCKETS];
 static BOOL shader_import_logged;
 
 /* the handle of a shader, asking the host (and sending its GLSL when the host does not know it); 0 if it is not ready,
-and *failed set if it never will be. lit: a vertex shader that hands its lighting on (nv2a_vk_vertex_shader_to_glsl) */
+and *failed set if it never will be. lit: a vertex shader that hands its lighting on (nv2a_vk_vertex_shader_to_glsl);
+plasma: a vertex shader of the dynamic lighting's model variant. wait: 0 not to make it for this draw, only to have it
+made: a draw with a stock shader to fall back on has no need to spend the frame's time */
 static uint32_t shader_handle(uint32_t stage, uint64_t hash, const struct vertex_shader_object *program,
-	unsigned long mask, BOOL lit, const struct nv2a_pixel_shader_key *key, BOOL *failed)
+	unsigned long mask, BOOL lit, unsigned int plasma, const struct nv2a_pixel_shader_key *key, BOOL wait, BOOL *failed)
 {
 	struct shader_entry **bucket = &shader_entries[stage][hash % SHADER_BUCKETS];
 	struct shader_entry *entry;
@@ -2703,7 +3009,7 @@ static uint32_t shader_handle(uint32_t stage, uint64_t hash, const struct vertex
 		char *glsl = stage == VK_SHADER_STAGE_VERTEX && program->fixed_function ? nv2a_vk_fixed_function_glsl() :
 			stage == VK_SHADER_STAGE_VERTEX ?
 			nv2a_vk_vertex_shader_to_glsl((const uint32_t *)program->instructions, program->instruction_count, mask,
-				lit ? &program->lighting : NULL) :
+				lit ? &program->lighting : NULL, plasma) :
 			nv2a_vk_pixel_shader_to_glsl(key);
 
 		if (glsl)
@@ -2715,7 +3021,7 @@ static uint32_t shader_handle(uint32_t stage, uint64_t hash, const struct vertex
 	}
 	/* queued or compiling: made now, for this draw, while the frame has time for it (the host's host_vk_shader_make);
 	else the draw is left out until a compile thread has made it */
-	if (status != VK_SHADER_STATUS_FAILED && status != VK_SHADER_STATUS_NOT_READY)
+	if (wait && status != VK_SHADER_STATUS_FAILED && status != VK_SHADER_STATUS_NOT_READY)
 	{
 		handle = host_vk_shader_make(stage, hash);
 		if (handle)
@@ -2728,8 +3034,9 @@ static uint32_t shader_handle(uint32_t stage, uint64_t hash, const struct vertex
 }
 
 /* a vertex shader's identity (vk_shaders.h): the generator's version, the program's hash and its packed mask, and for one
-that hands its lighting on (lit), a word saying so (the unlit ones' are as they always were) */
-static uint64_t vertex_shader_hash(const struct vertex_shader_object *program, unsigned long mask, BOOL lit)
+that hands its lighting on (lit), or is the dynamic lighting's model variant (plasma), a word saying so (the stock ones' are
+as they always were) */
+static uint64_t vertex_shader_hash(const struct vertex_shader_object *program, unsigned long mask, BOOL lit, unsigned int plasma)
 {
 	uint32_t generator = VK_SHADER_GENERATOR_VERSION, mask32 = (uint32_t)mask;
 	uint64_t hash;
@@ -2743,7 +3050,80 @@ static uint64_t vertex_shader_hash(const struct vertex_shader_object *program, u
 
 		hash = vk_hash_mix(hash, marker, sizeof(marker));
 	}
+	if (plasma)
+	{
+		static const char marker[] = "plasma";
+
+		hash = vk_hash_mix(hash, marker, sizeof(marker));
+		hash = vk_hash_mix(hash, &plasma, sizeof(plasma));
+	}
 	return hash;
+}
+
+/* ---------- the dynamic lighting's model variant
+
+Only a draw of a program with both point lights, with a light of the feature's in one of them, asks for it. It is compiled
+in the background, and meanwhile (and for good, if it fails) the draw uses the stock shaders, so that a model never leaves
+the screen because a light has touched it. Every other draw's key, hash and shaders are as they were. */
+
+static struct
+{
+	/* the variant this draw uses (XGPU_PLASMA_MODEL_*; 0 for stock) */
+	unsigned int bits;
+	float parameters[4], transforms[2][4];
+	uint32_t images[2];
+} plasma_draw;
+static uint32_t plasma_images_told[2];
+
+/* what the draw would use, if its shaders are ready: the slots selected, and the fields bound for them */
+static void plasma_draw_prepare(const struct vertex_shader_object *program, BOOL immediate)
+{
+	unsigned int mask;
+	int slot;
+
+	plasma_draw.bits = 0;
+	if (immediate || program->lighting.lights != 2 || program->plasma_failed)
+		return;
+	mask = plasma_model_lighting_mask();
+	if (!mask)
+		return;
+	memset(&plasma_draw, 0, sizeof(plasma_draw));
+	plasma_draw.bits = XGPU_PLASMA_MODEL_FALLOFF;
+	for (slot = 0; slot < 2; slot++)
+	{
+		const DWORD *field;
+
+		plasma_draw.parameters[slot] = (mask & (1u << slot)) ? 1.0f : 0.0f;
+		field = plasma_occlusion_model_texture(slot, plasma_draw.transforms[slot]);
+		if (field)
+		{
+			struct xgpu_texture_description description;
+			int kind;
+			uint32_t id = vk_texture_get(field, NULL, &kind, &description);
+
+			if (id && kind == VK_IMAGE_3D)
+			{
+				plasma_draw.images[slot] = id;
+				plasma_draw.parameters[2 + slot] = 1.0f;
+				plasma_draw.bits |= XGPU_PLASMA_MODEL_OCCLUSION;
+			}
+		}
+	}
+	/* (a slot with no field does not read its image, but has to have one to bind) */
+	if (plasma_draw.bits & XGPU_PLASMA_MODEL_OCCLUSION)
+	{
+		if (!plasma_draw.images[0])
+			plasma_draw.images[0] = plasma_draw.images[1];
+		if (!plasma_draw.images[1])
+			plasma_draw.images[1] = plasma_draw.images[0];
+	}
+}
+
+static void plasma_variant_failed(struct vertex_shader_object *program)
+{
+	platform_log("GPU: vertex shader %lu's dynamic lighting variant failed to compile (refer to the host's shader log): "
+		"stock from now on", program->id);
+	program->plasma_failed = TRUE;
 }
 
 /* a pixel shader's: the generator's version and the key's bytes */
@@ -2769,6 +3149,7 @@ static BOOL draw_shaders(BOOL immediate, struct nv2a_pixel_shader_key *key, unsi
 	if (device.fixed_function ? !immediate : !program || !device.vertex_shader || !program->instructions)
 		return FALSE;
 	pixel_key_make(key);
+	plasma_draw_prepare(program, immediate);
 	mask = immediate ? 0 : device.vertex_shader->packed_mask;
 	*mask_out = mask;
 	if (folder)
@@ -2786,9 +3167,31 @@ static BOOL draw_shaders(BOOL immediate, struct nv2a_pixel_shader_key *key, unsi
 		BOOL failed = FALSE;
 
 		key->per_pixel_lighting = (unsigned char)program->lighting.lights;
-		*vertex = shader_handle(VK_SHADER_STAGE_VERTEX, vertex_shader_hash(program, mask, TRUE), program, mask, TRUE, NULL,
-			&failed);
-		*pixel = shader_handle(VK_SHADER_STAGE_PIXEL, pixel_shader_hash(key), NULL, 0, FALSE, key, &failed);
+		if (plasma_draw.bits)
+		{
+			BOOL plasma_failed = FALSE;
+
+			key->plasma_model = (unsigned char)plasma_draw.bits;
+			*pixel = shader_handle(VK_SHADER_STAGE_PIXEL, pixel_shader_hash(key), NULL, 0, FALSE, 0, key, FALSE, &plasma_failed);
+			if (plasma_failed)
+				plasma_variant_failed(program);
+			key->plasma_model = 0;
+			if (*pixel)
+			{
+				*vertex = shader_handle(VK_SHADER_STAGE_VERTEX, vertex_shader_hash(program, mask, TRUE, 0), program, mask, TRUE, 0,
+					NULL, TRUE, &failed);
+				if (*vertex)
+				{
+					key->plasma_model = (unsigned char)plasma_draw.bits;
+					return TRUE;
+				}
+			}
+			plasma_draw.bits = 0;
+			failed = FALSE;
+		}
+		*vertex = shader_handle(VK_SHADER_STAGE_VERTEX, vertex_shader_hash(program, mask, TRUE, 0), program, mask, TRUE, 0, NULL,
+			TRUE, &failed);
+		*pixel = shader_handle(VK_SHADER_STAGE_PIXEL, pixel_shader_hash(key), NULL, 0, FALSE, 0, key, TRUE, &failed);
 		if (!failed)
 			return TRUE;
 		platform_log("GPU: vertex shader %lu cannot be lit for each pixel here (refer to the host's shader log): "
@@ -2799,9 +3202,21 @@ static BOOL draw_shaders(BOOL immediate, struct nv2a_pixel_shader_key *key, unsi
 	{
 		BOOL failed = FALSE;
 
-		*vertex = shader_handle(VK_SHADER_STAGE_VERTEX, vertex_shader_hash(program, mask, FALSE), program, mask, FALSE, NULL,
-			&failed);
-		*pixel = shader_handle(VK_SHADER_STAGE_PIXEL, pixel_shader_hash(key), NULL, 0, FALSE, key, &failed);
+		if (plasma_draw.bits)
+		{
+			BOOL plasma_failed = FALSE;
+
+			*vertex = shader_handle(VK_SHADER_STAGE_VERTEX, vertex_shader_hash(program, mask, FALSE, plasma_draw.bits), program,
+				mask, FALSE, plasma_draw.bits, NULL, FALSE, &plasma_failed);
+			if (plasma_failed)
+				plasma_variant_failed(program);
+			if (!*vertex)
+				plasma_draw.bits = 0;
+		}
+		if (!plasma_draw.bits)
+			*vertex = shader_handle(VK_SHADER_STAGE_VERTEX, vertex_shader_hash(program, mask, FALSE, 0), program, mask, FALSE, 0, NULL,
+				TRUE, &failed);
+		*pixel = shader_handle(VK_SHADER_STAGE_PIXEL, pixel_shader_hash(key), NULL, 0, FALSE, 0, key, TRUE, &failed);
 	}
 	return TRUE;
 }
@@ -2858,6 +3273,11 @@ static struct
 {
 	unsigned long draws, immediate_draws, presents;
 	unsigned long skipped_no_program, skipped_no_target, skipped_shader, skipped_texture, skipped_other;
+	/* the bytes put for draws, by kind, and how many puts of the vertex data, constants and indices */
+	unsigned long long put_vertex, put_expanded, put_index, put_constants, put_parameters, put_pixel, put_immediate, put_other;
+	unsigned long n_vertex, n_constants, n_index;
+	/* and the bytes drawn from static geometry's copies instead */
+	unsigned long long static_vertex, static_index;
 } stats;
 static BOOL statistics_on, statistics_read;
 
@@ -3024,6 +3444,11 @@ static void raster_state_make(struct vk_command_draw *draw, BOOL has_color, BOOL
 	{
 		state->depth_bias = 1;
 		draw->depth_bias_slope = dword_to_float(rs[D3DRS_POLYGONOFFSETZSLOPESCALE]);
+		/* The slope is the depth's change across a pixel, and a target drawn at several pixels to the game's one has that many
+		times less depth across each: the Xbox's slope term, taken across its own pixels, is that many times the scale. On a
+		surface seen at an angle it is most of the bias (the Pelican's lights on its curved hull sank in as slivers at 1080
+		lines, as d3d8_gl.c's did). The units are the Xbox's already: the depth here is the Xbox's (xgpu_reversed_depth). */
+		draw->depth_bias_slope *= target_scale[0] > target_scale[1] ? target_scale[0] : target_scale[1];
 		draw->depth_bias_constant = dword_to_float(rs[D3DRS_POLYGONOFFSETZOFFSET]);
 	}
 }
@@ -3100,6 +3525,43 @@ static void pixel_parameters_make(struct vk_pixel_parameters *p, const float tex
 		memcpy(p->model_lights[stage], device.constants[model_light_register(stage)], sizeof(p->model_lights[stage]));
 }
 
+/* the most register changes since the frame's last put of the vertex constants that are sent as a patch of it
+(VK_COMMAND_DATA_PATCH) rather than all 192 registers again: a model's draw changes its node matrices, a few dozen */
+#define CONSTANTS_PATCH_MOST 64
+
+/* the vertex constants as a patch of the frame's put base (its data id), the registers changed after serial `since`
+(the constant log's, which holds the latest CONSTANT_LOG_SIZE changes); its data id */
+static uint32_t constants_patch(uint32_t base, unsigned long since)
+{
+	unsigned char registers[CONSTANTS_PATCH_MOST];
+	uint32_t seen[(XGPU_VERTEX_CONSTANT_COUNT + 31) / 32] = { 0 };
+	unsigned long serial, count = 0, index;
+	struct vk_command_data_patch *command;
+
+	for (serial = since + 1; serial <= constants_serial; serial++)
+	{
+		unsigned char reg = constant_log[serial % CONSTANT_LOG_SIZE];
+
+		if (!(seen[reg / 32] & (1u << (reg % 32))))
+		{
+			seen[reg / 32] |= 1u << (reg % 32);
+			registers[count++] = reg;
+		}
+	}
+	command = stream_command(VK_COMMAND_DATA_PATCH, sizeof(*command) + count * sizeof(command->patches[0]));
+	command->id = ++data_id;
+	command->base = base;
+	command->count = (uint32_t)count;
+	for (index = 0; index < count; index++)
+	{
+		command->patches[index].offset = (uint32_t)registers[index] * (uint32_t)sizeof(device.constants[0]);
+		memcpy(command->patches[index].value, device.constants[registers[index]], sizeof(command->patches[index].value));
+	}
+	stats.put_constants += count * sizeof(command->patches[0]);
+	stats.n_constants++;
+	return command->id;
+}
+
 static void uniforms_make(struct vk_command_draw *draw, const float texture_scale[4][4], BOOL lit)
 {
 	struct vk_vertex_parameters parameters;
@@ -3107,7 +3569,15 @@ static void uniforms_make(struct vk_command_draw *draw, const float texture_scal
 
 	if (!puts_this_frame.constants_valid || puts_this_frame.constants_serial != constants_serial)
 	{
-		puts_this_frame.constants_ref = data_ref(vk_data_put(device.constants, sizeof(device.constants)));
+		/* (a few registers changed since the frame's last put: those alone, on top of it) */
+		if (puts_this_frame.constants_valid && constants_serial - puts_this_frame.constants_serial <= CONSTANTS_PATCH_MOST)
+			puts_this_frame.constants_ref = data_ref(constants_patch(puts_this_frame.constants_ref.id,
+				puts_this_frame.constants_serial));
+		else
+		{
+			puts_this_frame.constants_ref = data_ref(vk_data_put(device.constants, sizeof(device.constants)));
+			stats.put_constants += sizeof(device.constants); stats.n_constants++;
+		}
 		puts_this_frame.constants_serial = constants_serial;
 		puts_this_frame.constants_valid = TRUE;
 	}
@@ -3118,19 +3588,33 @@ static void uniforms_make(struct vk_command_draw *draw, const float texture_scal
 	parameters.point_and_screen[0] = D3D__RenderState[D3DRS_POINTSIZE] ? dword_to_float(D3D__RenderState[D3DRS_POINTSIZE]) : 1.0f;
 	parameters.point_and_screen[1] = (float)UI_OFFSET;
 	parameters.point_and_screen[2] = parameters.point_and_screen[3] = 0.0f;
+	/* (the variant's alone: zero for every other draw) */
+	memset(parameters.plasma_model, 0, sizeof(parameters.plasma_model) + sizeof(parameters.plasma_occ_transform));
+	if (plasma_draw.bits)
+	{
+		memcpy(parameters.plasma_model, plasma_draw.parameters, sizeof(parameters.plasma_model));
+		memcpy(parameters.plasma_occ_transform, plasma_draw.transforms, sizeof(parameters.plasma_occ_transform));
+	}
 	if (!puts_this_frame.parameters_valid || !words_equal(&puts_this_frame.parameters, &parameters, sizeof(parameters)))
 	{
 		puts_this_frame.parameters = parameters;
 		puts_this_frame.parameters_ref = data_ref(vk_data_put(&parameters, sizeof(parameters)));
+		stats.put_parameters += sizeof(parameters);
 		puts_this_frame.parameters_valid = TRUE;
 	}
 	draw->vertex_parameters = puts_this_frame.parameters_ref;
 
 	pixel_parameters_make(&pixel, texture_scale, lit);
+	if (plasma_draw.bits)
+	{
+		memcpy(pixel.plasma_model, plasma_draw.parameters, sizeof(pixel.plasma_model));
+		memcpy(pixel.plasma_occ_transform, plasma_draw.transforms, sizeof(pixel.plasma_occ_transform));
+	}
 	if (!puts_this_frame.pixel_valid || !words_equal(&puts_this_frame.pixel, &pixel, sizeof(pixel)))
 	{
 		puts_this_frame.pixel = pixel;
 		puts_this_frame.pixel_ref = data_ref(vk_data_put(&pixel, sizeof(pixel)));
+		stats.put_pixel += sizeof(pixel);
 		puts_this_frame.pixel_valid = TRUE;
 	}
 	draw->pixel_parameters = puts_this_frame.pixel_ref;
@@ -3290,8 +3774,22 @@ static uint32_t stream_expanded_put(const struct vertex_shader_object *declarati
 	}
 	state->bindings[binding].stride = stride ? (uint32_t)out_stride : 0;
 	id = vk_data_put(buffer, rows * out_stride);
+	stats.put_expanded += rows * out_stride;
 	free(buffer);
 	return id;
+}
+
+/* the current values of the sixteen registers, put unless the frame's last put has them */
+static struct vk_data_ref attributes_put(float values[XGPU_VERTEX_ATTRIBUTE_COUNT][4])
+{
+	if (!puts_this_frame.attributes_valid || !words_equal(puts_this_frame.attributes, values,
+		sizeof(puts_this_frame.attributes)))
+	{
+		memcpy(puts_this_frame.attributes, values, sizeof(puts_this_frame.attributes));
+		puts_this_frame.attributes_ref = data_ref(vk_data_put(values, sizeof(puts_this_frame.attributes)));
+		puts_this_frame.attributes_valid = TRUE;
+	}
+	return puts_this_frame.attributes_ref;
 }
 
 /* the vertices [first, first + count) of every stream the declaration reads, put, and the pipeline's bindings and attributes
@@ -3347,7 +3845,16 @@ static BOOL vertex_input_make(struct vk_command_draw *draw, unsigned long first,
 		}
 		else
 		{
-			draw->vertex_buffers[binding] = data_ref(vk_data_put(base, bytes));
+			/* (the game's static geometry: its copy on the host, at a stride a vertex buffer is read at safely) */
+			if (stride && !(stride & 3) && static_ref(base, bytes, FALSE, &draw->vertex_buffers[binding]))
+			{
+				stats.static_vertex += bytes;
+			}
+			else
+			{
+				draw->vertex_buffers[binding] = data_ref(vk_data_put(base, bytes));
+				stats.put_vertex += bytes; stats.n_vertex++;
+			}
 			state->bindings[binding].stride = (uint32_t)stride;
 			for (index = 0; index < declaration->element_count; index++)
 			{
@@ -3378,13 +3885,7 @@ static BOOL vertex_input_make(struct vk_command_draw *draw, unsigned long first,
 			if (declaration->packed_mask & (1UL << index))
 				memset(values[index], 0, sizeof(values[index]));
 		}
-		if (!puts_this_frame.attributes_valid || !words_equal(puts_this_frame.attributes, values, sizeof(values)))
-		{
-			memcpy(puts_this_frame.attributes, values, sizeof(values));
-			puts_this_frame.attributes_ref = data_ref(vk_data_put(values, sizeof(values)));
-			puts_this_frame.attributes_valid = TRUE;
-		}
-		draw->vertex_buffers[bindings] = puts_this_frame.attributes_ref;
+		draw->vertex_buffers[bindings] = attributes_put(values);
 		state->bindings[bindings].stride = 0;
 		for (index = 0; index < XGPU_VERTEX_ATTRIBUTE_COUNT; index++)
 		{
@@ -3638,6 +4139,17 @@ static void draw_make(D3DPRIMITIVETYPE type, unsigned long count, BOOL immediate
 	textures_make(&record, &key, texture_scale);
 	record.vertex_shader = vertex;
 	record.pixel_shader = pixel;
+	if (plasma_draw.bits & XGPU_PLASMA_MODEL_OCCLUSION)
+	{
+		record.plasma_occlusion = 1;
+		if (memcmp(plasma_images_told, plasma_draw.images, sizeof(plasma_images_told)))
+		{
+			struct vk_command_plasma_occlusion *command = stream_command(VK_COMMAND_PLASMA_OCCLUSION, sizeof(*command));
+
+			memcpy(command->images, plasma_draw.images, sizeof(command->images));
+			memcpy(plasma_images_told, plasma_draw.images, sizeof(plasma_images_told));
+		}
+	}
 	raster_state_make(&record, targets_told.color.kind != VK_SURFACE_NONE, has_depth);
 	record.state.topology = topology_of(type);
 
@@ -3667,24 +4179,43 @@ static void draw_make(D3DPRIMITIVETYPE type, unsigned long count, BOOL immediate
 	}
 	if (immediate)
 	{
+		unsigned long floats = device.immediate_columns * 4;
+		float values[XGPU_VERTEX_ATTRIBUTE_COUNT][4];
+		unsigned column;
+
 		/* (the fixed-function pipeline's: positions into clip space) */
-		if (device.fixed_function)
+		if (device.fixed_function && (device.immediate_mask & 1))
 		{
 			unsigned long vertex;
 
+			for (column = 0; device.immediate_registers[column] != 0; column++)
+				;
 			for (vertex = 0; vertex < count; vertex++)
-				fixed_function_transform(device.immediate_vertices + vertex * XGPU_VERTEX_ATTRIBUTE_COUNT * 4);
+				fixed_function_transform(device.immediate_vertices + vertex * floats + column * 4);
 		}
-		record.vertex_buffers[0] = data_ref(vk_data_put(device.immediate_vertices,
-			count * XGPU_VERTEX_ATTRIBUTE_COUNT * 4 * sizeof(float)));
-		record.state.binding_count = 1;
-		record.state.bindings[0].stride = XGPU_VERTEX_ATTRIBUTE_COUNT * 4 * sizeof(float);
+		/* the registers set since Begin, a vertex's columns; the others from their values, which the batch left as
+		they were */
+		record.vertex_buffers[0] = data_ref(vk_data_put(device.immediate_vertices, count * floats * sizeof(float)));
+		stats.put_immediate += count * floats * sizeof(float);
+		record.state.bindings[0].stride = (uint32_t)(floats * sizeof(float));
+		memcpy(values, device.attributes, sizeof(values));
 		for (stage = 0; stage < XGPU_VERTEX_ATTRIBUTE_COUNT; stage++)
 		{
+			/* (a column's register: its value here is never read, so it is left out of the comparison) */
+			if (device.immediate_mask & (1UL << stage))
+				memset(values[stage], 0, sizeof(values[stage]));
 			record.state.attributes[stage].format = VK_VERTEX_FORMAT_R32G32B32A32_SFLOAT;
-			record.state.attributes[stage].binding = 0;
+			record.state.attributes[stage].binding = 1;
 			record.state.attributes[stage].offset = (uint32_t)stage * 16;
 		}
+		for (column = 0; column < device.immediate_columns; column++)
+		{
+			record.state.attributes[device.immediate_registers[column]].binding = 0;
+			record.state.attributes[device.immediate_registers[column]].offset = (uint32_t)column * 16;
+		}
+		record.vertex_buffers[1] = attributes_put(values);
+		record.state.bindings[1].stride = 0;
+		record.state.binding_count = 2;
 	}
 	else if (!vertex_input_make(&record, first, vertices))
 	{
@@ -3700,7 +4231,15 @@ static void draw_make(D3DPRIMITIVETYPE type, unsigned long count, BOOL immediate
 			return;
 		}
 		record.indexed = 1;
-		record.index_data = data_ref(vk_data_put(indices, index_count * sizeof(WORD)));
+		if (indices == index_data && static_ref(indices, index_count * sizeof(WORD), TRUE, &record.index_data))
+		{
+			stats.static_index += index_count * sizeof(WORD);
+		}
+		else
+		{
+			record.index_data = data_ref(vk_data_put(indices, index_count * sizeof(WORD)));
+			stats.put_index += index_count * sizeof(WORD); stats.n_index++;
+		}
 		record.vertex_offset = index_data ? -(int32_t)minimum : 0;
 		record.count = (uint32_t)index_count;
 	}
@@ -3741,19 +4280,58 @@ void WINAPI D3DDevice_Begin(D3DPRIMITIVETYPE primitive_type)
 	device.immediate_active = TRUE;
 	device.immediate_type = primitive_type;
 	device.immediate_count = 0;
+	device.immediate_mask = 0;
+	device.immediate_columns = 0;
+}
+
+/* room for floats more floats of vertices; FALSE if there is none */
+static BOOL immediate_room(unsigned long floats)
+{
+	unsigned long needed = device.immediate_count * device.immediate_columns * 4 + floats;
+
+	if (needed > device.immediate_capacity)
+	{
+		unsigned long capacity = device.immediate_capacity ? device.immediate_capacity : 4096;
+		float *more;
+
+		while (capacity < needed)
+			capacity *= 2;
+		more = realloc(device.immediate_vertices, capacity * sizeof(float));
+		if (!more)
+			return FALSE;
+		device.immediate_vertices = more;
+		device.immediate_capacity = capacity;
+	}
+	return TRUE;
+}
+
+/* a register set for the first time since Begin becomes a column; the vertices made already get its value as it was
+before (it had not changed since Begin), each moved to the wider stride, the last first */
+static void immediate_column_add(int reg)
+{
+	unsigned long old = device.immediate_columns * 4, wide = old + 4, vertex;
+
+	if (!immediate_room(device.immediate_count * 4))
+		return;
+	for (vertex = device.immediate_count; vertex-- > 0;)
+	{
+		memmove(device.immediate_vertices + vertex * wide, device.immediate_vertices + vertex * old, old * sizeof(float));
+		memcpy(device.immediate_vertices + vertex * wide + old, device.attributes[reg], 4 * sizeof(float));
+	}
+	device.immediate_registers[device.immediate_columns++] = (unsigned char)reg;
+	device.immediate_mask |= 1UL << reg;
 }
 
 static void immediate_emit(void)
 {
-	unsigned long floats = XGPU_VERTEX_ATTRIBUTE_COUNT * 4;
+	float *at;
+	unsigned column;
 
-	if (device.immediate_count == device.immediate_capacity)
-	{
-		device.immediate_capacity = device.immediate_capacity ? device.immediate_capacity * 2 : 256;
-		device.immediate_vertices = realloc(device.immediate_vertices,
-			device.immediate_capacity * floats * sizeof(float));
-	}
-	memcpy(device.immediate_vertices + device.immediate_count * floats, device.attributes, floats * sizeof(float));
+	if (!immediate_room(device.immediate_columns * 4))
+		return;
+	at = device.immediate_vertices + device.immediate_count * device.immediate_columns * 4;
+	for (column = 0; column < device.immediate_columns; column++)
+		memcpy(at + column * 4, device.attributes[device.immediate_registers[column]], 4 * sizeof(float));
 	device.immediate_count++;
 }
 void WINAPI D3DDevice_End(void)
@@ -3764,6 +4342,39 @@ void WINAPI D3DDevice_End(void)
 	if (count)
 		draw_make(device.immediate_type, count, TRUE, NULL, 0);
 	device.immediate_count = 0;
+}
+
+void WINAPI D3DDevice_DrawVerticesImmediate(D3DPRIMITIVETYPE type, DWORD mask, CONST FLOAT *data, UINT count)
+{
+	unsigned long registers = (unsigned long)__builtin_popcountl(mask), reg, index;
+	const float *last;
+
+	if (!count || !(mask & 1) || (mask >> XGPU_VERTEX_ATTRIBUTE_COUNT))
+		return;
+	/* (End's draw from the vertices as they would be, a column a register) */
+	D3DDevice_Begin(type);
+	if (!immediate_room(count * registers * 4))
+	{
+		device.immediate_active = FALSE;
+		return;
+	}
+	for (reg = 0, index = 0; reg < XGPU_VERTEX_ATTRIBUTE_COUNT; reg++)
+	{
+		if (mask & (1UL << reg))
+			device.immediate_registers[index++] = (unsigned char)reg;
+	}
+	device.immediate_columns = (unsigned)registers;
+	device.immediate_mask = mask;
+	memcpy(device.immediate_vertices, data, count * registers * 4 * sizeof(float));
+	device.immediate_count = count;
+	/* (as the vertices would leave them, one at a time) */
+	last = data + (count - 1) * registers * 4;
+	for (reg = 0, index = 0; reg < XGPU_VERTEX_ATTRIBUTE_COUNT; reg++)
+	{
+		if (mask & (1UL << reg))
+			memcpy(device.attributes[reg], last + index++ * 4, 4 * sizeof(float));
+	}
+	D3DDevice_End();
 }
 
 static void set_attribute(INT reg, float a, float b, float c, float d)
@@ -3777,6 +4388,8 @@ static void set_attribute(INT reg, float a, float b, float c, float d)
 	}
 	if (reg < 0 || reg >= XGPU_VERTEX_ATTRIBUTE_COUNT)
 		return;
+	if (device.immediate_active && !(device.immediate_mask & (1UL << reg)))
+		immediate_column_add(reg);
 	device.attributes[reg][0] = a;
 	device.attributes[reg][1] = b;
 	device.attributes[reg][2] = c;
@@ -3901,6 +4514,8 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		puts_reset();
 		vk_texture_cache_begin_frame();
 		stats.presents++;
+		if (!(device.frame % 60))
+			static_check();
 		if (!statistics_read)
 		{
 			statistics_read = TRUE;
@@ -3912,6 +4527,13 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 				"%lu textured, %lu other", device.frame, stats.draws / stats.presents, stats.immediate_draws / stats.presents,
 				stats.skipped_no_program, stats.skipped_no_target, stats.skipped_shader, stats.skipped_texture,
 				stats.skipped_other);
+			platform_log("vk: puts a frame: vertex %llu KB (%lu), expanded %llu KB, index %llu KB (%lu), constants %llu KB (%lu), "
+				"parameters %llu KB, pixel %llu KB, immediate %llu KB; read from static copies: vertex %llu KB, index %llu KB",
+				stats.put_vertex / 1024 / stats.presents, stats.n_vertex / stats.presents,
+				stats.put_expanded / 1024 / stats.presents, stats.put_index / 1024 / stats.presents, stats.n_index / stats.presents,
+				stats.put_constants / 1024 / stats.presents, stats.n_constants / stats.presents, stats.put_parameters / 1024 / stats.presents,
+				stats.put_pixel / 1024 / stats.presents, stats.put_immediate / 1024 / stats.presents,
+				stats.static_vertex / 1024 / stats.presents, stats.static_index / 1024 / stats.presents);
 			memset(&stats, 0, sizeof(stats));
 		}
 	}

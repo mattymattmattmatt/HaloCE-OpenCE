@@ -24,6 +24,10 @@ header included; sizes are multiples of 4.
 
 #include "vk_shaders.h"
 
+/* the guest's command streams (d3d8_vk.c), written in turn: the host runs a stream on a thread of its own after
+host_vk_submit returns, which waits only until the stream the guest writes next is free (host_vk_render.c) */
+#define VK_COMMAND_STREAMS 3
+
 enum
 {
 	VK_COMMAND_TARGETS = 1,
@@ -45,6 +49,9 @@ enum
 	VK_COMMAND_HUD_PREPARE,
 	VK_COMMAND_HUD_FORGET,
 	VK_COMMAND_HUD_IMAGE,
+	VK_COMMAND_STATIC_FREE,
+	VK_COMMAND_DATA_PATCH,
+	VK_COMMAND_PLASMA_OCCLUSION,
 };
 
 /* a surface's kind, as the host makes its image */
@@ -196,6 +203,18 @@ struct vk_data_ref
 	uint32_t offset;
 };
 
+/* a data ref whose id has this bit names a static buffer (host_vk_static_make), the rest of the id its own: the game's
+geometry written once as a map loads, copied to the host once, not put at each draw */
+#define VK_DATA_STATIC 0x80000000u
+
+/* a static buffer let go (its range released or unloaded): the host destroys it once the frames that may use it have
+passed */
+struct vk_command_static_free
+{
+	struct vk_command_header header;
+	uint32_t id;
+};
+
 /* part of the data of an id: parts of one id come in order (part_offset 0, then the
 next, until total_size), possibly in different hand-overs, and the host places all of
 an id's parts contiguously. Followed by part_size bytes, the record padded to a
@@ -208,6 +227,23 @@ struct vk_command_data
 	uint32_t total_size;
 	uint32_t part_size;
 	uint32_t payload[];
+};
+
+/* a new data id (the next, as a VK_COMMAND_DATA's is) whose bytes are those of an earlier one of the frame, base, with
+count 16-byte pieces replaced, each at its offset: the vertex constants, of which a draw changes a few registers of 192 */
+struct vk_data_patch
+{
+	uint32_t offset;
+	uint32_t value[4];
+};
+
+struct vk_command_data_patch
+{
+	struct vk_command_header header;
+	uint32_t id;
+	uint32_t base;
+	uint32_t count;
+	struct vk_data_patch patches[];
 };
 
 /* the self-test's vertex: a position and a colour */
@@ -301,8 +337,21 @@ struct vk_command_draw
 	struct vk_data_ref index_data;
 	int32_t vertex_offset;
 	uint32_t count;
-	/* (the visibility tests are VK_COMMAND_VISIBILITY_*: the host knows a draw is in one from them) */
-	uint32_t reserved;
+	/* (the visibility tests are VK_COMMAND_VISIBILITY_*: the host knows a draw is in one from them)
+	1: its shaders are a model variant with occlusion (XGPU_PLASMA_MODEL_OCCLUSION), which reads the images
+	VK_COMMAND_PLASMA_OCCLUSION named last; 0 for every other draw */
+	uint32_t plasma_occlusion;
+};
+
+/* ---------- the dynamic lighting's visibility fields
+
+The images the model variants with occlusion read (VK_PLASMA_SET), until they change. Sent only for such a draw, so that
+nothing else's stream or binding changes. */
+
+struct vk_command_plasma_occlusion
+{
+	struct vk_command_header header;
+	uint32_t images[2];
 };
 
 /* Vulkan's formats, the numbers the vertex input uses */
@@ -336,6 +385,8 @@ struct vk_command_visibility_end
 	struct vk_command_header header;
 	uint32_t index;
 	float area;
+	/* the test's number at its slot (the low 32 bits), which host_vk_visibility gives with its count */
+	uint32_t test;
 };
 
 /* ---------- the mip composite (phase 6, step 5)
@@ -374,6 +425,9 @@ enum
 	VK_IMAGE_FORMAT_BC1, /* BC1 to BC3 as the Xbox keeps them */
 	VK_IMAGE_FORMAT_BC2,
 	VK_IMAGE_FORMAT_BC3,
+	/* ASTC 4x4 (16 bytes a block of 4x4 texels): DXT1 with its bits moved, where the device samples ASTC and not BC
+	(host_vk_astc_supported; dxt1_astc.h) */
+	VK_IMAGE_FORMAT_ASTC_4X4,
 };
 
 /* makes image id (the same description again keeps the image it has; another replaces it), its texels undefined until the

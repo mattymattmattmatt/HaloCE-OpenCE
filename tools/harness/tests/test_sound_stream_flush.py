@@ -15,6 +15,8 @@ NEGATIVE_CONTROLS = {
         "stream_complete_head(stream, head->finished ? XMEDIAPACKET_STATUS_SUCCESS : XMEDIAPACKET_STATUS_FLUSHED,"), "mixed-head"),
     "does-not-unlock-cache": (("sound_cache_sound_hardware_unlock(packet_context);", ""), "mixed-head"),
     "does-not-reset-resampler": (("resampler_reset(stream);", ""), "repeat"),
+    "mixed-while-flushed": (("stream->flushing = TRUE;", ""), "mixed-head"),
+    "left-flushing": (("stream->flushing = FALSE;", ""), "mixed-head"),
 }
 
 
@@ -22,7 +24,7 @@ def generated(fault=None):
     backend = read("port/linux/src/dsound_sdl.c")
     game = read("source/sound/sound_dsound_xbox.c")
     code = function(game, "dsound_channel_callback") + "\n" + function(game, "channel_stop") + "\n"
-    code += "\n".join(function(backend, name) for name in ["packet_release", "stream_complete_head",
+    code += "\n".join(function(backend, name) for name in ["samples_spare", "packet_release", "stream_complete_head",
         "streams_complete_finished", "stream_from_interface", "stream_flush"])
     if fault:
         code = mutated(code, *fault)

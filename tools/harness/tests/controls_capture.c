@@ -10,7 +10,8 @@ typedef int BOOL;
 #define pthread_mutex_unlock(lock) ((void)0)
 static Uint64 SDL_GetTicks(void){return 0;}
 struct widget_instance {
- char const *name; struct widget_instance *parent;
+ char const *name; struct widget_instance *parent, *child, *next;
+ short type;
  union {struct {short selected_index;} list;} parameters;
 };
 static struct widget_instance screen,spinner,row;
@@ -30,6 +31,11 @@ static void ui_widget_port_go_back(struct widget_instance *w){(void)w;went_back+
 static void halo_gamepad_capture_begin(void){}
 static int halo_gamepad_capture_poll(int *input){(void)input;return 0;}
 static void halo_gamepad_capture_end(void){}
+static char const *settings_profile_folder(void) { return NULL; }
+static int config_profile_text(const char *folder, const char *n, char *t, unsigned size)
+{ (void)folder; snprintf(t, size, "%s", config_string(n)); return 1; }
+static int config_profile_write(const char *folder, const char *n, const char *v)
+{ (void)folder; return config_write(n, v); }
 #include "under_test.inc"
 /* sdl_platform.c's key event while a binding is waited for */
 static void key_down(int scancode,int result)

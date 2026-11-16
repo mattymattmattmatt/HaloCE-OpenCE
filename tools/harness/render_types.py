@@ -17,4 +17,14 @@ def transparent_types():
         declarations.append(enum_with(text, member))
     text = read("source/rasterizer/rasterizer_geometry.h")
     declarations += [enum_with(text, "_rasterizer_vertex_type_environment_uncompressed"), enum_with(text, "_triangle_buffer_type_triangles")]
+    # Field-style accessors: the extracted game functions use these macros, which
+    # call helper functions under HALO_ANDROID / HALO_MOVABLE_WINDOW.
+    declarations += [
+        "#define VERTEX_BUFFER_HARDWARE_FORMAT(buffer) ((buffer)->hardware_format)",
+        "#define TRIANGLE_BUFFER_HARDWARE_FORMAT(buffer) ((buffer)->hardware_format)",
+        "#define VERTEX_BUFFER_BASE_ADDRESS(buffer) ((buffer)->base_address)",
+        "#define TRIANGLE_BUFFER_BASE_ADDRESS(buffer) ((buffer)->base_address)",
+        "#define TAG_BLOCK_ADDRESS(block) ((block).address)",
+        "#define TAG_BLOCK_ADDRESS_AT(block) ((block)->address)",
+    ]
     return "\n".join(declarations)

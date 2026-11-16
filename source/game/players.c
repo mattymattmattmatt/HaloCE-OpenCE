@@ -228,6 +228,7 @@ symbols in this file:
 /* ---------- headers */
 
 #include "cseries.h"
+#include "mcc_player.h" /* port: port/linux/game/mcc_player.h */
 #include "infection.h" /* port: port/linux/game/infection.c */
 #include "cseries/errors.h"
 #include "cseries/profile.h"
@@ -241,6 +242,7 @@ symbols in this file:
 #include "coop_allies.h" /* port: port/linux/game/coop_allies.c */
 #include "manual_respawn.h" /* port: port/linux/game/manual_respawn.c */
 #include "bots.h" /* port: port/linux/game/bots.c */
+#include "server_team_switch.h" /* port: port/linux/game/server_team_switch.c */
 #include "cutscene/cinematics.h" /* port: network co-op's first spawns */
 #include "editor/editor_stubs.h"
 #include "effects/effects.h"
@@ -284,6 +286,7 @@ symbols in this file:
 #include "units/vehicle_definitions.h"
 #include "units/vehicles.h"
 #include "network_replay.h" /* port: port/linux/game/network_replay_playback.c */
+#include "mcc_seats.h" /* port: port/linux/game/mcc_seats.c */
 
 /* network_game_globals.c's */
 boolean network_game_distributed_client(void);
@@ -620,6 +623,10 @@ void players_initialize_for_new_map(
 		sizeof(machine_to_player_table));
 	/* port: the bots of local games (port/linux/game/bots.c) */
 	bots_initialize_for_new_map();
+	/* port: a dedicated server's !switch: no cooldown or move is kept from
+	the last map, whose player indices this map's reuse
+	(server_team_switch.c) */
+	server_team_switch_initialize_for_new_map();
 
 	return;
 }
@@ -711,6 +718,17 @@ long find_unused_local_player_index(
 void player_delete(
 	long player_index)
 {
+	short local_player_index;
+
+	/* port: a local player of the player deleted (one who quit, whose slot
+	another player takes: network_game_spawn_player) is no one's: else the
+	slot would name a datum gone, and local_player_set_player_index would
+	get it */
+	for (local_player_index = 0; local_player_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS; local_player_index++)
+	{
+		if (players_globals->local_players[local_player_index] == player_index)
+			players_globals->local_players[local_player_index] = NONE;
+	}
 	datum_delete(
 		player_data,
 		player_index);
@@ -1874,7 +1892,7 @@ static void players_compute_combined_pvs(
 		/* port: a replay's playback has no local player: what its view sees is
 		the local players' (the effects and particles made where they can be
 		seen: port/linux/game/network_replay_playback.c) */
-		if (local_player_only && network_replay_playing())
+		if (local_player_only && network_replay_viewing())
 		{
 			struct observer_result const *camera = network_replay_camera();
 
@@ -1977,6 +1995,9 @@ static boolean player_handle_action(
 	case _player_action_result_evict_from_vehicle:
 	{
 		long nearby_unit_index;
+		/* port: MCC biped seats use host-validated interaction. */
+		if (mcc_seat_action(player_index, player->action_object_index, player->action_seat_index))
+			break;
 
 		if (unit_can_enter_seat(
 			player->unit_index,
@@ -4344,6 +4365,10 @@ static void player_examine_nearby_unit(
 	long player_index,
 	long unit_index)
 {
+	/* port: the legacy biped interaction remains empty outside MCC. */
+	short seat_index;
+	if (mcc_seat_nearby(player_index, unit_index, &seat_index))
+		player_set_action_result(player_index, _player_action_result_enter_vehicle, unit_index, seat_index);
 	return;
 }
 
@@ -4925,6 +4950,8 @@ void player_add_equipment(
 				starting_profile->starting_shield_modifier;
 			unit->object.body_vitality +=
 				starting_profile->starting_health_modifier;
+			/* port: MCC's expanded grenade types of the starting profile */
+			mcc_player_profile_grenades(unit_index, starting_profile, reset_equipment);
 			unit = (struct unit_datum *)unit->unit.grenade_counts;
 			starting_profile =
 				(struct scenario_starting_profile *)starting_profile->grenade_counts;
@@ -5082,6 +5109,8 @@ void players_update_before_game(
 				(NONE == action->desired_weapon_index) ||
 				((action->desired_weapon_index >= 0) &&
 				(action->desired_weapon_index <= MAXIMUM_WEAPONS_PER_UNIT)));
+			/* port: MCC's grenade types go beyond the legacy table's */
+			if (!mcc_player_choice_supported(action->desired_grenade_index))
 			match_assert(
 				"c:\\halo\\SOURCE\\game\\players.c",
 				0x261,
@@ -5230,6 +5259,8 @@ void players_update_before_game(
 						(NONE == control_data.weapon_index) ||
 						((control_data.weapon_index >= 0) &&
 						(control_data.weapon_index <= MAXIMUM_WEAPONS_PER_UNIT)));
+					/* port: MCC's grenade types go beyond the legacy table's */
+					if (!mcc_player_choice_supported(control_data.grenade_index))
 					match_assert(
 						"c:\\halo\\SOURCE\\game\\players.c",
 						0x2E4,

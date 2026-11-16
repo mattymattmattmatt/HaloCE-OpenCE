@@ -7,7 +7,7 @@ A dedicated server's gametype files (server_toml.h).
 #include "server_toml.h"
 #include "server_mode.h"
 
-#if HALO_SERVER_BUILD
+#if HALO_HOST_BUILD
 
 #include "platform.h"
 #include "port_config.h"
@@ -192,7 +192,7 @@ int server_gametype_file_parse(const char *text, int length, struct server_gamet
 			{
 				if (file->rule_count >= SERVER_RULES_MAXIMUM)
 				{
-					ok = gametype_error(file, rule_value.lineno, "more than %s rules%s", "48", "");
+					ok = gametype_error(file, rule_value.lineno, "more than %s rules%s", "64", "");
 					break;
 				}
 				file->rule_count++;

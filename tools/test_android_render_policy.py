@@ -124,7 +124,8 @@ def test_policy_is_selected_before_game_resources():
     start = function((ROOT / "port/android/guest/runtime/guest_start.c").read_text(), "__guest_start")
     assert start.index("__guest_thread_initialize_main();") < start.index("android_render_policy_initialize();")
     assert start.index("android_render_policy_initialize();") < start.index("(*constructor)();") < start.index("result = main(")
-    imports = (ROOT / "port/android/host_imports.list").read_text().splitlines()
+    imports = ((ROOT / "port/android/host_imports.list").read_text().splitlines()
+               + (ROOT / "port/android/android_imports.list").read_text().splitlines())
     assert imports.count("host_android_chip_family") == 1
 
 
@@ -144,12 +145,14 @@ def test_texture_dispatch_boundaries(tmp_path, enabled, ce, cached, valid, loads
 #define _bitmap_cached_bit 0
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
 struct bitmap_data { int flags, pixels_size; };
-static int ce, valid, android_texture_fixes, loads, legacy;
+static int ce, mcc, valid, android_texture_fixes, loads, legacy;
+static int mcc_cache_tags_loaded(void) { return mcc; }
 static int custom_edition_cache_tags_loaded(void) { return ce; }
 static int texture_cache_bitmap_valid(struct bitmap_data *b) { return valid; }
 static int rasterizer_xbox_bitmap_get_pixel_data_size(struct bitmap_data *b) { return 1024; }
 static void texture_cache_read_android_ce(struct bitmap_data *b, void *p) {}
 static void *android_ce_texture_get(struct bitmap_data *b, int size, int load, void (*read)(struct bitmap_data *,void *)) { loads++; return b; }
+static int android_ce_texture_enabled(void) { return 1; }
 static void dispatch(struct bitmap_data *bitmap) {
  void *hardware_format = NULL;
  int load = 1;

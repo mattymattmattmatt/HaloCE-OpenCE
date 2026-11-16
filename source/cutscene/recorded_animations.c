@@ -106,6 +106,7 @@ symbols in this file:
 #include "units/unit_control_data.h"
 #include "units/units.h"
 #include "units/vehicles.h"
+#include "mcc_recordings.h" /* port: port/linux/game/mcc_recording_control.c */
 
 /* ---------- constants */
 
@@ -254,6 +255,24 @@ void recorded_animations_dispose(
 	}
 
 	return;
+}
+
+/* port: a thread's place in its animation's event stream, which is the
+map's tag data (game_state.c's game_state_image_relocate) */
+boolean recorded_animations_port_relocate(
+	struct game_state_relocation const *relocation)
+{
+	long index;
+
+	for (index = 0; index < animation_threads->maximum_count; index++)
+	{
+		struct animation_thread *thread = game_state_relocation_element(relocation, animation_threads, index);
+
+		if (thread)
+			game_state_relocate(relocation, &thread->event_stream);
+	}
+
+	return TRUE;
 }
 
 void recorded_animations_dispose_from_old_map(
@@ -745,6 +764,10 @@ static boolean recorded_animation_play_internal(
 						(byte const *)TAG_DATA_ADDRESS(animation->event_stream) + animation->event_stream.size);
 
 					unit_set_actively_controlled(unit_index, TRUE);
+
+					/* port: MCC weapon-only recordings inherit the target's directions.
+					The private playback controller is only available here. */
+					mcc_recording_control_begin(unit_index, animation, &thread->controller);
 					SET_FLAG(
 						thread->flags,
 						_recording_thread_unit_was_controlled_bit,

@@ -37,6 +37,7 @@ void host_memory_report(const char *when);
 int host_texture_cache_get(uint64_t key, uint32_t buffer, uint32_t size);
 void host_texture_cache_put(uint64_t key, uint32_t buffer, uint32_t size);
 void host_texture_cache_clear(void);
+void host_texture_cache_prefetch(uint32_t items, uint32_t count);
 void host_texture_cache_report(void);
 /* puts back the clocks host_sdl2.c raised for the game */
 void host_restore_clocks(void);
@@ -51,6 +52,14 @@ int host_errno(void);
 /* the end of a frame on the thread that presents: the datagrams it held to
 send together are sent (host_net.c) */
 void host_net_frame_end(void);
+/* the guest's use of the card, logged with the profiler on (host_syscall.c) */
+void host_sd_activity_start(int on);
+void host_sd_activity_frame(void);
+/* whether the calling thread is the game's (host_thread.c) */
+int host_on_game_thread(void);
+/* (another thread's bulk transfer, before it takes the card's lock: the game
+thread's use of the card first, host_main.c) */
+void host_sd_defer_to_game(void);
 void host_sd_lock(void);
 void host_sd_unlock(void);
 /* write the SD card's journal, so a file closed by the guest is still there
@@ -79,27 +88,9 @@ void host_dk_frame_report(struct host_dk_frame_report *report);
 /* the host descriptor behind a guest one, or -1 (host_syscall.c) */
 int host_guest_fd(int guest_fd);
 
-/* the game's map cache files kept in memory (host_memory_files.c): a path's
-slot, or -1; an open gives a descriptor of HOST_MEMORY_FILE_DESCRIPTOR and
-up; the rest take one and answer as the system calls do, a negated errno
-on failure */
-#define HOST_MEMORY_FILE_DESCRIPTOR 0x40000000
-struct stat;
-struct timespec;
-int host_memory_file_path(const char *path);
-int host_memory_file_is(int descriptor);
-int host_memory_file_open(int slot, const char *path, int flags);
-int host_memory_file_close(int descriptor);
-long long host_memory_file_read(int descriptor, void *buffer, size_t count);
-long long host_memory_file_write(int descriptor, const void *buffer, size_t count);
-long long host_memory_file_pread(int descriptor, void *buffer, size_t count, long long offset);
-long long host_memory_file_pwrite(int descriptor, const void *buffer, size_t count, long long offset);
-long long host_memory_file_seek(int descriptor, long long offset, int whence);
-int host_memory_file_truncate(int descriptor, long long size);
-int host_memory_file_fstat(int descriptor, struct stat *out);
-int host_memory_file_stat(int slot, const char *path, struct stat *out);
-int host_memory_file_unlink(int slot, const char *path);
-int host_memory_file_set_times(int slot, const struct timespec *times);
+/* the game's map cache files kept in memory (host_memory_files.c, shared
+with Android's and the PS5's hosts) */
+#include "../../android/host/host_memory_files.h"
 
 /* logs, shows the message to the player and terminates */
 void host_fatal(const char *format, ...) __attribute__((format(printf, 1, 2), noreturn));
@@ -131,12 +122,18 @@ void host_memory_hold_image_range(void);
 is, so libnx's thread stacks and the host's first mappings do not take it
 (host_memory.c) */
 void host_memory_hold_window_range(void);
+/* maps MCC's tag window (0x50000000, 64 MB) from the start of main, for the
+whole run, so no thread's local storage, window or pool takes it; the guest
+is handed it by host_mcc_memory_reserve (host_memory.c) */
+void host_memory_hold_mcc_range(void);
 /* logs where the kernel put the process's address space, heap, alias and
  * stack regions (host_memory.c) */
 void host_memory_log_regions(void);
 /* whether the guest's memory below 4 GB has to be code memory, svcMapMemory
  * mapping nowhere there (host_mman.c) */
 int host_mman_low_code_mode(void);
+/* the end of the range below 4 GB that guest memory can be mapped in */
+uint64_t host_mman_guest_limit(void);
 
 /* Whether this port has set [address, address+size) aside, for the image, a
  * pool or the window. host_mman's allocator asks this before handing an
@@ -267,6 +264,8 @@ int host_dk_hud_decode(const unsigned char *data, uint32_t size, struct host_dk_
 the present of the frame before it (host_dk_pace, from the stand-in
 window's swap) */
 extern int host_dk_frame_pacing;
+/* debug.frame_pace_ahead: the frames the game may be ahead of the presents, 1 or 0 */
+extern int host_dk_pace_ahead;
 void host_dk_pace(void);
 /* debug.gpu_experiment: what-ifs that measure what part of the GPU's time a
 change could take back, comma-separated: "no_compression" (render targets

@@ -635,6 +635,30 @@ void effects_initialize_for_new_map(
 	return;
 }
 
+/* port: an effect's impulse field names a procedure and what it is given,
+which no caller sets (every effect is made with none); one that has them
+cannot be moved to another run's addresses, so its saved game is not taken
+(game_state.c's game_state_image_relocate) */
+boolean effects_port_relocate(
+	struct game_state_relocation const *relocation)
+{
+	long index;
+
+	for (index = 0; index < effect_data->maximum_count; index++)
+	{
+		struct effect_datum const *effect = game_state_relocation_element(relocation, effect_data, index);
+
+		if (effect && (effect->impulse_field.user_data || effect->impulse_field.translational_function ||
+			effect->impulse_field.angular_function))
+		{
+			error(2, "the saved game is not taken: effect %ld has an impulse field", index);
+			return FALSE;
+		}
+	}
+
+	return TRUE;
+}
+
 void effects_dispose_from_old_map(
 	void)
 {
@@ -692,6 +716,47 @@ void effect_delete(
 	}
 
 	return;
+}
+
+/* port: a client checkpoint boundary retires delayed damage and object
+creation from its discarded prediction. Use the same validated part classes
+as effect_generate_part; the deterministic flag also covers harmless lights. */
+void effects_discard_gameplay(void)
+{
+	long effect_index;
+
+	if (!effect_data || !effect_data->valid)
+		return;
+	for (effect_index = data_next_index(effect_data, NONE);
+		effect_index != NONE;
+		effect_index = data_next_index(effect_data, effect_index))
+	{
+		struct effect_definition *definition = effect_definition_get(effect_get(effect_index)->definition_index);
+		boolean gameplay = FALSE;
+		short event_index;
+
+		for (event_index = 0; event_index < definition->events.count && !gameplay; event_index++)
+		{
+			struct effect_event_definition *event = TAG_BLOCK_GET_ELEMENT(
+				&definition->events, event_index, struct effect_event_definition);
+			short part_index;
+
+			for (part_index = 0; part_index < event->parts.count; part_index++)
+			{
+				struct effect_part_definition *part = TAG_BLOCK_GET_ELEMENT(
+					&event->parts, part_index, struct effect_part_definition);
+
+				if (part->reference.index != NONE && (part->runtime_base_class_tag == OBJECT_DEFINITION_TAG ||
+					part->runtime_base_class_tag == DAMAGE_EFFECT_DEFINITION_TAG))
+				{
+					gameplay = TRUE;
+					break;
+				}
+			}
+		}
+		if (gameplay)
+			effect_delete(effect_index);
+	}
 }
 
 long effect_new_attached_from_markers(

@@ -46,8 +46,8 @@ import java.util.zip.ZipInputStream;
  * the latest release when it starts, on a thread of its own, and if it is
  * newer asks the player whether to update:
  *
- * - Yes: the release's app (halo-android-release.zip or -debug.zip) is
- *   downloaded and handed to Android's package installer, which replaces the
+ * - Yes: the release's app (slipstreamce-android-release.zip or -debug.zip; the old
+ *   package's are the bridge: Migration.java) is downloaded and handed to Android's package installer, which replaces the
  *   game (closing it) and offers to open the new version.
  * - No: nothing, until the next start.
  * - Do not ask again: after the player confirms it, update.auto = false is
@@ -85,16 +85,18 @@ final class Updater {
 
     /* ---------- the open-source Vulkan driver for Adreno GPUs
 
-    On an Adreno, the Turnip build (Mesa's Vulkan driver for Adreno) for its series is downloaded into the data folder when it
-    is not there, from the project that releases it (port/android/README.md, "Graphics: OpenGL ES and Vulkan"). The download
+    On an Adreno, the Turnip build (Mesa's Vulkan driver for Adreno) for its series is downloaded into the data folder's
+    freedreno_drivers when it is not there (one downloaded before into the data folder itself is moved there), where Video
+    Setup lists every archive as a driver to choose (port/linux/game/menu_functions.c), from the project that releases it (port/android/README.md, "Graphics: OpenGL ES and Vulkan"). The download
     must have the size and SHA-256 of the build that was chosen, or it is dropped. Every build looks, whatever update.auto says:
     the driver is not an update of the game. LauncherActivity does it before the game starts, with the download's progress on
     screen, so that the game finds the driver on its first start.
 
     Which archive is this phone's is decided once, from the GPU's name, and written to vk_driver_auto.txt in the data folder
-    (the archive's name, or an empty line for a GPU that has none): display.vk_driver = "auto" is that archive
-    (port/android/host/host_vk_driver.c), so that a player turns Turnip on with one setting. The default driver is the
-    phone's own (display.vk_driver = ""): the archive is downloaded, not used, until the player sets "auto". */
+    (the archive's name, or an empty line for a GPU that has none), so that it is not decided again. The default driver
+    is the phone's own (display.vk_driver = ""): the archive is downloaded, not used, until the player chooses it by its
+    name in Video Setup, as any other archive in freedreno_drivers. (display.vk_driver = "auto", which was this archive,
+    is the phone's own driver now: port_config.c writes "" over it.) */
 
     static final class Driver {
         final String name, url, sha256, series;
@@ -122,6 +124,24 @@ final class Updater {
             "27e400a39cae06ac22695d74b837449868f712c679662c5793776bd575eca3bd", 800, 899, "8xx"),
     };
     private static final String AUTO_FILE = "vk_driver_auto.txt";
+    static final String DRIVER_FOLDER = "freedreno_drivers";
+
+    /** where an archive goes: the data folder's freedreno_drivers (made, and the archive moved there from the data folder
+     * if it was downloaded there before) */
+    private static File driverFile(File root, Driver driver) {
+        File folder = new File(root, DRIVER_FOLDER);
+        File archive = new File(folder, driver.name);
+        File old = new File(root, driver.name);
+
+        if (!folder.isDirectory() && !folder.mkdirs())
+            android.util.Log.i("halo", "driver: could not make " + folder);
+        if (old.length() == driver.size && archive.length() != driver.size) {
+            archive.delete();
+            if (old.renameTo(archive))
+                android.util.Log.i("halo", "driver: moved " + driver.name + " into " + DRIVER_FOLDER);
+        }
+        return archive;
+    }
 
     private static Driver driverNamed(String name) {
         for (Driver driver : DRIVERS) {
@@ -141,7 +161,7 @@ final class Updater {
             return false;
         Driver driver = driverNamed(lines.get(0).trim());
 
-        return driver == null || new File(root, driver.name).length() == driver.size;
+        return driver == null || driverFile(root, driver).length() == driver.size;
     }
 
     /** the GPU's name, and this phone's archive (null for a GPU that has none) */
@@ -183,15 +203,16 @@ final class Updater {
         return new Choice(renderer, chosen);
     }
 
-    /** whether an archive is in the data folder at root */
+    /** whether an archive is in the data folder at root's freedreno_drivers */
     static boolean driverPresent(File root, Driver driver) {
-        return new File(root, driver.name).length() == driver.size;
+        return driverFile(root, driver).length() == driver.size;
     }
 
-    /** the archive downloaded into root (as a .partial file, renamed once it is checked); throws why it could not be */
+    /** the archive downloaded into root's freedreno_drivers (as a .partial file, renamed once it is checked); throws why it
+     * could not be */
     static void driverDownload(File root, Driver driver, String gpu, Progress progress) throws Exception {
-        File archive = new File(root, driver.name);
-        File partial = new File(root, driver.name + ".partial");
+        File archive = driverFile(root, driver);
+        File partial = new File(archive.getParentFile(), driver.name + ".partial");
 
         try {
             android.util.Log.i("halo", "driver: downloading " + driver.url + " for the " + gpu);
@@ -201,7 +222,7 @@ final class Updater {
             archive.delete();
             if (!partial.renameTo(archive))
                 throw new IOException("it could not be renamed to " + archive);
-            android.util.Log.i("halo", "driver: " + driver.name + " is in the data folder");
+            android.util.Log.i("halo", "driver: " + driver.name + " is in " + DRIVER_FOLDER);
         } catch (Exception e) {
             partial.delete();
             android.util.Log.i("halo", "driver: could not download " + driver.name + ": " + e);
@@ -445,8 +466,8 @@ final class Updater {
         if (activity.isFinishing())
             return;
         new AlertDialog.Builder(activity)
-            .setTitle("Halo: new version")
-            .setMessage("A new version of Halo was detected (build " + latest + "; this is build "
+            .setTitle("SlipstreamCE: new version")
+            .setMessage("A new version of SlipstreamCE was detected (build " + latest + "; this is build "
                 + BuildConfig.HALO_BUILD_NUMBER + ").\n\nDo you want to update? The game will close and start "
                 + "the new version.")
             .setCancelable(false)
@@ -458,7 +479,7 @@ final class Updater {
 
     private static void confirmNever(Activity activity) {
         new AlertDialog.Builder(activity)
-            .setTitle("Halo: new version")
+            .setTitle("SlipstreamCE: new version")
             .setMessage("Stop asking about new versions?\n\nTo ask again, set auto = true in the [update] section "
                 + "of config.toml.")
             .setCancelable(false)
@@ -474,9 +495,31 @@ final class Updater {
 
     /* ---------- updating */
 
+    /** The bridge's way on: the latest release's new app, downloaded and handed to the installer. */
+    static void downloadNewApp(Activity activity, Runnable failed) {
+        new Thread(() -> {
+            int latest = latestRelease();
+
+            if (activity.isFinishing())
+                return;
+            activity.runOnUiThread(() -> {
+                if (latest > 0)
+                    update(activity, latest);
+                else
+                    failed.run();
+            });
+        }, "new app check").start();
+    }
+
     private static void update(Activity activity, int latest) {
-        String asset = "halo-android-" + (BuildConfig.DEBUG ? "debug" : "release") + ".zip";
+        String asset = "slipstreamce-android-" + (BuildConfig.DEBUG ? "debug" : "release") + ".zip";
         File directory = new File(activity.getCacheDir(), UpdateProvider.DIRECTORY);
+        // (a bridge whose player said no at the installer has it already, and is not to download it at each start)
+        File kept = new File(directory, "build-" + latest);
+        if (BuildConfig.HALO_BRIDGE && kept.exists() && new File(directory, UpdateProvider.APK).length() > 0) {
+            install(activity);
+            return;
+        }
         LinearLayout layout = new LinearLayout(activity);
         TextView status = new TextView(activity);
         ProgressBar bar = new ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal);
@@ -490,7 +533,7 @@ final class Updater {
         layout.addView(status);
         layout.addView(bar);
         AlertDialog progress = new AlertDialog.Builder(activity)
-            .setTitle("Halo: new version")
+            .setTitle("SlipstreamCE: new version")
             .setView(layout)
             .setCancelable(false)
             .show();
@@ -509,6 +552,7 @@ final class Updater {
                     }));
                 extractApk(zip, apk);
                 zip.delete();
+                kept.createNewFile();
                 activity.runOnUiThread(() -> {
                     progress.dismiss();
                     install(activity);
@@ -518,7 +562,7 @@ final class Updater {
                 activity.runOnUiThread(() -> {
                     progress.dismiss();
                     new AlertDialog.Builder(activity)
-                        .setTitle("Halo: new version")
+                        .setTitle("SlipstreamCE: new version")
                         .setMessage("The update failed:\n\n" + e.getMessage())
                         .setPositiveButton("OK", null)
                         .show();

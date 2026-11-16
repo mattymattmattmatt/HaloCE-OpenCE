@@ -123,6 +123,7 @@ struct game_options;
 #include "gore.h"
 #include "manual_respawn.h" /* port: port/linux/game/manual_respawn.c */
 #include "hud_toggle.h" /* port: port/linux/game/hud_toggle.c */
+#include "map_share.h" /* port: port/linux/game/map_share.c */
 #include "game_modes.h" /* port: port/linux/game/game_modes.c */
 #include "ai/ai.h"
 #include "bink/bink_playback.h"
@@ -185,8 +186,10 @@ struct game_options;
 #include "structures/structures.h"
 #include "units/units.h"
 #include "units/vehicles.h"
+#include "units/bipeds.h" /* port: bipeds_riding_latch */
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "biped_ragdoll.h" /* port: port/linux/game/biped_ragdoll.c */
+#include "mcc_loading.h" /* port: port/linux/game/mcc_loading.c */
 #ifdef HALO_PROFILE
 #include "profile_console.h" /* port: port/linux/game/profile_console.c */
 #endif
@@ -437,6 +440,11 @@ void game_initial_pulse(
 {
 	struct data_iterator iterator;
 
+	/* port: the map's declared value before scripts run; a load must not read
+	it again (vehicle_riding.c) */
+	vehicle_riding_map_start();
+	bipeds_riding_latch();
+
 	data_iterator_new(&iterator, player_data);
 	while (data_iterator_next(&iterator))
 		game_engine_player_added(iterator.datum_index);
@@ -643,6 +651,7 @@ boolean game_load(
 		game_options_verify(options));
 
 	random_seed_debug_log(TRUE);
+	mcc_loading_begin(options->map_name); /* port: no-op for Xbox/CE loads */
 	csmemcpy(&game_globals->options, options, sizeof(*options));
 	{
 		/* port: how long the map's load takes once it is in the cache, in the port's log */
@@ -656,6 +665,7 @@ boolean game_load(
 		platform_log("map load: %s: scenario_load %lu ms", options->map_name, GetTickCount() - started);
 	}
 
+	mcc_loading_end(game_globals->map_loaded); /* port: includes failed MCC loads */
 	return game_globals->map_loaded;
 }
 
@@ -780,7 +790,12 @@ void game_unload(
 
 		ui_widgets_close_all();
 		if (map_status == 2)
-			display_error_damaged_media();
+		{
+			if (map_share_blocks_load(NULL))
+				error(_error_silent, "map sharing: not treating a missing shared map as damaged media");
+			else
+				display_error_damaged_media();
+		}
 		cache_files_precache_map_end();
 	}
 
@@ -848,6 +863,16 @@ void game_precache_new_map(
 {
 	long map_status;
 
+	/* port: a map-share download in progress or a failed/incomplete share
+	must not enter a blocking precache or the damaged-disc death loop */
+	if (map_share_blocks_load(map_name))
+	{
+		error(_error_silent,
+			"map sharing: not precaching %s (download in progress or incomplete)",
+			map_name ? map_name : "");
+		return;
+	}
+
 	if (!cache_files_precache_map_loaded(map_name))
 	{
 		if (cache_files_precache_in_progress() &&
@@ -878,12 +903,22 @@ void game_precache_new_map(
 					0xF9,
 					FALSE,
 					"read the last error message for which map failed to load");
+				/* port: do not spin in a blocking precache that never started,
+				and do not then treat the missing map as a damaged disc */
+				return;
 			}
 		}
 
 		cache_files_precache_set_priority(blocking);
 		if (blocking)
 		{
+			if (!cache_files_precache_in_progress() ||
+				!cache_files_precache_is_copying_map(map_name))
+			{
+				error(_error_silent, "map '%s' is not being precached; not waiting for it",
+					map_name);
+				return;
+			}
 			struct game_runtime_globals_prefix *globals = game_globals;
 			/* port: (for the loading screen's time, below) */
 			unsigned long loading_started = GetTickCount();
@@ -950,7 +985,16 @@ void game_precache_new_map(
 			}
 			ui_widgets_close_all();
 			if (map_status == _cached_map_file_failed)
+			{
+				if (map_share_blocks_load(map_name))
+				{
+					error(_error_silent, "map sharing: not treating a missing shared map as damaged media");
+					cache_files_precache_map_end();
+					globals->map_load_in_progress = FALSE;
+					return;
+				}
 				display_error_damaged_media();
+			}
 			cache_files_precache_map_end();
 			match_assert(
 				"c:\\halo\\SOURCE\\game\\game.c",

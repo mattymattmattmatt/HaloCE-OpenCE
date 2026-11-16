@@ -74,7 +74,9 @@ symbols in this file:
 #include "scenario/scenario_definitions.h"
 #include "text/draw_string.h"
 #include "text/text_group.h"
+#include "mcc_hud_draw.h" /* port: port/linux/game/mcc_hud_draw.c */
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
+#include "custom_campaigns.h" /* port: port/linux/game/custom_campaigns.c */
 
 /* ---------- constants */
 
@@ -293,6 +295,29 @@ void cinematic_set_title_delayed(
 	return;
 }
 
+/* port: a custom campaign's chapter titles, each logged the first time it
+is drawn or why it is not, while they are new to the port
+(docs/custom_campaigns.md) */
+static void cinematic_title_note(
+	short title_index,
+	char const *problem)
+{
+	static short noted_title = NONE;
+	static char const *noted_problem;
+	struct scenario_cutscene_title *title;
+
+	if (!custom_campaign_kind() || (title_index == noted_title && problem == noted_problem))
+		return;
+	noted_title = title_index;
+	noted_problem = problem;
+	title = TAG_BLOCK_GET_ELEMENT(
+		&global_scenario_get()->cutscene_chapter_titles,
+		title_index,
+		struct scenario_cutscene_title);
+	error(_error_silent, "custom campaign: chapter title %d '%s' %s%s", title_index, title->name,
+		problem ? "skipped: " : "drawn", problem ? problem : "");
+}
+
 void cinematic_render(
 	void)
 {
@@ -377,7 +402,10 @@ void cinematic_render(
 
 			font_index = hud_globals->messaging.single_player_font.index;
 			if (font_index == NONE)
+			{
+				cinematic_title_note(active_title->title_index, "the HUD has no single player font");
 				continue;
+			}
 
 			title = TAG_BLOCK_GET_ELEMENT(
 				&global_scenario_get()->cutscene_chapter_titles,
@@ -387,15 +415,20 @@ void cinematic_render(
 			help_text_tag_index =
 				global_scenario_get()->ingame_help_text.index;
 			if (help_text_tag_index == NONE)
+			{
+				cinematic_title_note(active_title->title_index, "the scenario has no ingame help text");
 				continue;
+			}
 
 			string_list =
 				unicode_string_list_definition_get(help_text_tag_index);
 			if (title->text_index < 0 ||
 				title->text_index >= string_list->strings.count)
 			{
+				cinematic_title_note(active_title->title_index, "its text is past the help text's strings");
 				continue;
 			}
+			cinematic_title_note(active_title->title_index, ui_widgets_active() ? "not drawn: a menu is up" : NULL);
 
 			title_bounds = &title->bounds;
 			fade_amount = 1.0f;
@@ -463,15 +496,37 @@ void cinematic_render(
 					(title->shadow_color & 0x00FFFFFF));
 
 				{
-					/* the bounds are for 640 columns: on a wider screen move
-					them so they keep their place relative to its sides */
+					/* port: the bounds are for 640 columns: on a wider screen
+					move them so the edge the text is justified to (its middle,
+					if centered) keeps its place relative to the screen's sides,
+					where the Xbox's 4:3 picture had it. Moving the middle of a
+					right-justified title's box (most chapter titles: a box from
+					near the left edge) left the text short of the right side.
+					The justification is draw_string.c's: 0 left, 1 right,
+					2 center */
 					static rectangle2d wide_bounds;
-					short shift = (short)(((title_bounds->x0 + title_bounds->x1) / 2) *
-						(halo_screen_width() - 640) / 640);
+					short anchor;
+					short shift;
+
+					switch (title->justification)
+					{
+					case 0:
+						anchor = title_bounds->x0;
+						break;
+					case 1:
+						anchor = title_bounds->x1;
+						break;
+					default:
+						anchor = (short)((title_bounds->x0 + title_bounds->x1) / 2);
+						break;
+					}
+					shift = (short)(anchor * (halo_screen_width() - 640) / 640);
 
 					wide_bounds = *title_bounds;
 					wide_bounds.x0 += shift;
 					wide_bounds.x1 += shift;
+					/* port: MCC title layout uses the final screen anchor. */
+					mcc_hud_title_bounds(&wide_bounds, title->justification, title->text_flags);
 					title_bounds = &wide_bounds;
 				}
 				rasterizer_draw_unicode_string(

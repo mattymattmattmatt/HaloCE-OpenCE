@@ -284,6 +284,7 @@ symbols in this file:
 #include "interface/terminal.h"
 #include "main/console.h"
 #include "game/game.h"
+#include "mcc_scripts.h" /* port: port/linux/game/mcc_scripts.h */
 
 /* ---------- constants */
 
@@ -336,14 +337,15 @@ enum
 #define hs_syntax_get(expression_index) \
 	((struct hs_syntax_node *)datum_get(hs_syntax_data, (expression_index)))
 
+/* port: MCC selects its own checked stack end; native limits are unchanged. */
 /* a thread is valid when it lies inside the thread data array and its stack pointer and
    the fill mark of its topmost frame lie inside its own inline stack buffer */
 #define valid_thread(thread) \
 	((byte *)(thread)>=(byte *)hs_thread_data->data && \
 	(byte *)(thread)<(byte *)hs_thread_data->data+hs_thread_data->count*hs_thread_data->size && \
 	(byte *)(thread)->stack>=(thread)->stack_data && \
-	(byte *)(thread)->stack<(thread)->stack_data+HS_THREAD_STACK_SIZE && \
-	(thread)->stack->data+(thread)->stack->size<=(thread)->stack_data+HS_THREAD_STACK_SIZE)
+	(byte *)(thread)->stack<mcc_hs_stack_end(thread) && \
+	(thread)->stack->data+(thread)->stack->size<=mcc_hs_stack_end(thread))
 
 #define HS_GLOBAL_DESIGNATOR_IS_EXTERNAL(designator) \
 	TEST_FLAG((designator), _hs_global_external_bit)
@@ -486,6 +488,10 @@ static long hs_object_to_object_list(
 static boolean hs_object_type_can_cast(
 	short actual_type,
 	short desired_type);
+/* port: an object, unit or list a value names that no longer exists */
+static long hs_value_still_exists(
+	short type,
+	long value);
 static char const *hs_thread_format(
 	long thread_index);
 static void hs_stack_pop(
@@ -738,6 +744,10 @@ boolean debug_trigger_volumes;
 
 /* ---------- public code */
 
+#include "mcc_script_threads.inl" /* port: MCC-only bounded thread storage. */
+#include "mcc_script_runtime.inl" /* port: port/linux/game/mcc_script_runtime.inl */
+#include "hs_console_state.inl" /* port: port/linux/game/hs_console_state.inl */
+
 void hs_runtime_initialize(
 	void)
 {
@@ -746,6 +756,7 @@ void hs_runtime_initialize(
 
 	hs_thread_data = game_state_data_new("hs thread", 0x100, 0x218);
 	hs_global_data = game_state_data_new("hs globals", 0x400, 8);
+	hs_console_state_initialize(); /* port: shares the threads' saved lifetime. */
 	if (hs_thread_data && hs_global_data)
 	{
 		match_vassert("c:\\halo\\SOURCE\\hs\\hs_runtime.c", 0xa9,
@@ -774,6 +785,9 @@ void hs_runtime_initialize_for_new_map(
 {
 	long internal_thread_index;
 
+	/* port: select the MCC-owned array only after its cache was accepted. */
+	mcc_hs_threads_activate();
+	hs_console_state_reset(); /* port: text and snapshots belong to this map. */
 	data_make_valid(hs_thread_data);
 	hs_runtime_globals.initialized = TRUE;
 	hs_runtime_globals.executing_thread_index = NONE;
@@ -877,6 +891,115 @@ void hs_runtime_dispose(
 	return;
 }
 
+/* port: a string value is an address: of the scenario's string constants
+(the map's tag data) or of the empty string (the game's image). A global's
+type says whether it holds one; a stack frame's data does not, so a value
+there is only taken for a string if it is one of those exactly, the start
+of a constant (game_state.c's game_state_image_relocate) */
+struct hs_runtime_relocation_strings
+{
+	unsigned long first;
+	unsigned long size;
+	char const *constants;
+	unsigned long empty;
+	/* how far the constants moved (game_state_relocation_tag_delta) */
+	unsigned long delta;
+};
+
+static boolean hs_runtime_relocate_string(
+	struct game_state_relocation const *relocation,
+	struct hs_runtime_relocation_strings const *strings,
+	byte *field)
+{
+	unsigned long value;
+	unsigned long offset;
+
+	(void)relocation;
+	csmemcpy(&value, field, sizeof(value));
+	offset = value - strings->first;
+	if (value == strings->empty)
+		value = (unsigned long)_hs_type_string_default;
+	else if (offset < strings->size && (!offset || !strings->constants[offset - 1]))
+		value += strings->delta;
+	else
+		return FALSE;
+	csmemcpy(field, &value, sizeof(value));
+
+	return TRUE;
+}
+
+/* port: a script thread's stack is frames packed at any byte of its
+stack_data, each with the address of the one below and of where its value
+goes (in its caller's frame, the thread, or a global); a sleeping thread's
+are in the saved game. Walked from the top (frame sizes are not kept once a
+thread resumes) */
+boolean hs_runtime_port_relocate(
+	struct game_state_relocation const *relocation)
+{
+	struct scenario *scenario = global_scenario_get();
+	struct hs_runtime_relocation_strings strings;
+	long index;
+
+	strings.constants = scenario ? (char const *)TAG_DATA_ADDRESS(scenario->hs_string_constants) : NULL;
+	strings.size = strings.constants ? (unsigned long)scenario->hs_string_constants.size : 0;
+	/* (in the window for the game's own maps; an MCC map's tags may lie
+	elsewhere: game_state_relocation_tag_delta) */
+	strings.delta = game_state_relocation_tag_delta(relocation, strings.constants);
+	strings.first = (unsigned long)strings.constants - strings.delta;
+	strings.empty = (unsigned long)_hs_type_string_default - relocation->image_delta;
+	for (index = 0; index < hs_thread_data->maximum_count; index++)
+	{
+		struct hs_thread_datum *thread = game_state_relocation_element(relocation, hs_thread_data, index);
+		byte const *live_first;
+		byte const *live_end;
+		byte const *above;
+		struct hs_stack_frame *frame_live;
+		long count;
+
+		if (!thread)
+			continue;
+		live_first = ((struct hs_thread_datum const *)((byte const *)hs_thread_data->data +
+			index * hs_thread_data->size))->stack_data;
+		live_end = live_first + sizeof(thread->stack_data);
+		hs_runtime_relocate_string(relocation, &strings, (byte *)&thread->result);
+		game_state_relocate(relocation, &thread->stack);
+		above = live_end;
+		for (frame_live = thread->stack, count = 0;
+			frame_live && (byte const *)frame_live >= live_first &&
+				(byte const *)frame_live + sizeof(struct hs_stack_frame) <= above && count < 256;
+			count++)
+		{
+			byte *frame = game_state_relocation_pointer(relocation, frame_live);
+			byte *data;
+
+			game_state_relocate(relocation, frame + offsetof(struct hs_stack_frame, previous));
+			game_state_relocate(relocation, frame + offsetof(struct hs_stack_frame, result));
+			/* (past a value moved, so that its new bytes are not read again
+			as part of another) */
+			for (data = frame + offsetof(struct hs_stack_frame, data);
+				data + sizeof(long) <= (byte *)game_state_relocation_pointer(relocation, above);
+				data += hs_runtime_relocate_string(relocation, &strings, data) ? sizeof(long) : 1)
+			{
+			}
+			above = (byte const *)frame_live;
+			csmemcpy(&frame_live, frame + offsetof(struct hs_stack_frame, previous), sizeof(frame_live));
+		}
+	}
+	for (index = hs_external_global_count; index < hs_global_data->maximum_count; index++)
+	{
+		struct hs_global_datum *global = game_state_relocation_element(relocation, hs_global_data, index);
+
+		if (global && scenario && index - hs_external_global_count < scenario->hs_globals.count &&
+			TAG_BLOCK_GET_ELEMENT(&scenario->hs_globals, index - hs_external_global_count, struct hs_global)->type ==
+				_hs_type_string)
+		{
+			hs_runtime_relocate_string(relocation, &strings, (byte *)&global->value);
+		}
+	}
+
+	return TRUE;
+}
+
 void hs_runtime_dispose_from_old_map(
 	void)
 {
@@ -891,6 +1014,7 @@ void hs_runtime_dispose_from_old_map(
 			datum_delete(hs_global_data, global_index);
 	}
 	hs_runtime_globals.initialized = FALSE;
+	hs_console_state_reset(); /* port: release the old map's console ownership. */
 
 	return;
 }
@@ -912,6 +1036,12 @@ static char const *expression_get_function_name(
 			expression_index != thread->stack->expression_index)
 		{
 			/* port: an index past the table (a damaged map's) names none */
+			{
+
+				struct hs_function_definition *mcc_function = mcc_script_function(syntax_node->index);
+				if (mcc_function)
+					return mcc_function->name;
+			}
 			if ((word)syntax_node->index>=hs_function_table_count)
 				return "(corrupt function)";
 
@@ -954,6 +1084,51 @@ boolean hs_runtime_waiting_on_call(
 	caller = hs_syntax_get(frame->previous->expression_index);
 
 	return !TEST_FLAG(caller->flags, _hs_syntax_node_script_bit) && caller->function_index == _hs_function_sleep_until;
+}
+
+/* port: a global initializer is not a console command, even when it calls
+a static script. The owning thread, not its current stack frame, decides. */
+boolean hs_runtime_port_executing_console_command(
+	void)
+{
+	return hs_runtime_globals.initialized &&
+		hs_runtime_globals.executing_thread_index != NONE &&
+		hs_thread_get(hs_runtime_globals.executing_thread_index)->type == _hs_thread_type_console_command;
+}
+
+/* port: the map's riding call counts only from a startup script (vehicle_riding.c) */
+short hs_runtime_port_executing_script_type(
+	void)
+{
+	struct hs_thread_datum *thread;
+	struct hs_script *script;
+
+	if (!hs_runtime_globals.initialized || hs_runtime_globals.executing_thread_index==NONE)
+		return NONE;
+	thread = hs_thread_get(hs_runtime_globals.executing_thread_index);
+	if (thread->type!=_hs_thread_type_script)
+		return NONE;
+	script = TAG_BLOCK_GET_ELEMENT(
+		&global_scenario_get()->hs_scripts,
+		thread->script_index,
+		struct hs_script);
+
+	return script->script_type;
+}
+
+/* port: a disabled initializer holds its type's default, not the map's word */
+short hs_runtime_port_scenario_boolean(
+	char const *name)
+{
+	short designator;
+
+	designator = hs_find_global_by_name(name);
+	if (designator==NONE || ((word)designator & 0x8000) ||
+		hs_global_get_type(designator)!=_hs_type_boolean || hs_scenario_global_initializer_disabled(designator))
+		return NONE;
+
+	/* (a boolean is its low byte, as the engine reads it: the global's value is a whole long) */
+	return (boolean)hs_global_evaluate(designator)!=FALSE;
 }
 
 char const *hs_runtime_get_executing_thread_name(
@@ -1350,6 +1525,8 @@ static long hs_thread_new(
 static void hs_thread_delete(
 	long thread_index)
 {
+	/* port: an MCC thread's own storage (mcc_script_threads.inl) */
+	mcc_hs_release_thread(thread_index);
 	match_assert("c:\\halo\\SOURCE\\hs\\hs_runtime.c", 0x290,
 		hs_thread_get(thread_index)->type!=_hs_thread_type_script);
 
@@ -1365,13 +1542,14 @@ static boolean hs_stack_push(
 	struct hs_stack_frame *new_frame = (struct hs_stack_frame *)
 		((byte *)thread->stack+thread->stack->size+sizeof(struct hs_stack_frame));
 
+	/* port: MCC uses its own bound; Xbox/CE keep the inline stack limit. */
 	match_hs_assert("c:\\halo\\SOURCE\\hs\\hs_runtime.c", 0x35e, thread_index,
-		(byte *) (new_frame+1)<thread->stack_data+HS_THREAD_STACK_SIZE,
+		(byte *) (new_frame+1)<mcc_hs_stack_end(thread),
 		"stack overflow.");
 
 	/* port: a frame past the thread's stack isn't pushed (it would be
 	written over the next thread's datum): the thread is ended instead */
-	if ((byte *)(new_frame+1)>=thread->stack_data+HS_THREAD_STACK_SIZE ||
+	if ((byte *)(new_frame+1)>=mcc_hs_stack_end(thread) ||
 		TEST_FLAG(thread->flags, _hs_thread_stack_overflow_bit))
 	{
 		hs_stack_overflow(thread_index);
@@ -1796,6 +1974,13 @@ boolean hs_can_cast(
 {
 	short object_type;
 
+	{
+		/* port: MCC-only AI casts and signed integer widening. */
+
+		if (mcc_script_can_cast(actual_type, desired_type))
+			return TRUE;
+	}
+
 	match_assert("c:\\halo\\SOURCE\\hs\\hs_runtime.c", 0x5a4,
 		actual_type==_hs_passthrough || hs_type_valid(actual_type));
 	match_assert("c:\\halo\\SOURCE\\hs\\hs_runtime.c", 0x5a5,
@@ -1842,14 +2027,48 @@ cast_object_type:
 	}
 }
 
+/* port: an object or a list that a script holds can be gone when the script
+uses it. A global keeps a vehicle's index after the vehicle is deleted, and a
+list made for an argument is collected while a later argument's static script
+sleeps. Maps do this, and Halo PC plays them, but here datum_get gives NULL for
+it and the read through that crashes the game. Such a value is none, which is
+already how a script says no object: an object's name gives none when that
+object doesn't exist. */
+static long hs_value_still_exists(
+	short type,
+	long value)
+{
+	if (HS_TYPE_IS_OBJECT(type))
+		return object_try_and_get(value) ? value : NONE;
+	if (type==_hs_type_object_list)
+		return datum_try_and_get(object_list_header_data, value) ? value : NONE;
+
+	return value;
+}
+
 long hs_cast(
 	long thread_index,
 	short actual_type,
 	short desired_type,
 	long value)
 {
+	{
+		/* port: MCC-only AI casts and signed integer widening. */
+
+
+		if (mcc_script_can_cast(actual_type, desired_type))
+			return mcc_script_cast(actual_type, desired_type, value);
+	}
+
 	match_hs_assert("c:\\halo\\SOURCE\\hs\\hs_runtime.c", 0x5d8, thread_index,
 		hs_can_cast(actual_type, desired_type), "bad typecast.");
+
+	/* port: every global read and every function's or script's result comes
+	through here. Checked before the casts below, so no list is made of an
+	object that is gone */
+	value = hs_value_still_exists(
+		actual_type==_hs_passthrough ? desired_type : actual_type,
+		value);
 
 	if (actual_type!=desired_type &&
 		actual_type!=_hs_passthrough &&
@@ -2149,6 +2368,10 @@ void hs_evaluate_set(
 		NULL;
 	short type;
 	long global_index;
+
+	/* port: a set of an MCC script's parameter (mcc_script_runtime.inl) */
+	if (mcc_hs_parameter_set(thread_index, variable, initialize))
+		return;
 
 	/* port: a variable that isn't a global's name ends the thread: its
 	index would pick the global (the external one too) written through. Only
@@ -2456,11 +2679,12 @@ void hs_evaluate_debug_string(
 
 	if (*expression_index!=NONE && *argument_count<MAXIMUM_HS_DEBUG_STRING_ARGUMENTS)
 	{
-		long argument;
-
-		hs_evaluate(thread_index, *expression_index, &argument);
+		/* port: BUG (original): the argument was evaluated into a local of
+		this function, which a call's result reaches only after it has
+		returned. It goes to its place on the thread's stack instead (a
+		pointer is a long on every port), where a checkpoint can keep it */
+		hs_evaluate(thread_index, *expression_index, (long *)&arguments[*argument_count]);
 		*expression_index = hs_syntax_get(*expression_index)->next_node_index;
-		arguments[*argument_count] = (char const *)argument;
 		*argument_count += 1;
 	}
 	else
@@ -2716,6 +2940,9 @@ static void hs_thread_main(
 		index_count = TEST_FLAG(expression->flags, _hs_syntax_node_script_bit) ?
 			global_scenario_get()->hs_scripts.count :
 			hs_function_table_count;
+		/* port: MCC's additional functions are past the table's (mcc_scripts.c) */
+		if (!TEST_FLAG(expression->flags, _hs_syntax_node_script_bit) && mcc_script_function(expression->index))
+			index_count = expression->index + 1;
 		if (expression->index<0 || expression->index>=index_count)
 		{
 			hs_syntax_error(thread_index);
@@ -2726,10 +2953,13 @@ static void hs_thread_main(
 
 			match_assert("c:\\halo\\SOURCE\\hs\\hs_runtime.c", 0x2d8, function->evaluate);
 
-			function->evaluate(
-				expression->index,
-				thread_index,
-				initialize);
+			/* port: MCC may release a completed conditional frame before
+			entering its selected branch; legacy evaluation is unchanged. */
+			if (!mcc_hs_if_tail(expression->index, thread_index, initialize))
+				function->evaluate(
+					expression->index,
+					thread_index,
+					initialize);
 		}
 		else
 		{
@@ -2740,6 +2970,8 @@ static void hs_thread_main(
 		frames are let go, and a script's thread doesn't run again */
 		if (TEST_FLAG(thread->flags, _hs_thread_stack_overflow_bit))
 		{
+			/* port: an MCC thread's own storage (mcc_script_threads.inl) */
+			mcc_hs_release_thread(thread_index);
 			thread->stack = (struct hs_stack_frame *)thread->stack_data;
 			thread->flags = 0;
 			thread->sleep_until = thread->type==_hs_thread_type_script ? NONE : 0;
@@ -2772,12 +3004,19 @@ static void hs_script_evaluate(
 	long thread_index,
 	boolean initialize)
 {
-	struct hs_script *script = TAG_BLOCK_GET_ELEMENT(
+	struct hs_script *script;
+	struct hs_thread_datum *thread;
+	long *result;
+
+	/* port: an MCC map's scripts with parameters (mcc_script_runtime.inl) */
+	if (mcc_hs_script_evaluate(script_index, thread_index, initialize))
+		return;
+	script = TAG_BLOCK_GET_ELEMENT(
 		&global_scenario_get()->hs_scripts,
 		script_index,
 		struct hs_script);
-	struct hs_thread_datum *thread = hs_thread_get(thread_index);
-	long *result = hs_stack_allocate(thread_index, sizeof(long));
+	thread = hs_thread_get(thread_index);
+	result = hs_stack_allocate(thread_index, sizeof(long));
 
 	/* port: none on a stack overflow (hs_stack_overflow) */
 	if (!result)
@@ -2838,14 +3077,15 @@ static void *hs_stack_allocate(
 		valid_thread(thread), "corrupted stack.");
 	match_hs_assert("c:\\halo\\SOURCE\\hs\\hs_runtime.c", 0x37e, thread_index,
 		size, "attempt to allocate zero space from the stack.");
+	/* port: MCC uses its own bound; Xbox/CE keep the inline stack limit. */
 	match_hs_assert("c:\\halo\\SOURCE\\hs\\hs_runtime.c", 0x37f, thread_index,
-		frame->data+frame->size+size<=thread->stack_data+HS_THREAD_STACK_SIZE,
+		frame->data+frame->size+size<=mcc_hs_stack_end(thread),
 		"stack overflow.");
 
 	/* port: none past the thread's stack (hs_stack_overflow); the caller
 	returns on NULL */
 	if (size<0 ||
-		size>thread->stack_data+HS_THREAD_STACK_SIZE-(frame->data+frame->size) ||
+		size>mcc_hs_stack_end(thread)-(frame->data+frame->size) ||
 		TEST_FLAG(thread->flags, _hs_thread_stack_overflow_bit))
 	{
 		hs_stack_overflow(thread_index);
@@ -2882,6 +3122,9 @@ static void hs_evaluate(
 
 		return;
 	}
+	/* port: an MCC script's parameter (mcc_script_runtime.inl) */
+	if (mcc_hs_parameter_evaluate(thread_index, expression, destination))
+		return;
 
 	if (TEST_FLAG(hs_syntax_get(expression_index)->flags, _hs_syntax_node_primitive_bit))
 	{
@@ -2921,6 +3164,9 @@ static void hs_global_reconcile_read(
 {
 	struct hs_global_datum *global;
 	struct hs_external_global_definition *external;
+
+	/* port: MCC's scenario-local speed global reflects its authoritative clock. */
+	mcc_hs_speed_reconcile(global_designator, FALSE);
 
 	if (HS_GLOBAL_DESIGNATOR_IS_EXTERNAL(global_designator))
 	{
@@ -3150,6 +3396,9 @@ static void hs_global_reconcile_write(
 	struct hs_external_global_definition *external;
 	real value;
 
+	/* port: MCC speed writes cannot change a client's local clock. */
+	mcc_hs_speed_reconcile(global_designator, TRUE);
+
 	if (HS_GLOBAL_DESIGNATOR_IS_EXTERNAL(global_designator))
 	{
 		long global_index;
@@ -3363,6 +3612,7 @@ static long *hs_arguments_evaluate(
 	long *values = hs_stack_allocate(thread_index, formal_parameter_count*sizeof(long));
 	short *argument_index = hs_stack_allocate(thread_index, sizeof(short));
 	long *expression_index = hs_stack_allocate(thread_index, sizeof(long));
+	short value_index;
 
 	/* port: none on a stack overflow (hs_stack_overflow): as for arguments
 	still being evaluated, the caller returns on NULL */
@@ -3398,6 +3648,15 @@ static long *hs_arguments_evaluate(
 
 	match_hs_assert("c:\\halo\\SOURCE\\hs\\hs_runtime.c", 0x3d1, thread_index,
 		*expression_index==NONE, "corrupted syntax tree.");
+
+	/* port: an argument was checked when it was evaluated, and a later one's
+	static script may have slept since (hs_value_still_exists) */
+	for (value_index = 0; value_index<formal_parameter_count; value_index++)
+	{
+		values[value_index] = hs_value_still_exists(
+			formal_parameters[value_index],
+			values[value_index]);
+	}
 
 	return values;
 }

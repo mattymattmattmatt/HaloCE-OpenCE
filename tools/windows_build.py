@@ -340,7 +340,7 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
         description="WINDOWS RC $out",
     )
     resources = BUILD / "halo.res"
-    n.build(outputs=resources, rule="windows_rc", inputs=PORT_DIR / "halo.rc", implicit=[PORT_DIR / "opence-icon.ico"])
+    n.build(outputs=resources, rule="windows_rc", inputs=PORT_DIR / "halo.rc", implicit=[PORT_DIR / "slipstream-icon.ico"])
     n.rule(
         name="windows_copy",
         command="$python -c \"import shutil,sys; shutil.copyfile(sys.argv[1], sys.argv[2])\" $in $out",
@@ -365,6 +365,10 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
         "--target=i686-pc-windows-msvc",
         "-fuse-ld=lld",
         "-g",
+        # Reserve the MCC tag window before SDL's ASLR placement. Keep the
+        # shipped DLL unchanged; the first SDL call loads it after reservation.
+        "-Wl,/DELAYLOAD:SDL3.dll",
+        "-ldelayimp",
         # the Xbox memory window is at 0x80000000, in the upper half of the
         # 32-bit address space
         "-Wl,/LARGEADDRESSAWARE",
@@ -466,7 +470,9 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
         for source in sorted(linux_platform.glob("*.c")):
             if source.name in replaced:
                 continue
-            if source.name == "posix_dtls.c":
+            if source.name in ("posix_mcc_preview.c", "posix_mcc_share.c"):
+                add_object(source, win32_cflags)
+            elif source.name == "posix_dtls.c":
                 # (Mbed TLS sees the Windows SDK, as the win32_*.c do)
                 add_object(source, f"{win32_cflags} {mbedtls_include}")
             elif source.name in ("updater.c", "server_mode.c"):
@@ -517,6 +523,7 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
         # (port/include/halo_math.h)
         for source in musl_math_sources():
             add_object(source, musl_math_cflags(abi))
+        add_object(Path("port/android/host/host_replay.c"), platform_cflags)
 
         n.build(
             outputs=output,

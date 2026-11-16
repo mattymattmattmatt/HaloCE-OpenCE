@@ -170,6 +170,7 @@ symbols in this file:
 #include "rasterizer/xbox/rasterizer_xbox_plasma_energy.h"
 #include "rasterizer/xbox/rasterizer_xbox_water.h"
 #include "rasterizer/xbox/shader_transparent_chicago_preprocessor.h"
+#include "needler_lighting.h" /* port: port/linux/game/needler_lighting.c */
 
 /* ---------- constants */
 
@@ -865,6 +866,8 @@ void rasterizer_transparent_geometry_dispose_aux_buffer(
 }
 
 /* ---------- private code */
+
+#include "mcc_chicago.inl" /* port: MCC-only authored blending compatibility. */
 
 /* port: mesh and material checks run only when model tags load. */
 #include "rasterizer/rasterizer_transparent_enclosure.h"
@@ -2402,6 +2405,9 @@ void rasterizer_transparent_geometry_group_draw(
 								pixel_shader.constant_0[stage_index] =
 									real_argb_color_to_pixel32(&constant_color0);
 							}
+							/* port: brighten the optional Needler core before fog. */
+							needler_lighting_transparent(group->shader, &pixel_shader,
+								shader_transparent_generic->generic.stages.count);
 							break;
 						}
 
@@ -2691,6 +2697,9 @@ void rasterizer_transparent_geometry_group_draw(
 							success = success && shader_transparent_chicago_create(
 								group->shader,
 								&pixel_shader);
+							/* port: optional world-model needle emission, before fog. */
+							needler_lighting_transparent(group->shader, &pixel_shader,
+								shader_transparent_chicago->chicago.maps.count);
 
 							if (rasterizer_debug_options.draw_environment_fog)
 							{
@@ -2842,6 +2851,9 @@ void rasterizer_transparent_geometry_group_draw(
 									}
 								}
 							}
+							/* port: keep MCC blend semantics out of the legacy shader path. */
+							mcc_chicago_blend(&shader_transparent_chicago->chicago,
+								&pixel_shader, rasterizer_debug_options.draw_environment_fog);
 							break;
 						}
 

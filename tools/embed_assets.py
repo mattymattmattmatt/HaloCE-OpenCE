@@ -41,6 +41,7 @@ ROOT = Path(__file__).resolve().parent.parent
 HUD_ASSETS = Path("port/assets/hud")
 LAYOUT = HUD_ASSETS / "layout.json"
 CE_LAYOUT = HUD_ASSETS / "ce_layout.json"
+MCC_LAYOUT = HUD_ASSETS / "mcc_layout.json"
 CE_STOCK = HUD_ASSETS / "ce_stock.json"
 # the HUD textures whose bitmaps Halo Custom Edition lays out alike
 CUSTOM_EDITION_HUD = HUD_ASSETS / "custom_edition.json"
@@ -54,12 +55,14 @@ FONT_ASSETS = Path("port/assets/fonts")
 FONT_LIST = FONT_ASSETS / "fonts.json"
 MENU_ASSETS = Path("port/assets/menus")
 MENU_LIST = MENU_ASSETS / "menus.json"
+# the settings' Credits (menu_functions.c's credits screen)
+CREDITS_TEXT = ROOT / "port/assets/credits.txt"
 # SMAA's files and the names port/linux/src/xgpu_post.c declares them by
 SMAA_ASSETS = Path("port/third_party/smaa")
 SMAA_FILES = (("SMAA.hlsl", "xgpu_smaa_shader"), ("area_tex.zlib", "xgpu_smaa_area_texture"),
               ("search_tex.zlib", "xgpu_smaa_search_texture"))
-# the desktop windows' icon (tools/app_icon.py; port/linux/src/sdl_platform.c)
-WINDOW_ICON = Path("port/assets/icon/opence-icon-256.png")
+# the desktop windows' icon (tools/slipstream_icon.py; port/linux/src/sdl_platform.c)
+WINDOW_ICON = Path("port/assets/icon/slipstream-icon-256.png")
 # the pointer the menus show in place of the system's (port/linux/src/sdl_platform.c)
 MENU_CURSOR = Path("port/assets/cursor/menu_cursor.png")
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -100,7 +103,8 @@ def textures(platform: Optional[str] = None) -> List[tuple]:
     result = []
     overrides = platform_overrides(platform)
     for folder, listing, title in ((HUD_ASSETS, LAYOUT, False), (TITLE_ASSETS, TITLE_LIST, True),
-                                   (BUTTON_ASSETS, BUTTON_LIST, True), (HUD_ASSETS, CE_LAYOUT, False)):
+                                   (BUTTON_ASSETS, BUTTON_LIST, True), (HUD_ASSETS, CE_LAYOUT, False),
+                                   (HUD_ASSETS, MCC_LAYOUT, False)):
         if not (ROOT / listing).is_file():
             continue
         for asset in json.loads((ROOT / listing).read_text())["assets"]:
@@ -135,7 +139,7 @@ def platform_of(prefix: str) -> Optional[str]:
 
 def hud_asset_inputs(platform: Optional[str] = None) -> List[Path]:
     """The files the generated source is made from."""
-    inputs = [listing for listing in (LAYOUT, CE_LAYOUT, CE_STOCK, CUSTOM_EDITION_HUD, TITLE_LIST, BUTTON_LIST, FONT_LIST, MENU_LIST)
+    inputs = [listing for listing in (LAYOUT, CE_LAYOUT, MCC_LAYOUT, CE_STOCK, CUSTOM_EDITION_HUD, TITLE_LIST, BUTTON_LIST, FONT_LIST, MENU_LIST)
               if (ROOT / listing).is_file()]
     if platform:
         inputs.append(BUTTON_PLATFORMS / platform / "buttons.json")
@@ -151,7 +155,7 @@ def hud_configure_inputs() -> List[Path]:
     folders, for files added or removed), not each file, which a change of a
     list may rename or remove."""
     inputs = []
-    for folder, listing in ((HUD_ASSETS, LAYOUT), (HUD_ASSETS, CE_LAYOUT), (TITLE_ASSETS, TITLE_LIST), (BUTTON_ASSETS, BUTTON_LIST),
+    for folder, listing in ((HUD_ASSETS, LAYOUT), (HUD_ASSETS, CE_LAYOUT), (HUD_ASSETS, MCC_LAYOUT), (TITLE_ASSETS, TITLE_LIST), (BUTTON_ASSETS, BUTTON_LIST),
                             (FONT_ASSETS, FONT_LIST), (MENU_ASSETS, MENU_LIST)):
         if (ROOT / listing).is_file():
             inputs += [folder, listing]
@@ -229,7 +233,7 @@ def hud_assets_build(n: Any, prefix: str, output: Path) -> List[Path]:
         description=f"{prefix.upper()} EMBED $out",
     )
     n.build(outputs=output, rule=f"{prefix}_embed_assets",
-            implicit=[Path("tools/embed_assets.py"), *inputs, *news_inputs()])
+            implicit=[Path("tools/embed_assets.py"), CREDITS_TEXT.relative_to(ROOT), *inputs, *news_inputs()])
     return [output]
 
 
@@ -371,6 +375,12 @@ def main() -> None:
     lines.extend(words(data))
     lines.append("};")
     lines.append(f"const unsigned int halo_news_size = {len(data) - 1};")
+    # the settings' Credits (port/assets/credits.txt), ASCII ending in a NUL
+    data = CREDITS_TEXT.read_text(encoding="ascii").replace("\r", "").encode("ascii") + b"\0"
+    lines.append("")
+    lines.append("const unsigned int halo_credits_words[] = {")
+    lines.extend(words(data))
+    lines.append("};")
     lines.append("")
     # SMAA's shader, as text a GLSL compiler takes (ASCII, ending in a NUL),
     # and its lookup textures (xgpu_post.c); each of size 0 that the

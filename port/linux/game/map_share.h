@@ -130,6 +130,16 @@ boolean map_share_game_map_version(
 map no time to precache until they are) */
 boolean map_share_downloading(
 	char const *level_name);
+/* TRUE if this machine must not precache or load `level_name` (or any map,
+when it is NULL): a share download is in progress, or one failed or did not
+leave a playable map. Callers must not display_error_damaged_media or enter
+a blocking precache. */
+boolean map_share_blocks_load(
+	char const *level_name);
+/* TRUE when the map can be precached and loaded: not blocked, and a Custom
+Edition or MCC map is actually playable on this machine. */
+boolean map_share_map_ready(
+	char const *level_name);
 /* whether this machine's players wait to join the host's game: until its
 settings name the map (a game in progress would start them at once), and
 for a game in progress until the map is downloaded (network_client_manager.c) */
@@ -233,6 +243,27 @@ boolean map_share_pieces_hashed(
 
 /* the hashing thread's work: started and collected each frame */
 void map_share_files_update(
+	void);
+
+/* the part of an upload's cap (percent) map uploads take now: 100 but while a
+game is being played on this machine (network.map_upload_in_game) */
+long map_share_upload_percent(void);
+
+/* the lock map sharing's connections' thread and the game's hold while they
+look at what they share (map_share.c; recursive) */
+void map_share_lock(void);
+void map_share_unlock(void);
+
+/* the host's file connection (port/android/host/host_file_share.c) as one of
+a download's sources: the host's token for this machine's download (from
+network_extensions.c's data, mcc_share.c), and whether the host wants its
+listener for Custom Edition maps */
+void map_share_file_share_token(
+	unsigned long session,
+	byte const *token,
+	unsigned long direct_address,
+	unsigned short direct_port);
+boolean map_share_file_connection_wanted(
 	void);
 
 #endif

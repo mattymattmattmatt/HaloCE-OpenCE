@@ -1,13 +1,13 @@
 # PS5
 
-Halo: Combat Evolved on a jailbroken PlayStation 5, as a homebrew title
-(`PPSA99500`): the menus, the campaign and multiplayer at 120 frames a
-second on a TV that takes it, up to native 4K, split screen with a second
-pad, aiming with the DualSense's gyroscope, voice chat through the pad's
-microphone, and system link and internet play with the other builds. It
-needs your own copy of the game's Xbox disc image, from which the first
-start extracts the maps. This README is for players first; building and
-developing are at its end.
+Halo CE Gore on a jailbroken PlayStation 5, as a homebrew title
+(`PPSA99501`): the gore mod on top of the universal port's PS5 title. It
+installs beside the universal port (`PPSA99500`) and neither replaces the
+other. The menus, the campaign and multiplayer run at 120 frames a second
+on a TV that takes it, up to native 4K, with split screen, DualSense gyro,
+theater mode, and system link and internet play with the other gore builds.
+It needs your own copy of the game's Xbox disc image. This README is for
+players first; building and developing are at its end.
 
 ## What the console needs
 
@@ -32,14 +32,17 @@ developing are at its end.
 
 ## Installing from the release
 
-1. Download `halo-ps5-release.zip` from the repository's latest release
-   (https://github.com/thelinkin3000/halo-ce-universal/releases/latest)
+1. Download `halo-gore-ps5-release.zip` from this repository's latest
+   `ps5-gore-b` release
+   (https://github.com/mattymattmattmatt/HaloCE-OpenCE/releases)
    and unzip it on your computer.
-2. Over FTP, copy its `PPSA99500` folder into `/data/homebrew` on the
+2. Over FTP, copy its `PPSA99501` folder into `/data/homebrew` on the
    console.
-3. Make the folder `/data/halo` and copy the game's disc image (`.iso` or
-   `.xiso`) into it.
-4. Start Halo: Combat Evolved from the home screen.
+3. If the universal port is already set up (`/data/halo` with its maps),
+   that is all: this title reads its maps from `/data/halo/maps`.
+   Otherwise make `/data/halo` and copy the disc image into it, or make
+   `/data/halo-gore` and copy it there.
+4. Start Halo CE Gore from the home screen.
 
 `README.txt` in the zip says the same in a few lines. The zip also holds
 `COPYING` and `licenses/`, the licences of what the title is built from;
@@ -72,20 +75,21 @@ folder holds:
 A release's build looks for a newer release on GitHub each time it starts,
 about ten seconds in, while you play. When there is one it downloads it
 (about 50 MB) and installs it in the title's folder, with notifications
-("Halo: downloading build N", every quarter of the way, then "Halo: build N
+("Halo CE Gore: downloading build N", every quarter of the way, then "Halo CE Gore: build N
 is installed: close the game and start it again to use it"). The game goes
 on as it was until you close it; the next start is the new build. If the
 download or the install does not finish, a notification says why and
-nothing is changed. `update.auto = false` in `/data/halo/config.toml` turns
-the look off. To update by hand, copy a newer release's `PPSA99500` folder
-over the old one (with the game closed).
+nothing is changed. `update.auto = false` in `/data/halo-gore/config.toml` turns
+the look off. To update by hand, copy a newer release's `PPSA99501` folder
+over the old one (with the game closed). The updater only looks at this
+repository's `ps5-gore-b<number>` releases.
 
 ## Settings
 
 The game's settings are in its menus (Settings), as the PS5's: Video Setup's
 MAXIMUM RESOLUTION, Gamepads' GYRO AIM and the rest (below, "The menus"),
 and in `/data/halo/config.toml`, which you can edit over FTP with the game
-closed (`port/linux/README.md` describes every setting). Two defaults are a
+closed (`docs/settings.md` describes every setting). Two defaults are a
 computer's rather than a console's: voice chat's push-to-talk is the `V`
 key (`controls.push_to_talk`: set it to `"Gamepad LB"`, say, to talk with the
 pad), and the frame rate is not capped (`display.max_fps = 0`; the display's
@@ -100,7 +104,10 @@ FTP server can delete the maps (the next start extracts them again), edit
 
 The host's log is `/data/halo/halo.log` (or `halo.log` in the title's folder
 when there is no `/data/halo`), and every line goes to the kernel log too,
-prefixed `halo: `. It has the ranges of memory the game was given, the
+prefixed `halo: `. `halo_log = false` in the `[debug]` section of
+`config.toml` (the overlay's **Write halo.log**) writes the kernel log
+only, from the next start; `log_files = false` (**Write debug.txt**)
+writes no `debug.txt`. It has the ranges of memory the game was given, the
 game's own output (`game: `), the files the extraction writes, the maps
 opened, and every 5 s a heartbeat: the frames swapped, their mean and
 longest time, how many took over 20 and over 33 ms (and over 10 and 17 ms

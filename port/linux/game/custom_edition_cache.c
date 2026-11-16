@@ -31,6 +31,8 @@ where its offset falls in their combined offset space.
 #include "custom_edition_cache.h"
 #include "tag_schema.h"
 #include "map_share.h"
+#include "custom_campaigns.h"
+#include "mcc_loading.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -137,6 +139,9 @@ static int custom_edition_file_read(
 {
 	FILE *stream = context;
 
+	/* (the loading screen drawn again, at most every 50 ms, while the map is
+	read: mcc_loading.c) */
+	mcc_loading_pulse();
 	return fseek(stream, (long)offset, SEEK_SET) == 0 && fread(buffer, 1, size, stream) == size;
 }
 
@@ -324,6 +329,10 @@ static boolean custom_edition_map_named(
 	char hashed[MAP_PATH_SIZE];
 	short folder;
 
+	/* (a mounted custom campaign's map of the name its header gives:
+	custom_campaigns.c) */
+	if (custom_campaign_map_path(map_name, TRUE, path))
+		return TRUE;
 	for (folder = 0; folder < NUMBER_OF_MAPS_FOLDERS; folder++)
 	{
 		if (maps_folder_has(maps_folder(folder), name, MAP_FILE_EXTENSION, path) ||
@@ -418,8 +427,16 @@ static boolean custom_edition_resource_map_path(
 	char *path)
 {
 	char const *name = resource_map_type_describe(type);
+	char file_name[MAP_PATH_SIZE];
 	short folder;
 
+	/* (a mounted custom campaign's own, if it has them) */
+	if (strlen(name) + strlen(MAP_FILE_EXTENSION) < sizeof(file_name))
+	{
+		sprintf(file_name, "%s%s", name, MAP_FILE_EXTENSION);
+		if (custom_campaign_file_path(file_name, path))
+			return TRUE;
+	}
 	for (folder = 0; folder < NUMBER_OF_MAPS_FOLDERS; folder++)
 	{
 		if (maps_folder_has(maps_folder(folder), name, MAP_FILE_EXTENSION, path))
@@ -430,153 +447,6 @@ static boolean custom_edition_resource_map_path(
 	sprintf(path, "%s%s%s", maps_folder(0), name, MAP_FILE_EXTENSION);
 
 	return TRUE;
-}
-
-/* the locale resource map custom_edition_locale_open opened */
-static struct
-{
-	boolean open;
-	struct custom_edition_file file;
-	struct resource_map map;
-} custom_edition_locale;
-
-/* a unicode string list tag: its strings' block (count, address and
-definition), each element a tag_data of the string's UTF-16 characters
-(size, then the address 12 bytes in) */
-#define STRING_LIST_HEADER_BYTES 12
-#define STRING_LIST_ELEMENT_BYTES 20
-#define STRING_LIST_ELEMENT_ADDRESS_OFFSET 12
-#define STRING_LIST_MAXIMUM_COUNT 32767
-
-boolean custom_edition_locale_open(
-	void)
-{
-	char path[MAP_PATH_SIZE];
-	short folder;
-
-	custom_edition_locale_close();
-	for (folder = 0; folder < NUMBER_OF_MAPS_FOLDERS; folder++)
-	{
-		if (maps_folder_has(maps_folder(folder), resource_map_type_describe(_resource_map_locale), MAP_FILE_EXTENSION, path))
-		{
-			break;
-		}
-	}
-	if (folder == NUMBER_OF_MAPS_FOLDERS || !custom_edition_file_open(&custom_edition_locale.file, path))
-	{
-		return FALSE;
-	}
-	if (resource_map_open(&custom_edition_locale.file.source, _resource_map_locale, &custom_edition_locale.map) !=
-		_cache_file_status_ok)
-	{
-		error(_error_silent, "custom edition: '%s' is not a locale resource map", path);
-		custom_edition_file_close(&custom_edition_locale.file);
-		return FALSE;
-	}
-	custom_edition_locale.open = TRUE;
-
-	return TRUE;
-}
-
-void custom_edition_locale_close(
-	void)
-{
-	if (custom_edition_locale.open)
-	{
-		resource_map_close(&custom_edition_locale.map);
-		custom_edition_file_close(&custom_edition_locale.file);
-		custom_edition_locale.open = FALSE;
-	}
-
-	return;
-}
-
-struct custom_edition_string_list *custom_edition_locale_strings(
-	char const *name)
-{
-	struct resource_map const *map = &custom_edition_locale.map;
-	struct resource_map_item const *item = NULL;
-	struct custom_edition_string_list *list = NULL;
-	byte *tag;
-	int32_t count, index;
-	uint32_t address, text_bytes = 0;
-	unsigned short *characters;
-
-	for (index = 0; custom_edition_locale.open && index < map->item_count && !item; index++)
-	{
-		if (!csstrcasecmp(map->items[index].name, name))
-		{
-			item = &map->items[index];
-		}
-	}
-	if (!item || item->size < STRING_LIST_HEADER_BYTES || !(tag = malloc(item->size)))
-	{
-		return NULL;
-	}
-	if (!custom_edition_locale.file.source.read(custom_edition_locale.file.source.context, item->data_offset, item->size, tag))
-	{
-		goto done;
-	}
-	/* (the tag's addresses count from its start; every string lies within
-	it, so together they are no longer than it) */
-	memcpy(&count, tag, sizeof(count));
-	memcpy(&address, tag + sizeof(count), sizeof(address));
-	if (count <= 0 || count > STRING_LIST_MAXIMUM_COUNT || address > item->size ||
-		(uint32_t)count > (item->size - address) / STRING_LIST_ELEMENT_BYTES)
-	{
-		goto done;
-	}
-	for (index = 0; index < count; index++)
-	{
-		byte const *element = tag + address + (uint32_t)index * STRING_LIST_ELEMENT_BYTES;
-		int32_t size;
-		uint32_t data;
-
-		memcpy(&size, element, sizeof(size));
-		memcpy(&data, element + STRING_LIST_ELEMENT_ADDRESS_OFFSET, sizeof(data));
-		if (size < 0 || (size & 1) || data > item->size || (uint32_t)size > item->size - data ||
-			(uint32_t)size > item->size - text_bytes)
-		{
-			goto done;
-		}
-		text_bytes += (uint32_t)size;
-	}
-	/* one block: the list, its strings' addresses and lengths, then their
-	characters, each terminated */
-	list = malloc(sizeof(*list) + (size_t)count * (sizeof(*list->strings) + sizeof(*list->lengths)) +
-		(size_t)text_bytes + (size_t)count * sizeof(unsigned short));
-	if (!list)
-	{
-		goto done;
-	}
-	list->count = count;
-	list->strings = (unsigned short const **)(list + 1);
-	list->lengths = (long *)(list->strings + count);
-	characters = (unsigned short *)(list->lengths + count);
-	for (index = 0; index < count; index++)
-	{
-		byte const *element = tag + address + (uint32_t)index * STRING_LIST_ELEMENT_BYTES;
-		int32_t size;
-		uint32_t data;
-		long length;
-
-		memcpy(&size, element, sizeof(size));
-		memcpy(&data, element + STRING_LIST_ELEMENT_ADDRESS_OFFSET, sizeof(data));
-		memcpy(characters, tag + data, (size_t)size);
-		length = size / 2;
-		if (!length || characters[length - 1])
-		{
-			characters[length++] = 0;
-		}
-		list->strings[index] = characters;
-		list->lengths[index] = length;
-		characters += length;
-	}
-
-done:
-	free(tag);
-
-	return list;
 }
 
 static void custom_edition_cache_files_close(
@@ -812,6 +682,11 @@ static boolean custom_edition_cache_tags_convert(
 	{
 		error(_error_silent, "custom edition: the multiplayer score hint names the BACK button where Halo PC names a key");
 	}
+	if (conversion.widget_functions_renumbered || conversion.widget_inputs_renumbered)
+	{
+		error(_error_silent, "custom edition: %ld menu event handlers and %ld game data inputs of Halo PC's own functions run the port's",
+			(long)conversion.widget_functions_renumbered, (long)conversion.widget_inputs_renumbered);
+	}
 	if (conversion.widget_functions_cleared || conversion.pause_menu_trimmed)
 	{
 		error(
@@ -853,6 +728,58 @@ static boolean custom_edition_cache_identify(
 	custom_edition_file_close(&file);
 
 	return identified;
+}
+
+/* whether the file at `path` is an Xbox cache (version 5) of a multiplayer
+scenario: one of custom_maps' Xbox multiplayer maps
+(custom_xbox_map_level) */
+static boolean xbox_multiplayer_cache_file(
+	char const *path)
+{
+	struct custom_edition_file file;
+	struct cache_file_identity identity;
+	boolean found = FALSE;
+
+	if (!custom_edition_file_open(&file, path))
+		return FALSE;
+	if (cache_file_identify(&file.source, &identity) == _cache_file_status_ok &&
+		identity.format == _cache_file_format_xbox_cache &&
+		identity.scenario_type == _scenario_type_multiplayer)
+	{
+		found = TRUE;
+	}
+	custom_edition_file_close(&file);
+
+	return found;
+}
+
+boolean custom_xbox_map_level(
+	char const *level_name)
+{
+	/* (the last answer, for a second: the game asks many times a frame, and
+	the file is looked for in the folders each time) */
+	static struct
+	{
+		char name[MAP_PATH_SIZE];
+		boolean found;
+		unsigned long looked_at;
+	} last;
+	char path[MAP_PATH_SIZE];
+	unsigned long now = GetTickCount() | 1;
+
+	if (!level_name ||
+		_strnicmp(level_name, CUSTOM_EDITION_LEVEL_NAME_PREFIX, csstrlen(CUSTOM_EDITION_LEVEL_NAME_PREFIX)) ||
+		strlen(level_name) >= sizeof(last.name))
+	{
+		return FALSE;
+	}
+	if (last.looked_at && now - last.looked_at < 1000 && !csstrcasecmp(last.name, level_name))
+		return last.found;
+	strcpy(last.name, level_name);
+	last.found = custom_edition_map_path(level_name, path) && xbox_multiplayer_cache_file(path);
+	last.looked_at = now;
+
+	return last.found;
 }
 
 static void custom_edition_cache_report_log(
@@ -923,8 +850,11 @@ boolean custom_edition_cache_refuse(
 boolean custom_edition_level_name(
 	char const *level_name)
 {
+	/* (and a mounted Custom Edition campaign's maps, which keep their own
+	names: custom_campaigns.c) */
 	return level_name &&
-		!_strnicmp(level_name, CUSTOM_EDITION_LEVEL_NAME_PREFIX, csstrlen(CUSTOM_EDITION_LEVEL_NAME_PREFIX));
+		(!_strnicmp(level_name, CUSTOM_EDITION_LEVEL_NAME_PREFIX, csstrlen(CUSTOM_EDITION_LEVEL_NAME_PREFIX)) ||
+			custom_campaign_custom_edition_map(level_name));
 }
 
 boolean custom_edition_map_file_path(
@@ -1097,6 +1027,10 @@ boolean custom_edition_cache_present(
 			(int)MIN(64, map_share_name_base_length(name)), name);
 		return FALSE;
 	}
+	/* (an Xbox multiplayer map of custom_maps: played as the game's own
+	are, unpacked into the map cache, with no resource maps) */
+	if (xbox_multiplayer_cache_file(path))
+		return TRUE;
 	if (!halo_custom_edition_tag_cache())
 	{
 		error(_error_silent, "custom edition: the map '%s' cannot be played: %s", level_name,
@@ -1155,24 +1089,34 @@ boolean custom_edition_cache_playable(
 {
 	struct cache_file_identity identity;
 
-	return custom_edition_level_name(level_name) && custom_edition_cache_identify(level_name, &identity);
+	return custom_edition_level_name(level_name) &&
+		(custom_edition_cache_identify(level_name, &identity) || custom_xbox_map_level(level_name));
 }
 
 short custom_edition_cache_file_scenario_type(
-	char const *path)
+	char const *path,
+	boolean *xbox_map)
 {
 	struct custom_edition_file file;
 	struct cache_file_identity identity;
 	short type = NONE;
 
-	if (!halo_custom_edition_tag_cache() || !custom_edition_file_open(&file, path))
+	if (xbox_map)
+		*xbox_map = FALSE;
+
+	if (!custom_edition_file_open(&file, path))
 	{
 		return NONE;
 	}
 	if (cache_file_identify(&file.source, &identity) == _cache_file_status_ok &&
-		identity.format == _cache_file_format_custom_edition_cache)
+		((identity.format == _cache_file_format_custom_edition_cache && halo_custom_edition_tag_cache()) ||
+			/* (an Xbox multiplayer map: custom_xbox_map_level) */
+			(identity.format == _cache_file_format_xbox_cache &&
+				identity.scenario_type == _scenario_type_multiplayer)))
 	{
 		type = (short)identity.scenario_type;
+		if (xbox_map)
+			*xbox_map = identity.format == _cache_file_format_xbox_cache;
 	}
 	custom_edition_file_close(&file);
 
@@ -1309,7 +1253,10 @@ boolean custom_edition_structure_bsp_reference_valid(
 {
 	struct custom_edition_cache_globals *globals = &custom_edition_cache_globals;
 	unsigned long address = (unsigned long)reference->base_address;
-	unsigned long top = CUSTOM_EDITION_TAG_CACHE_ADDRESS + globals->tag_cache_bytes;
+	/* (where the tag cache is: the reference was moved there with the rest
+	of the tags' addresses, halo_port_window.h) */
+	unsigned long base = (unsigned long)(uintptr_t)globals->tag_cache;
+	unsigned long top = base + globals->tag_cache_bytes;
 
 	/* (in the map's cache data, read to the top of its tag cache, above its
 	tags, as its loader found them) */
@@ -1318,7 +1265,7 @@ boolean custom_edition_structure_bsp_reference_valid(
 		reference->file_size < 0x18 ||
 		(unsigned long)reference->file_offset > globals->file_length ||
 		(unsigned long)reference->file_size > globals->file_length - (unsigned long)reference->file_offset ||
-		address < CUSTOM_EDITION_TAG_CACHE_ADDRESS + globals->loaded_bytes ||
+		address < base + globals->loaded_bytes ||
 		address > top ||
 		(unsigned long)reference->file_size > top - address)
 	{

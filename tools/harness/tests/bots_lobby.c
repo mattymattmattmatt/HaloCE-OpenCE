@@ -16,6 +16,7 @@ typedef unsigned short word;
 #define VALID_INDEX(index, count) ((index) >= 0 && (index) < (count))
 #define PIN(value, low, high) ((value) < (low) ? (low) : (value) > (high) ? (high) : (value))
 #define NUMBEROF(array) (sizeof(array) / sizeof((array)[0]))
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define csmemset memset
 #define csmemcpy memcpy
 #define error(priority, ...) ((void)0)
@@ -27,9 +28,15 @@ typedef unsigned short word;
 #define MAXIMUM_NETWORK_PLAYER_COUNT HALO_PORT_MAXIMUM_NETWORK_PLAYERS
 #define NETWORK_GAME_PLAYER_SLOTS HALO_PORT_MAXIMUM_NETWORK_PLAYERS
 
+struct universal_variant
+{
+	boolean teams;
+};
+
 struct game_variant
 {
 	short game_engine_index;
+	struct universal_variant universal_variant;
 };
 
 struct network_game
@@ -73,6 +80,36 @@ public; the cases' games may) */
 static boolean bots_game_allowed(void)
 {
 	return TRUE;
+}
+
+/* The extracted lobby also names a dedicated server's roster path; the cases
+are local and hosted games, so this stays off and the roster helpers no-op. */
+static int halo_server_mode(void) { return 0; }
+static int bots_server_listed(void) { return 0; }
+static boolean bots_game_type_played(long game_engine_index) { (void)game_engine_index; return FALSE; }
+static boolean bots_on_roster(long bot_index) { (void)bot_index; return FALSE; }
+static short bots_bot_joined_kind(long bot_index) { (void)bot_index; return 0; }
+static short bots_bot_own_skill(long bot_index) { (void)bot_index; return 0; }
+static long bots_bot_team_asked(long bot_index) { (void)bot_index; return NONE; }
+static short bots_kind(void) { return 0; }
+/* (bots.c: bots_network_player records these for the bot that joins) */
+static char bots_kinds[BOTS_MAXIMUM];
+static signed char bots_bot_skills[BOTS_MAXIMUM];
+static short bots_next_kind = NONE;
+static short bots_next_skill = NONE;
+static signed char bots_bot_teams_asked[BOTS_MAXIMUM];
+static long bots_next_team = NONE;
+static boolean network_game_server_port_host_bot_join(struct network_game_server *server, long wanted_index,
+	short kind, short skill, long team_index, char *said, long said_size)
+{
+	(void)server;
+	(void)wanted_index;
+	(void)kind;
+	(void)skill;
+	(void)team_index;
+	(void)said;
+	(void)said_size;
+	return FALSE;
 }
 
 /* (the game's own code, as its build compiles it: a char index, a char
@@ -259,21 +296,25 @@ int main(int argc, char **argv)
 		CHECK(bots_in(&team0, &team1) == 6, "%ld bots in a hosted network game, not 6", bots_in(&team0, &team1));
 		return 0;
 	}
-	/* Slayer alone (the other gametypes' goals are not the bots' yet): none
-	in CTF, and those of a Slayer lobby leave when it becomes CTF */
-	CASE("slayer-only")
+	/* Slayer, CTF and King of the Hill (Oddball and Race only when bots.kind
+	is Proving Grounds): those of a lobby leave when it becomes a gametype
+	they do not play */
+	CASE("played-gametypes")
 	{
 		lobby(game_engine_ctf, 16);
 		player(0, 0);
 		wanted = 6;
 		network_game_server_port_bots(&server);
-		CHECK(bots_in(&team0, &team1) == 0, "%ld bots in CTF", bots_in(&team0, &team1));
+		CHECK(bots_in(&team0, &team1) == 6, "%ld bots in CTF, not 6", bots_in(&team0, &team1));
 		server.game.variant.game_engine_index = game_engine_slayer;
 		network_game_server_port_bots(&server);
 		CHECK(bots_in(&team0, &team1) == 6, "%ld bots in Slayer, not 6", bots_in(&team0, &team1));
 		server.game.variant.game_engine_index = game_engine_king;
 		network_game_server_port_bots(&server);
-		CHECK(bots_in(&team0, &team1) == 0, "%ld bots stayed for King of the Hill", bots_in(&team0, &team1));
+		CHECK(bots_in(&team0, &team1) == 6, "%ld bots in King of the Hill, not 6", bots_in(&team0, &team1));
+		server.game.variant.game_engine_index = game_engine_oddball;
+		network_game_server_port_bots(&server);
+		CHECK(bots_in(&team0, &team1) == 0, "%ld bots stayed for Oddball", bots_in(&team0, &team1));
 		return 0;
 	}
 	/* nothing changes once the game is started, nor in the game */

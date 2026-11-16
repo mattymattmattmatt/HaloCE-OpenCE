@@ -11,6 +11,8 @@ host_exit
 host_get_tp
 host_set_tp
 host_thread_create
+host_mcc_memory_reserve
+host_mcc_memory_release
 host_memory_watch_initialize
 host_memory_watch_protect
 host_memory_watch_generation
@@ -62,3 +64,78 @@ host_gl_buffer_write
 host_gl_fence_frame
 host_gl_wait_frame
 host_errno
+# a replay's records kept in the host's memory, outside the guest's
+# (port/android/host/host_replay.c; port/linux/game/network_replay_playback.c)
+host_replay_store_append
+host_replay_store_read
+host_replay_store_free
+host_mcc_import_start
+host_mcc_root
+host_mcc_import_state
+host_mcc_import_progress
+host_mcc_import_question
+host_mcc_import_answer
+host_mcc_import_finish
+# an MCC map's conversion on the host's threads (port/android/host/host_mcc_convert.c)
+host_mcc_convert_workers
+host_mcc_convert_submit
+host_mcc_convert_wait
+host_mcc_convert_output_size
+host_mcc_convert_release
+host_mcc_audio_append
+host_mcc_audio_read
+host_mcc_convert_reset
+# an MCC package's fingerprint on the host's threads (port/android/host/host_mcc_hash.c)
+host_mcc_hash_start
+host_mcc_hash_wait
+host_mcc_hash_cancel
+# a file's plain SHA-256 on the host's threads (host_mcc_hash.c: an MCC package a host offers)
+host_sha256_start
+host_sha256_poll
+host_sha256_cancel
+# the Steam Workshop screen (port/android/host/steam_downloads.c)
+host_steam_open
+host_steam_close
+host_steam_poll
+host_steam_count
+host_steam_view
+host_steam_first
+host_steam_set_first
+host_steam_chosen
+host_steam_set_chosen
+host_steam_row
+host_steam_details
+host_steam_choose
+host_steam_back
+host_steam_picture
+host_steam_text_wanted
+host_steam_text_caption
+host_steam_text_typed
+host_steam_qr
+# a joiner's MCC package from the Workshop (steam_downloads.c)
+host_steam_shared_fetch
+host_steam_shared_state
+host_steam_install_start
+host_steam_install_status
+host_steam_install_progress
+host_steam_take_rescan
+# files between two SlipstreamCE machines over a connection of their own (host_file_share.c)
+host_fs_host_frame
+host_fs_rate_facts
+host_fs_allowance
+host_fs_serve_begin
+host_fs_serve_file
+host_fs_serve_ready
+host_fs_serve_progress
+host_fs_serve_end
+host_fs_fetch_begin
+host_fs_direct
+host_fs_fetch_file
+host_fs_fetch_start
+host_fs_fetch_status
+host_fs_fetch_stop
+host_fs_pieces_begin
+host_fs_pieces_ask
+host_fs_pieces_take
+host_fs_pieces_state
+host_fs_pieces_stop
