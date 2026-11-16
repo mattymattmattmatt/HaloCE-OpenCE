@@ -469,6 +469,11 @@ void platform_share_path(const char *path)
     (void)path;
 }
 
+void platform_share_file(FILE *file)
+{
+    (void)file;
+}
+
 void platform_translate_path(const char *xbox_path, char *host_path, unsigned long host_path_size)
 {
     (void)xbox_path;
@@ -503,6 +508,7 @@ def test_config_has_each_section_once(tmp_path):
     (stubs / "platform.h").write_text(
         "void platform_log(const char *format, ...);\n"
         "void platform_share_path(const char *path);\n"
+        "void platform_share_file(FILE *file);\n"
         "void platform_translate_path(const char *xbox_path, char *host_path, unsigned long host_path_size);\n")
     # (beside the stubs, which it then includes instead of the platform layer's)
     for name in ("port_config.c", "port_config.h"):
