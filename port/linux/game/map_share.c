@@ -97,6 +97,11 @@ pieces checked on the host's threads */
 #endif
 
 #include <pthread.h>
+#ifndef PTHREAD_MUTEX_RECURSIVE
+#ifdef PTHREAD_MUTEX_RECURSIVE_NP
+#define PTHREAD_MUTEX_RECURSIVE PTHREAD_MUTEX_RECURSIVE_NP
+#endif
+#endif
 #include <xtl.h>
 #include <stdio.h>
 #include <stdlib.h>

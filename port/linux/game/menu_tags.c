@@ -1643,7 +1643,7 @@ static void *pause_button_texts(struct cache_file_tag_instance *instances, struc
 		return NULL;
 	memcpy(button, model, sizeof(*button));
 	instance_set(instances, UNICODE_STRING_LIST_TAG, text_tag, name, " text",
-		string_list_build(texts, other_text ? 2 : 1));
+		string_list_build(texts, text_count));
 	reference_set(&button->text_label_string_list, UNICODE_STRING_LIST_TAG, text_tag);
 	button->string_list_index = 0;
 	button->game_data_inputs.count = 0;
