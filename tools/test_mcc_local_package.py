@@ -36,7 +36,10 @@ static const char *data_root;
 static const char *platform_data_root(void) {return data_root;}
 static const char *platform_save_root(void) {return data_root;}
 static const char *platform_custom_edition_root(void) {return "";}
+static const char *platform_mcc_root(void) {return data_root;}
 static void make_directories(const char *p) {(void)p;}
+#define FILE_SYSTEM_HAS_CASE 1
+static const char *moved_folder(const char *name) {(void)name;return NULL;}
 int config_boolean(const char *p) {(void)p;return 0;}
 const char *config_string(const char *p) {(void)p;return "";}
 #ifdef _WIN32

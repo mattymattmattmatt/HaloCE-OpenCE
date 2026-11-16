@@ -198,6 +198,7 @@ typedef int BOOL;
 static char const *platform_data_root(void) {return getenv("TEST_DATA_ROOT");}
 static char const *platform_save_root(void) {return platform_data_root();}
 static char const *platform_custom_edition_root(void) {return "";}
+static char const *platform_mcc_root(void) {return platform_data_root();}
 static void make_directories(char const *path) {(void)path;}
 /* (this fork's game.maps.path and game.custom_maps.path, which move d:\\maps and d:\\custom_maps:
 neither set here) */
